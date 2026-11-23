@@ -76,6 +76,8 @@ function itRows(s: SenderInfo, intel: IntelState, verdict?: Verdict): [string, s
   if (s.registrable) {
     rows.push(['Domain', `${s.registrable}${s.domain !== s.registrable ? ` (sent from ${s.domain})` : ''}${s.freemail ? ', free email provider' : ''}`]);
   }
+  if (s.viaDomain) rows.push(['Relay (via)', s.viaDomain]);
+  if (s.unauthenticated) rows.push(['Authentication', 'unverified by webmail']);
   if (intel === 'loading') rows.push(['Domain lookup', 'checking…']);
   else if (intel === 'unavailable') rows.push(['Domain lookup', 'unavailable']);
   else if (intel) {

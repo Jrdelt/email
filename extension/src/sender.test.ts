@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { registrableDomain } from './domain';
-import { analyzeSender } from './sender';
+import { analyzeSender, canTrustByAllowlist } from './sender';
 
 const w = (name: string, addr: string, links: { text: string; href: string }[] = []) => analyzeSender(name, addr, links).warnings;
 
@@ -38,5 +38,28 @@ describe('analyzeSender', () => {
   it('international domain', () => expect(w('A', 'a@xn--pple-43d.com').join(' ')).toMatch(/lookalike characters/));
   it('collects other link domains', () => {
     expect(analyzeSender('A', 'a@shop.com', [{ text: 'x', href: 'https://track.other.net/a' }, { text: 'y', href: 'https://www.shop.com' }]).linkDomains).toEqual(['other.net']);
+  });
+
+  it('flags suspicious via relays and unauthenticated senders while allowing known ESP relays', () => {
+    const suspicious = analyzeSender('GmailSupportTeam', 'alert@nozfr.itl', [], {
+      viaDomain: '442.320397.jnc7.one.bss0019.narodaro.my.id',
+    });
+    expect(suspicious.authIssue).toBe(true);
+    expect(suspicious.warnings.join(' | ')).toMatch(/suspicious relay server \(my\.id\)/);
+    expect(canTrustByAllowlist(suspicious)).toBe(false);
+
+    const esp = analyzeSender('Shop Updates', 'news@shop.com', [], { viaDomain: 'em123.sendgrid.net' });
+    expect(esp.authIssue).toBeUndefined();
+    expect(esp.warnings).toEqual([]);
+    expect(canTrustByAllowlist(esp)).toBe(true);
+
+    const unauth = analyzeSender('Bank', 'alerts@bank.com', [], { unauthenticated: true });
+    expect(unauth.unauthenticated).toBe(true);
+    expect(unauth.authIssue).toBe(true);
+    expect(unauth.warnings[0]).toMatch(/could not verify/);
+    expect(canTrustByAllowlist(unauth)).toBe(false);
+
+    const unknownVia = analyzeSender('Bank', 'alerts@bank.com', [], { viaDomain: 'evil-relay.example' });
+    expect(canTrustByAllowlist(unknownVia)).toBe(false);
   });
 });

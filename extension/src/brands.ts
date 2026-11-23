@@ -56,3 +56,11 @@ export const FREEMAIL = new Set([
   'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'aol.com',
   'icloud.com', 'me.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'zoho.com',
 ]);
+
+/** Legitimate third-party email service providers commonly shown in webmail "via" headers. */
+export const KNOWN_ESP_DOMAINS = new Set([
+  'sendgrid.net', 'amazonses.com', 'mailgun.org', 'mailgun.net', 'postmarkapp.com', 'mcsv.net', 'mailchimpapp.net',
+  'rsgsv.net', 'mcdlv.net', 'hubspotemail.net', 'sparkpostmail.com', 'mandrillapp.com', 'constantcontact.com',
+  'exacttarget.com', 'salesforce.com', 'zendesk.com', 'freshdesk.com', 'klaviyomail.com', 'bounces.google.com',
+  'googlegroups.com', 'protection.outlook.com', 'intercom-mail.com', 'brevo.com', 'sendinblue.com',
+]);

@@ -67,7 +67,7 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   const root = host.attachShadow({ mode: 'closed' });
   const style = doc.createElement('style');
   style.textContent = `
-    :host{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    :host{all:initial!important;display:block!important;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif!important;color:#111111!important;font-size:14px!important;line-height:1.4!important;direction:ltr!important;text-align:left!important;visibility:visible!important;opacity:1!important}
     .wrap{position:fixed;top:22px;left:16px;right:16px;z-index:2147483647;display:flex;justify-content:center;pointer-events:none}
     .card{
       pointer-events:auto;position:relative;width:100%;max-width:760px;box-sizing:border-box;
@@ -328,5 +328,5 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   card.append(topSticker, close, mainRow, actionsBar, drawer);
   wrap.append(card);
   root.append(style, wrap);
-  (doc.body ?? doc.documentElement).appendChild(host);
+  (doc.documentElement ?? doc.body).appendChild(host);
 }

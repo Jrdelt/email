@@ -76,6 +76,77 @@ describe('linkLock', () => {
     f.dispatchEvent(afterUnlock);
     expect(afterUnlock.defaultPrevented).toBe(false);
   });
+
+  it('stashes formaction, SVG xlink:href, ping, blocks Enter/Space keydown, and auto-locks dynamic nodes', async () => {
+    document.body.innerHTML = `
+      <div id="m">
+        <form id="f"><button id="fa" formaction="https://evil.example/steal">Submit</button>
+          <input id="fi" type="submit" formaction="https://evil.example/steal2" value="Go">
+        </form>
+        <svg viewBox="0 0 100 20"><a id="svg-a" xlink:href="https://evil.example/svg"><text id="svg-txt" x="0" y="15">Click</text></a></svg>
+        <a id="ping-a" href="https://evil.example/p" ping="https://track.evil.example/beacon">Ping</a>
+        <p id="plain" tabindex="0">Plain paragraph</p>
+      </div>`;
+    const m = document.getElementById('m')!;
+    const fa = document.getElementById('fa')!;
+    const fi = document.getElementById('fi')!;
+    const svgA = document.getElementById('svg-a')!;
+    const pingA = document.getElementById('ping-a')!;
+
+    expect(linksIn(m).map((l) => l.href)).toEqual([
+      'https://evil.example/steal',
+      'https://evil.example/steal2',
+      'https://evil.example/svg',
+      'https://evil.example/p',
+    ]);
+
+    lockLinks(m);
+    expect(fa.hasAttribute('formaction')).toBe(false);
+    expect(fa.getAttribute('data-ped-formaction')).toBe('https://evil.example/steal');
+    expect(fi.hasAttribute('formaction')).toBe(false);
+    expect(fi.getAttribute('data-ped-formaction')).toBe('https://evil.example/steal2');
+    expect(svgA.getAttribute('xlink:href')).toBeNull();
+    expect(svgA.getAttributeNS('http://www.w3.org/1999/xlink', 'href')).toBeNull();
+    expect(svgA.getAttribute('data-ped-xlink-href')).toBe('https://evil.example/svg');
+    expect(pingA.hasAttribute('ping')).toBe(false);
+    expect(pingA.getAttribute('data-ped-ping')).toBe('https://track.evil.example/beacon');
+
+    expect(linksIn(m).map((l) => l.href)).toEqual([
+      'https://evil.example/steal',
+      'https://evil.example/steal2',
+      'https://evil.example/svg',
+      'https://evil.example/p',
+    ]);
+
+    const enterLocked = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    pingA.dispatchEvent(enterLocked);
+    expect(enterLocked.defaultPrevented).toBe(true);
+
+    const spaceBtn = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    fa.dispatchEvent(spaceBtn);
+    expect(spaceBtn.defaultPrevented).toBe(true);
+
+    const enterPlain = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    document.getElementById('plain')!.dispatchEvent(enterPlain);
+    expect(enterPlain.defaultPrevented).toBe(false);
+
+    const dyn = document.createElement('a');
+    dyn.id = 'dyn';
+    dyn.href = 'https://evil.example/dynamic';
+    dyn.textContent = 'Dynamic';
+    m.appendChild(dyn);
+    await vi.waitFor(() => expect(dyn.hasAttribute('href')).toBe(false));
+    expect(dyn.getAttribute('data-ped-href')).toBe('https://evil.example/dynamic');
+
+    unlockLinks(m);
+    expect(fa.getAttribute('formaction')).toBe('https://evil.example/steal');
+    expect(fi.getAttribute('formaction')).toBe('https://evil.example/steal2');
+    expect(
+      svgA.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ?? svgA.getAttribute('xlink:href'),
+    ).toBe('https://evil.example/svg');
+    expect(pingA.getAttribute('ping')).toBe('https://track.evil.example/beacon');
+    expect(dyn.getAttribute('href')).toBe('https://evil.example/dynamic');
+  });
 });
 
 describe('banner', () => {
@@ -116,6 +187,28 @@ describe('banner', () => {
       trustEmailBtn.click();
       await vi.waitFor(() => expect(trustEmailBtn.textContent).toBe('Trusted — links enabled'));
       expect(act2.onUnlock).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+      removeBanner();
+    }
+  });
+
+  it('isolates host styles with all:initial and mounts on documentElement instead of body', () => {
+    document.body.innerHTML = '';
+    removeBanner();
+    const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
+    let capturedRoot: ShadowRoot | undefined;
+    const origAttach = HTMLElement.prototype.attachShadow;
+    const spy = vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      capturedRoot = origAttach.call(this, init);
+      return capturedRoot;
+    });
+    try {
+      showBanner({ level: 'warning', title: 'Check this sender.', tag: 'SENDER WARNING', reasons: sender.warnings, linksLocked: true, sender }, actions());
+      const host = document.getElementById('ped-banner-host')!;
+      expect(host.parentElement).toBe(document.documentElement);
+      expect(document.body.querySelector('#ped-banner-host')).toBeNull();
+      expect(capturedRoot!.querySelector('style')!.textContent).toContain('all:initial!important');
     } finally {
       spy.mockRestore();
       removeBanner();
@@ -294,9 +387,34 @@ describe('gmail adapter', () => {
     const e = gmail.extract(document)!;
     expect(e.senderName).toBe('GmailSupportTeam');
     expect(e.senderAddress).toBe('alert-442-320397@nozfr.itl');
+    expect(e.viaDomain).toBe('442.320397.jnc7.one.bss0019.narodaro.my.id');
     expect(e.body).toContain("We've Blocked Your Account!");
     expect(e.body).toContain('Please update your billing details.');
     expect(e.links).toEqual([{ text: 'Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' }]);
+  });
+
+  it('extracts a.acP viaDomain, unauthenticated warning badge, and ignores spoofed header markup inside div.a3s', () => {
+    document.body.innerHTML = `
+      <div class="adn ads">
+        <div class="gE iv gt">
+          <h3 class="iw gFxsud">
+            <span class="gD" email="alerts@bank.com" name="Bank">Bank</span>
+            <span class="go"><a class="acP" href="https://support.google.com/mail/answer/1311182?hl=en">via</a></span>
+            <span class="go"> 12.relay.evil.example </span>
+          </h3>
+          <img alt="Gmail couldn't verify that bank.com actually sent this message" src="x.png">
+        </div>
+        <div class="a3s">
+          <span class="gD" email="spoofed@body.example" name="Fake">Fake</span>
+          <span class="go">via ignored.body.example</span>
+          Hello <a href="https://evil.example/x">Click</a>
+        </div>
+      </div>`;
+    const e = gmail.extract(document)!;
+    expect(e.senderName).toBe('Bank');
+    expect(e.senderAddress).toBe('alerts@bank.com');
+    expect(e.viaDomain).toBe('12.relay.evil.example');
+    expect(e.unauthenticated).toBe(true);
   });
 
   it('returns null with no open email', () => {

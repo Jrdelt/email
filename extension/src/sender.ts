@@ -1,6 +1,6 @@
 import { normalizeSender } from './allowlist';
-import { BRANDS, FREEMAIL, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
-import { hostOf, isInternational, registrableDomain } from './domain';
+import { BRANDS, FREEMAIL, KNOWN_ESP_DOMAINS, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
+import { hostOf, isInternational, isValidDomain, registrableDomain } from './domain';
 import type { Link } from './features';
 
 export interface SenderInfo {
@@ -12,6 +12,9 @@ export interface SenderInfo {
   registrable: string; // e.g. mail.paypal.co.uk -> paypal.co.uk
   freemail: boolean;
   linkDomains: string[]; // registrable domains of links that differ from the sender's
+  viaDomain?: string; // relay host when shown by webmail (e.g. Gmail "via ...")
+  unauthenticated?: boolean; // true when webmail explicitly flags verification failure
+  authIssue?: boolean; // true when authentication failed or relay looks suspicious
   warnings: string[]; // shown in the banner; never block anything
 }
 
@@ -30,7 +33,12 @@ function levenshtein(a: string, b: string): number {
 }
 
 /** Local-only sender analysis. Produces warnings; never rejects or blocks. */
-export function analyzeSender(name: string, rawAddress: string, links: Link[]): SenderInfo {
+export function analyzeSender(
+  name: string,
+  rawAddress: string,
+  links: Link[],
+  meta: { viaDomain?: string; unauthenticated?: boolean } = {},
+): SenderInfo {
   const raw = rawAddress.trim();
   const address = normalizeSender(raw);
   const domain = (raw.includes('@') ? raw.slice(raw.lastIndexOf('@') + 1) : '').toLowerCase().replace(/>$/, '');
@@ -39,7 +47,39 @@ export function analyzeSender(name: string, rawAddress: string, links: Link[]): 
   const warnings: string[] = [];
 
   const linkDomains = [...new Set(links.map((l) => registrableDomain(hostOf(l.href))).filter((d) => d && d !== registrable))];
-  const info: SenderInfo = { name: displayName, rawAddress: raw, address, valid: address !== '', domain, registrable, freemail: FREEMAIL.has(registrable), linkDomains, warnings };
+  const info: SenderInfo = {
+    name: displayName,
+    rawAddress: raw,
+    address,
+    valid: address !== '',
+    domain,
+    registrable,
+    freemail: FREEMAIL.has(registrable),
+    linkDomains,
+    warnings,
+  };
+
+  const via = meta.viaDomain?.trim().toLowerCase() ?? '';
+  const validVia = via && isValidDomain(via) ? via : '';
+  const viaReg = validVia ? registrableDomain(validVia) : '';
+
+  if (meta.unauthenticated) {
+    info.unauthenticated = true;
+    info.authIssue = true;
+    warnings.push('Webmail could not verify that this sender is genuine');
+  }
+
+  if (validVia && viaReg && registrable && viaReg !== registrable) {
+    info.viaDomain = validVia;
+    const labels = validVia.split('.');
+    const hasNumericLabel = labels.some((l) => /^\d+$/.test(l));
+    const suspiciousVia = isInternational(validVia) || FREEMAIL.has(viaReg) || labels.length >= 4 || hasNumericLabel;
+    if (suspiciousVia && !KNOWN_ESP_DOMAINS.has(viaReg)) {
+      info.authIssue = true;
+      warnings.push(`Sent through a suspicious relay server (${viaReg})`);
+    }
+  }
+
   if (!raw) return info;
 
   if (!info.valid) warnings.push("The sender's email address looks invalid or forged");
@@ -84,4 +124,14 @@ export function analyzeSender(name: string, rawAddress: string, links: Link[]): 
     }
   }
   return info;
+}
+
+/** True only when a valid exact sender address has no auth failure or unexpected non-ESP relay. */
+export function canTrustByAllowlist(info: SenderInfo): boolean {
+  if (!info.valid || info.unauthenticated || info.authIssue) return false;
+  if (info.viaDomain) {
+    const viaReg = registrableDomain(info.viaDomain);
+    if (viaReg && viaReg !== info.registrable && !KNOWN_ESP_DOMAINS.has(viaReg)) return false;
+  }
+  return true;
 }

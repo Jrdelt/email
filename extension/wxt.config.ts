@@ -18,6 +18,9 @@ export default defineConfig({
     },
     permissions: ['storage'],
     host_permissions: WEBMAIL_MATCHES,
+    content_security_policy: {
+      extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none';",
+    },
     browser_specific_settings: {
       gecko: { id: 'phishing-email-detector@jrdelt.github.io', strict_min_version: '115.0' },
     },

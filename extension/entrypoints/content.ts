@@ -13,7 +13,7 @@ import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
 import { WEBMAIL_MATCHES } from '../src/hosts';
-import { analyzeSender } from '../src/sender';
+import { analyzeSender, canTrustByAllowlist } from '../src/sender';
 import { decideBanner, removeBanner, showBanner } from '../src/ui/banner';
 import type { IntelState } from '../src/ui/details';
 import { lockLinks, unlockLinks } from '../src/ui/linkLock';
@@ -25,6 +25,8 @@ const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="do
 interface ScannableMsg {
   senderName: string;
   senderAddress: string;
+  viaDomain?: string;
+  unauthenticated?: boolean;
   body: string;
   links: Link[];
 }
@@ -40,7 +42,8 @@ function extractAll(adapter: WebmailAdapter | undefined, doc: Document): Extract
   return one ? [one] : [];
 }
 
-const msgKey = (e: ScannableMsg) => `${e.senderAddress}\n${e.body}`;
+const msgKey = (e: ScannableMsg) =>
+  `${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}`;
 
 function createScheduler(runScan: () => Promise<void>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -73,12 +76,18 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     messages.map(async (email) => {
       const k = msgKey(email);
       const hash = await hashEmail(email.senderAddress, email.body, email.links);
-      const sender = analyzeSender(email.senderName, email.senderAddress, email.links);
-      const trusted =
-        threadUnlocked ||
-        trustedThisSession.has(hash) ||
-        trustedEmails.has(hash) ||
-        (sender.valid && trustedSenders.has(sender.address));
+      const sender = analyzeSender(email.senderName, email.senderAddress, email.links, {
+        viaDomain: email.viaDomain,
+        unauthenticated: email.unauthenticated,
+      });
+      const allowlisted = sender.valid && trustedSenders.has(sender.address);
+      const allowlistTrusted = allowlisted && canTrustByAllowlist(sender);
+      if (allowlisted && !allowlistTrusted) {
+        sender.warnings.unshift(
+          `Claims to be a trusted sender (${sender.address}), but failed authentication or used an unexpected relay`,
+        );
+      }
+      const trusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash) || allowlistTrusted;
       const verdict: Verdict = trusted
         ? { score: 0, level: 'safe', reasons: [] }
         : scoreEmail(sender.address, email.body, email.links);
