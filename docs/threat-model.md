@@ -41,7 +41,7 @@ Lookup services learn only the **registrable domain** of opened emails' senders 
 
 ## Permissions, Messaging & UI Isolation
 
-- **Minimal install permissions:** Only `storage` and the explicit webmail match patterns in `extension/src/hosts.ts` (no `<all_urls>`, no `tabs` host access, zero `web_accessible_resources`, zero runtime npm dependencies).
+- **Minimal install permissions:** Only `storage` and the explicit active webmail match patterns in `extension/src/hosts.ts` (Gmail, Outlook Web, and iCloud Mail; Yahoo and Proton match patterns are withheld until their adapters ship in `T7c`/`T7d` so store builds never request unused host access). No `<all_urls>`, no `tabs` host access, zero `web_accessible_resources`, and zero runtime npm dependencies.
 - **Sender-verified messaging:** `background.ts` verifies `sender.id` and `isSupportedWebmailUrl(sender.url)` (plus top-frame / iCloud `app`-frame checks on `verdict` and `sandbox`-frame checks on `icloudBody`), never using `window.postMessage`.
 - **Closed Shadow DOM & strict CSP:** `#ped-banner-host` and `#ped-toast-host` use `attachShadow({ mode: 'closed' })` with `:host { all: initial !important }` mounted on `document.documentElement`, constructed strictly via `textContent` / `createElementNS`. Extension pages enforce `script-src 'self'; object-src 'none'; base-uri 'none';`.
 

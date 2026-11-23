@@ -1,18 +1,53 @@
-# Privacy
+# Privacy Policy for Phishing Email Detector
 
-- Email analysis runs locally in the browser. No email content, attachment files/names, URLs, or sender addresses are transmitted (attachments are never downloaded or read).
-- **Domain lookups (always on):** for each email you open (the sender's domain) or external link you click inside an email (the destination's domain only — never the path, query string, or `#fragment`), the extension looks up **only that registrable domain**
-  (for example `paypal.com`, never `you@...` or the message) to show registration date, registrar, mail settings
-  and spam reports. These services receive the domain and your IP address:
-  - IANA (`data.iana.org`, registry list, weekly) and the domain's registry RDAP server (or `rdap.org`)
-  - Cloudflare DNS (`cloudflare-dns.com`) for MX/SPF/DMARC and the URIBL spam list
-  - Google DNS (`dns.google`), only if Cloudflare's URIBL query is refused
-  Results are cached for 24 hours on your device, so a domain is looked up at most once a day.
-- No analytics or telemetry.
-- Permissions are limited to the supported webmail hosts and `storage`.
-- Intercepted link warning details for `warning.html` (`warn:*`) and the current tab's latest verdict (`tab:*`) are stored ephemerally in `browser.storage.session` (in memory only, never in URL query strings or browser history) and cleared automatically when a tab closes, when a warning expires after 1 hour, when you proceed, or when you close the browser.
-- Stored locally in `browser.storage.local` only (never synced or sent anywhere):
-  - **Trusted senders** (`trustedSenders`): exact email addresses you explicitly trust, validated by a strict format check (no domains, wildcards, or display names). View and remove them in the popup.
-  - **Trusted emails** (`trustedEmails`, up to 500): one-way SHA-256 fingerprints only (no email body, links, attachment names, or sender address stored), so an email you trust with `"I trust this email"` stays unlocked across refreshes; revert immediately via the inline **Undo** pill or clear them in the popup.
-  - **False-positive reports** (`falsePositiveReports`, up to 50): verdict level, score, and reason text, with email addresses redacted. No email body or sender is stored. View the count and clear them in the popup.
-  - **Domain lookup cache** (`domainIntelCache`, up to 500 entries, 24 h TTL) and **IANA RDAP registry list** (`rdapBootstrap`, 7 d TTL): public RDAP/DNS results keyed strictly by registrable domain so repeated emails from the same domain avoid redundant network lookups.
+**Last updated:** November 23, 2026
+
+Phishing Email Detector checks emails you open in supported webmail services (Gmail, Outlook on the web, and iCloud Mail) directly inside your browser to warn about phishing, deceptive links, and unsafe attachments.
+
+## 1. What Data We Process (and What Never Leaves Your Device)
+
+- **Processed locally in your browser only (never transmitted):** Email subject lines and message text, sender display names and full email addresses, attachment filenames, and full link URLs (including paths, query parameters, and `#fragments`) are analyzed strictly in memory on your device. Attachment files are never downloaded or read by the extension.
+- **Queried off-device (registrable domain names only):** When you open an untrusted email or click an external link inside an email, the extension sends **only the bare registrable domain name** (for example `paypal.com`—never `you@paypal.com`, never the message content, and never the full URL path or query string) to public domain-registration and DNS services to check domain age, mail configuration (`MX`/`SPF`/`DMARC`), and public spam listings.
+- **No analytics, tracking, or accounts:** The extension does not use cookies, analytics SDKs, crash telemetry, advertising identifiers, or developer-operated backend servers.
+
+## 2. How Data Is Stored
+
+All extension state is stored **exclusively on your device** using browser local/session storage (`storage.local` and `storage.session`—never `storage.sync`):
+
+- **Trusted senders (`trustedSenders` in `storage.local`):** Exact email addresses you explicitly choose to trust via *"Always trust sender"*.
+- **Trusted emails (`trustedEmails` in `storage.local`, up to 500 entries):** One-way SHA-256 cryptographic hashes only (no email text, links, attachment names, or sender addresses are stored) so emails you unlock with *"I trust this email"* stay unlocked across page refreshes.
+- **False-positive notes (`falsePositiveReports` in `storage.local`, up to 50 entries):** Verdict level, numeric score, and redacted warning reason text saved locally when you click *"Not phishing"*. Never transmitted anywhere.
+- **Domain lookup caches (`domainIntelCache` for 24 hours, `rdapBootstrap` for 7 days in `storage.local`):** Public domain registration and DNS results keyed by registrable domain name to avoid repeated network lookups.
+- **Temporary tab & link-warning state (`tab:*` and `warn:*` in `storage.session`):** Held in memory only for the active tab and warning page, expiring within 1 hour or automatically when the tab or browser closes.
+
+## 3. How Data Is Used
+
+Every piece of data processed by the extension is used solely for its single purpose—detecting phishing emails, pausing risky links and untrusted attachments in webmail, and displaying clear security warnings to you. Data is never used for advertising, profiling, creditworthiness, lending, or any unrelated purpose.
+
+## 4. Third-Party Services Used for Domain Lookups
+
+When checking a sender's registrable domain or a clicked external link's registrable domain, those public lookup services receive the **domain name** and your **IP address** (requests are sent without cookies or referrers):
+
+- **IANA RDAP Bootstrap (`data.iana.org`) & Domain Registry RDAP Servers (with `rdap.org` fallback):** Used to look up domain registration date and registrar ([ICANN/IANA Privacy Policy](https://www.icann.org/privacy/policy), [rdap.org Info](https://about.rdap.org/)).
+- **Cloudflare Public DNS (`cloudflare-dns.com`):** Used for DNS-over-HTTPS `MX`, `SPF`, `DMARC`, `NXDOMAIN`, and URIBL queries ([Cloudflare 1.1.1.1 Privacy Policy](https://developers.cloudflare.com/1.1.1.1/privacy/public-dns-resolver/)).
+- **Google Public DNS (`dns.google`):** Used only as a fallback if Cloudflare's URIBL DNS query is rate-limited ([Google Public DNS Privacy](https://developers.google.com/speed/public-dns/privacy)).
+- **URIBL (`multi.uribl.com` via DNS):** Queried via DNS to check whether a domain is publicly listed for spam or phishing ([URIBL About/Policy](https://uribl.com/about.shtml)).
+
+## 5. Data Sharing and Sale
+
+We do **not** sell, rent, license, or share user data with third parties. Aside from the public registrable-domain lookups listed in Section 4, zero data leaves your browser.
+
+## 6. Data Retention and User Controls
+
+- Temporary session state (`storage.session`) is deleted when you close the tab, after 1 hour, or when you close your browser.
+- Cached domain lookups expire after 24 hours.
+- You can view and remove **Trusted senders**, clear **Trusted emails** (or click **Undo** immediately after trusting), and clear local **False-positive reports** at any time from the extension toolbar popup.
+- Uninstalling the extension permanently deletes all local storage associated with the extension from your browser.
+
+## 7. Changes to This Policy
+
+If the extension's data practices or lookup endpoints ever change, we will update this policy and the "Last updated" date above prior to releasing the change.
+
+## 8. Contact
+
+For privacy questions or concerns, open an issue or contact the maintainer via [https://github.com/Jrdelt/email](https://github.com/Jrdelt/email) (or see [SECURITY.md](../SECURITY.md) for private security/privacy reports).

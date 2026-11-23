@@ -24,8 +24,8 @@ Privacy-first phishing email protection that runs locally in your browser. One T
 | **Gmail** | `mail.google.com` | Supported | Full thread scanning, `via`/unauthenticated header checks, attachment shelf & inline lock |
 | **Outlook Web** | `outlook.live.com`, `outlook.office.com`, `outlook.office365.com`, `outlook.cloud.microsoft` | Supported | Reading Pane subject + thread scanning, Safe Links unwrapping, attachment Aria-card lock |
 | **iCloud Mail** | `www.icloud.com/mail/*` (+ scoped `mail2` & `icloud-sandbox` frames) | Supported | Stateless `sender.url`-verified cross-frame header/body coordination & lock |
-| **Yahoo Mail** | `mail.yahoo.com` | Planned (`T7c`) | Adapter stub + generic fallback extractor |
-| **Proton Mail** | `mail.proton.me` | Planned (`T7d`) | Adapter stub |
+| **Yahoo Mail** | `mail.yahoo.com` | Planned (`T7c`) | Adapter stub (host permission withheld until implemented) |
+| **Proton Mail** | `mail.proton.me` | Planned (`T7d`) | Adapter stub (host permission withheld until implemented) |
 
 ## Architecture
 
