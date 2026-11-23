@@ -1,10 +1,11 @@
 import { scoreEmail } from '../src/features';
+import { WEBMAIL_MATCHES } from '../src/hosts';
 
 const MAX_BODY_CHARS = 20_000; // cap work per email
 const DEBOUNCE_MS = 400;
 
 export default defineContentScript({
-  matches: ['https://mail.google.com/*', 'https://outlook.live.com/*', 'https://outlook.office.com/*'],
+  matches: WEBMAIL_MATCHES,
   main() {
     // Selectors are best-effort; TODO(T7) move into src/adapters/.
     const SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];

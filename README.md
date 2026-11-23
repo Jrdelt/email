@@ -8,7 +8,7 @@ One codebase ships to **Chrome, Edge and Firefox** (Manifest V3, built with [WXT
 
 ## How it works
 ```
-Webmail page (Gmail / Outlook web)
+Webmail page (Gmail, Outlook, Yahoo, Proton, iCloud)
   └─ content script: sender, link text vs. real href, body text
        └─ scorer (heuristics now, tiny JSON model later) — runs locally, nothing leaves the browser
             └─ banner + popup with human-readable reasons

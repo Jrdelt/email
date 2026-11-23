@@ -12,7 +12,7 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 - **Privacy:** no email content, URLs or sender addresses leave the browser. No network calls from the extension. No telemetry.
 - **Parity contract:** `ml/src/phishml/features.py` and `extension/src/features.ts` must produce identical features.
   Any feature change updates both plus `ml/tests/fixtures/parity.json`, which both test suites read.
-- **Permissions:** only `storage` and the webmail hosts in `wxt.config.ts`. Justify any addition in `docs/threat-model.md`.
+- **Permissions:** only `storage` and the webmail hosts in `extension/src/hosts.ts` (single source for host permissions and content-script matches). Justify any addition in `docs/threat-model.md`.
 - **Evaluation:** split by time, never randomly. Report precision at <=0.1% false-positive rate, not just accuracy.
 - **Data:** raw data goes in `ml/data/raw/` (gitignored). Record source, license and collection date in `ml/data/SOURCES.md`.
 - **UI safety:** build DOM with `textContent`; never `innerHTML` with email-derived data.
@@ -27,5 +27,5 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 - Any task that adds a dependency must report package size before and after.
 
 ## Layout
-- `extension/src/features.ts` scorer; `model.ts` JSON-model scorer (stub); `adapters/` per-webmail DOM extraction (stubs)
+- `extension/src/features.ts` scorer; `model.ts` JSON-model scorer (stub); `hosts.ts` supported webmail URLs; `adapters/` per-webmail DOM extraction (Gmail, Outlook, Yahoo, Proton, iCloud; stubs)
 - `ml/src/phishml/` `features.py`, `data.py`, `train.py`, `evaluate.py`, `export_model.py` (stubs except features)
