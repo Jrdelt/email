@@ -1,6 +1,5 @@
 // Inline SVG icon builders using createElementNS only (never innerHTML) so CSP stays strict.
 const SVG_NS = 'http://www.w3.org/2000/svg';
-let uid = 0;
 
 function svgRoot(doc: Document, size: number, viewBox = '0 0 24 24'): SVGSVGElement {
   const s = doc.createElementNS(SVG_NS, 'svg');
@@ -22,69 +21,67 @@ function svgEl<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
-/** Brand emblem: blue gradient security shield + white envelope + emerald check badge. */
-export function createLogoSvg(doc: Document, size = 24): SVGSVGElement {
-  const s = svgRoot(doc, size);
-  const gradId = `ped-shield-${++uid}`;
-  const defs = svgEl(doc, 'defs', {});
-  const lg = svgEl(doc, 'linearGradient', { id: gradId, x1: '0', y1: '0', x2: '0', y2: '1' });
-  lg.append(
-    svgEl(doc, 'stop', { offset: '0%', 'stop-color': '#2563eb' }),
-    svgEl(doc, 'stop', { offset: '100%', 'stop-color': '#1e3a8a' }),
+/** Neo-brutalist brand emblem: offset black shadow, mint tile, white envelope, coral check seal. */
+export function createLogoSvg(doc: Document, size = 28): SVGSVGElement {
+  const s = svgRoot(doc, size, '0 0 28 28');
+  s.append(
+    svgEl(doc, 'rect', { x: '4', y: '4', width: '19.5', height: '19.5', rx: '4.6', fill: '#111111' }),
+    svgEl(doc, 'rect', {
+      x: '2',
+      y: '2',
+      width: '19.5',
+      height: '19.5',
+      rx: '4.6',
+      fill: '#26d08c',
+      stroke: '#111111',
+      'stroke-width': '1.9',
+    }),
+    svgEl(doc, 'rect', {
+      x: '5.5',
+      y: '7.5',
+      width: '12.5',
+      height: '8.5',
+      rx: '1.5',
+      fill: '#ffffff',
+      stroke: '#111111',
+      'stroke-width': '1.6',
+    }),
+    svgEl(doc, 'path', {
+      d: 'M6.2 8.4 L11.75 12.6 L17.3 8.4',
+      fill: 'none',
+      stroke: '#111111',
+      'stroke-width': '1.6',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    }),
+    svgEl(doc, 'circle', { cx: '21.3', cy: '21.3', r: '4.7', fill: '#111111' }),
+    svgEl(doc, 'circle', {
+      cx: '20.5',
+      cy: '20.5',
+      r: '4.7',
+      fill: '#ff563f',
+      stroke: '#111111',
+      'stroke-width': '1.7',
+    }),
+    svgEl(doc, 'path', {
+      d: 'M18.6 20.6 L19.9 21.9 L22.5 19.2',
+      fill: 'none',
+      stroke: '#ffffff',
+      'stroke-width': '1.6',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    }),
   );
-  defs.append(lg);
-
-  const shield = svgEl(doc, 'path', {
-    d: 'M12 2.2 L4.4 5.2 C4 5.4 3.8 5.8 3.8 6.3 C3.8 13.4 6.9 18.8 12 21.8 C17.1 18.8 20.2 13.4 20.2 6.3 C20.2 5.8 20 5.4 19.6 5.2 Z',
-    fill: `url(#${gradId})`,
-    stroke: '#93c5fd',
-    'stroke-opacity': '0.45',
-    'stroke-width': '0.8',
-  });
-  const env = svgEl(doc, 'rect', {
-    x: '6.6',
-    y: '8.3',
-    width: '10.8',
-    height: '7.4',
-    rx: '1.3',
-    fill: '#ffffff',
-  });
-  const flap = svgEl(doc, 'path', {
-    d: 'M7.3 9.2 L12 12.7 L16.7 9.2',
-    fill: 'none',
-    stroke: '#1e3a8a',
-    'stroke-width': '1.25',
-    'stroke-linecap': 'round',
-    'stroke-linejoin': 'round',
-  });
-  const badge = svgEl(doc, 'circle', {
-    cx: '17.6',
-    cy: '16.9',
-    r: '4',
-    fill: '#10b981',
-    stroke: '#1e3a8a',
-    'stroke-width': '1.2',
-  });
-  const check = svgEl(doc, 'path', {
-    d: 'M15.8 16.9 L17.1 18.2 L19.4 15.6',
-    fill: 'none',
-    stroke: '#ffffff',
-    'stroke-width': '1.3',
-    'stroke-linecap': 'round',
-    'stroke-linejoin': 'round',
-  });
-
-  s.append(defs, shield, env, flap, badge, check);
   return s;
 }
 
-/** Semantic state icon (shield check, warning triangle, or danger shield). */
-export function createStatusIcon(doc: Document, kind: 'safe' | 'warning' | 'danger', size = 20): SVGSVGElement {
+/** Bold geometric status icons (shield check, warning triangle, or danger shield). */
+export function createStatusIcon(doc: Document, kind: 'safe' | 'warning' | 'danger', size = 22): SVGSVGElement {
   const s = svgRoot(doc, size);
   const strokeAttrs = {
     fill: 'none',
     stroke: 'currentColor',
-    'stroke-width': '1.9',
+    'stroke-width': '2.2',
     'stroke-linecap': 'round',
     'stroke-linejoin': 'round',
   };
@@ -107,7 +104,7 @@ export function createStatusIcon(doc: Document, kind: 'safe' | 'warning' | 'dang
         ...strokeAttrs,
       }),
       svgEl(doc, 'path', { d: 'M12 9.2 V13.6', ...strokeAttrs }),
-      svgEl(doc, 'circle', { cx: '12', cy: '16.8', r: '1', fill: 'currentColor' }),
+      svgEl(doc, 'circle', { cx: '12', cy: '16.9', r: '1.1', fill: 'currentColor' }),
     );
     return s;
   }
@@ -118,12 +115,12 @@ export function createStatusIcon(doc: Document, kind: 'safe' | 'warning' | 'dang
       ...strokeAttrs,
     }),
     svgEl(doc, 'path', { d: 'M12 8 V12.6', ...strokeAttrs }),
-    svgEl(doc, 'circle', { cx: '12', cy: '15.8', r: '1', fill: 'currentColor' }),
+    svgEl(doc, 'circle', { cx: '12', cy: '15.9', r: '1.1', fill: 'currentColor' }),
   );
   return s;
 }
 
-/** Small padlock icon for the "Links paused" indicator pill. */
+/** Small padlock icon for paused-links indicator pills. */
 export function createLockIcon(doc: Document, size = 12): SVGSVGElement {
   const s = svgRoot(doc, size);
   s.append(
@@ -131,7 +128,7 @@ export function createLockIcon(doc: Document, size = 12): SVGSVGElement {
       d: 'M7.5 10.5 V7.5 C7.5 5 9.5 3 12 3 C14.5 3 16.5 5 16.5 7.5 V10.5',
       fill: 'none',
       stroke: 'currentColor',
-      'stroke-width': '2',
+      'stroke-width': '2.2',
       'stroke-linecap': 'round',
     }),
     svgEl(doc, 'rect', {
@@ -142,7 +139,7 @@ export function createLockIcon(doc: Document, size = 12): SVGSVGElement {
       rx: '2.5',
       fill: 'none',
       stroke: 'currentColor',
-      'stroke-width': '2',
+      'stroke-width': '2.2',
     }),
   );
   return s;

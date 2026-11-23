@@ -11,7 +11,7 @@ const $ = (id: string) => document.getElementById(id)!;
 
 interface TabState { verdict: Verdict; sender?: SenderInfo; intel?: IntelState }
 
-$('logo').append(createLogoSvg(document, 28));
+$('logo').append(createLogoSvg(document, 32));
 
 async function renderVerdict() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -20,10 +20,8 @@ async function renderVerdict() {
   const st = (await browser.storage.session?.get?.(key))?.[key] as TabState | undefined;
   if (!st?.verdict) return;
 
-  const senderWarnings = [
-    ...(st.sender?.warnings ?? []),
-    ...(typeof st.intel === 'object' ? intelWarnings(st.intel) : []),
-  ];
+  const intelList = typeof st.intel === 'object' ? intelWarnings(st.intel) : [];
+  const senderWarnings = [...(st.sender?.warnings ?? []), ...intelList];
   const danger = st.verdict.level !== 'safe';
   const allReasons = danger
     ? [...st.verdict.reasons, ...senderWarnings]
@@ -33,28 +31,41 @@ async function renderVerdict() {
   out.textContent = '';
   out.className = 'card';
 
-  const badge = document.createElement('div');
   let kind: 'safe' | 'warning' | 'danger' = 'safe';
-  let label = 'Looks safe';
+  let label = 'Looks safe.';
+  let tagText = 'SAFE';
   if (st.verdict.level === 'likely-phishing') {
     kind = 'danger';
-    label = 'Possible phishing email';
-    badge.className = 'status status-danger';
+    label = 'Possible phishing.';
+    tagText = 'PHISHING WARNING';
   } else if (st.verdict.level === 'suspicious') {
     kind = 'danger';
-    label = 'This email looks suspicious';
-    badge.className = 'status status-danger';
+    label = 'Looks suspicious.';
+    tagText = 'PHISHING WARNING';
   } else if (senderWarnings.length > 0) {
     kind = 'warning';
-    label = 'Double-check this sender';
-    badge.className = 'status status-warn';
-  } else {
-    badge.className = 'status status-safe';
+    label = 'Check this sender.';
+    tagText = intelList.length > 0 ? 'DOMAIN WARNING' : 'SENDER CHECK';
   }
-  const labelSpan = document.createElement('span');
-  labelSpan.textContent = label;
-  badge.append(createStatusIcon(document, kind, 16), labelSpan);
-  out.append(badge);
+
+  const row = document.createElement('div');
+  row.className = 'status-row';
+
+  const iconBox = document.createElement('div');
+  iconBox.className = kind === 'safe' ? 'icon-box icon-safe' : 'icon-box icon-alert';
+  iconBox.append(createStatusIcon(document, kind, 20));
+
+  const titleWrap = document.createElement('div');
+  const titleEl = document.createElement('div');
+  titleEl.className = 'status-title';
+  titleEl.textContent = label;
+  const tagEl = document.createElement('span');
+  tagEl.className = 'tag';
+  tagEl.textContent = tagText;
+  titleWrap.append(titleEl, tagEl);
+
+  row.append(iconBox, titleWrap);
+  out.append(row);
 
   if ((danger || senderWarnings.length > 0) && allReasons.length > 0) {
     const ul = document.createElement('ul');

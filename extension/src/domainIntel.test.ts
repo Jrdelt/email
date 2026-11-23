@@ -7,12 +7,12 @@ import { memoryKV } from './storage';
 const NOW = Date.parse('2026-11-22T00:00:00Z');
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-function fakeFetch(opts: { registered?: string; urible?: string | null; uribleGoogle?: string; mx?: boolean; rdap404?: boolean } = {}): FetchFn {
+function fakeFetch(opts: { registered?: string; urible?: string | null; uribleGoogle?: string; mx?: boolean; rdap404?: boolean; rdapTitle?: string } = {}): FetchFn {
   return vi.fn(async (url: string) => {
     const u = new URL(url);
     if (u.hostname === 'data.iana.org') return json({ services: [[['com', 'net'], ['https://rdap.verisign.com/com/v1/']]] });
     if (u.hostname === 'rdap.verisign.com' || u.hostname === 'rdap.org') {
-      if (opts.rdap404) return json({}, 404);
+      if (opts.rdap404) return json(opts.rdapTitle ? { errorCode: 404, title: opts.rdapTitle } : {}, 404);
       return json({
         events: [{ eventAction: 'registration', eventDate: opts.registered ?? '2010-01-01T00:00:00Z' }, { eventAction: 'expiration', eventDate: '2030-01-01T00:00:00Z' }],
         entities: [{ roles: ['registrar'], vcardArray: ['vcard', [['version', {}, 'text', '4.0'], ['fn', {}, 'text', 'Example Registrar']]] }],
@@ -65,8 +65,19 @@ describe('lookupDomain', () => {
     expect(i.reputation.status).toBe('refused');
     expect(intelWarnings(i, NOW)).toEqual([]);
   });
-  it('unregistered domain', async () => {
-    expect(intelWarnings(await lookupDomain('nope.example', fakeFetch({ rdap404: true }), NOW), NOW)[0]).toMatch(/not registered/);
+  it('unregistered domain on supported TLD', async () => {
+    const i = await lookupDomain('nope.com', fakeFetch({ rdap404: true, mx: false }), NOW);
+    expect(i.rdap.status).toBe('notfound');
+    expect(intelWarnings(i, NOW)[0]).toMatch(/not registered/);
+  });
+  it('unsupported TLD RDAP 404 (e.g. .io) does not falsely warn not registered', async () => {
+    const i = await lookupDomain(
+      'interviewing.io',
+      fakeFetch({ rdap404: true, rdapTitle: 'No RDAP service is available for this resource' }),
+      NOW,
+    );
+    expect(i.rdap.status).toBe('unsupported');
+    expect(intelWarnings(i, NOW)).toEqual([]);
   });
   it('network failure degrades to error states, never throws', async () => {
     const i = await lookupDomain('example.com', (async () => { throw new Error('offline'); }) as FetchFn, NOW);

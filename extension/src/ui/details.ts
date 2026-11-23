@@ -84,7 +84,13 @@ function itRows(s: SenderInfo, intel: IntelState, verdict?: Verdict): [string, s
       rows.push(['Registrar', r.registrar ?? 'unknown']);
       rows.push(['Expires', fmtDate(r.expires)]);
     } else {
-      rows.push(['Registration', r.status === 'notfound' ? 'domain not registered' : 'lookup failed']);
+      const msg =
+        r.status === 'unsupported'
+          ? 'RDAP not available for this TLD'
+          : r.status === 'notfound'
+            ? 'domain not registered'
+            : 'lookup failed';
+      rows.push(['Registration', msg]);
     }
     const d = intel.dns;
     if (d.status === 'ok') {

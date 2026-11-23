@@ -2,78 +2,19 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="color-scheme" content="light dark" />
     <title>Phishing Email Detector</title>
     <style>
-      :root {
-        color-scheme: light dark;
-        --bg: #f8fafc;
-        --card-bg: #ffffff;
-        --card-border: #e2e8f0;
-        --text: #0f172a;
-        --muted: #475569;
-        --accent: #2563eb;
-        --btn-bg: #ffffff;
-        --btn-border: #cbd5e1;
-        --btn-hover: #f1f5f9;
-        --pill-bg: #f1f5f9;
-        --safe-bg: #dcfce7;
-        --safe-fg: #166534;
-        --safe-border: #bbf7d0;
-        --warn-bg: #fef3c7;
-        --warn-fg: #92400e;
-        --warn-border: #fde68a;
-        --danger-bg: #fee2e2;
-        --danger-fg: #991b1b;
-        --danger-border: #fecaca;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #0f172a;
-          --card-bg: #1e293b;
-          --card-border: #334155;
-          --text: #f8fafc;
-          --muted: #cbd5e1;
-          --accent: #60a5fa;
-          --btn-bg: #1e293b;
-          --btn-border: #475569;
-          --btn-hover: #334155;
-          --pill-bg: #334155;
-          --safe-bg: #143321;
-          --safe-fg: #86efac;
-          --safe-border: #166534;
-          --warn-bg: #382a12;
-          --warn-fg: #fde68a;
-          --warn-border: #78350f;
-          --danger-bg: #3b181d;
-          --danger-fg: #fca5a5;
-          --danger-border: #7f1d1d;
-        }
-      }
-
-      @supports (color: light-dark(white, black)) {
-        :root {
-          --bg: light-dark(#f8fafc, #0f172a);
-          --card-bg: light-dark(#ffffff, #1e293b);
-          --card-border: light-dark(#e2e8f0, #334155);
-          --text: light-dark(#0f172a, #f8fafc);
-          --muted: light-dark(#475569, #cbd5e1);
-          --accent: light-dark(#2563eb, #60a5fa);
-          --btn-bg: light-dark(#ffffff, #1e293b);
-          --btn-border: light-dark(#cbd5e1, #475569);
-          --btn-hover: light-dark(#f1f5f9, #334155);
-          --pill-bg: light-dark(#f1f5f9, #334155);
-        }
-      }
-
       body {
         font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        width: 360px;
+        width: 372px;
         padding: 14px;
         margin: 0;
-        background: var(--bg);
-        color: var(--text);
+        color: #111111;
+        background-color: #fdf9f0;
+        background-image:
+          linear-gradient(to right, #ece5d5 1px, transparent 1px),
+          linear-gradient(to bottom, #ece5d5 1px, transparent 1px);
+        background-size: 18px 18px;
         box-sizing: border-box;
       }
 
@@ -83,68 +24,94 @@
         gap: 10px;
         margin-bottom: 12px;
       }
-      .logo {
+      .logo { flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+      .hdr-copy { flex: 1; min-width: 0; }
+      h3 { margin: 0; font-size: 16px; font-weight: 900; letter-spacing: -.02em; line-height: 1.15; }
+      .sub { font-size: 12px; color: #444444; font-weight: 500; }
+      .mini-sticker {
         flex-shrink: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        background: #26d08c; color: #111111;
+        border: 2px solid #111111; border-radius: 999px;
+        box-shadow: 2px 2px 0 #111111; rotate: 4deg;
+        font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+        padding: 3px 9px;
       }
-      h3 { margin: 0; font-size: 15px; line-height: 1.2; }
-      .sub { font-size: 12px; color: var(--muted); }
-      h4 { margin: 14px 0 6px; font-size: 13px; color: var(--text); }
+
+      h4 { margin: 14px 0 6px; font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #111111; }
 
       .card {
-        background: var(--card-bg);
-        border: 1px solid var(--card-border);
-        border-radius: 10px;
-        padding: 10px 12px;
+        background: #ffffff;
+        border: 2px solid #111111;
+        border-radius: 14px;
+        box-shadow: 4px 4px 0 #111111;
+        padding: 12px;
       }
 
-      .status {
-        display: inline-flex;
+      .status-row {
+        display: flex;
         align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-weight: 600;
-        font-size: 13px;
-        border: 1px solid transparent;
+        gap: 10px;
         margin-bottom: 8px;
       }
-      .status-safe { background: var(--safe-bg); color: var(--safe-fg); border-color: var(--safe-border); }
-      .status-warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-border); }
-      .status-danger { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-border); }
+      .icon-box {
+        flex-shrink: 0;
+        width: 36px; height: 36px;
+        border-radius: 9px;
+        border: 2px solid #111111;
+        box-shadow: 3px 3px 0 #111111;
+        display: flex; align-items: center; justify-content: center;
+        color: #111111;
+      }
+      .icon-safe { background: #26d08c; }
+      .icon-alert { background: #ff563f; }
+      .status-title { font-size: 17px; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; }
+      .tag {
+        display: inline-block; margin-top: 3px;
+        background: #111111; color: #ffffff; border-radius: 999px;
+        font-size: 9.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase;
+        padding: 2px 9px;
+      }
 
-      ul { padding-left: 18px; margin: 4px 0 8px; font-size: 13px; }
+      ul { padding-left: 18px; margin: 6px 0 8px; font-size: 13px; }
       li + li { margin-top: 3px; }
 
       .trusted-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
       .trusted-pill {
         display: inline-flex; align-items: center; gap: 6px;
-        background: var(--pill-bg); border: 1px solid var(--card-border);
-        border-radius: 999px; padding: 3px 8px 3px 10px; font-size: 12.5px;
+        background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111;
+        border-radius: 999px; padding: 3px 8px 3px 10px; font-size: 12px; font-weight: 600;
       }
-      .trusted-pill button { padding: 1px 6px; font-size: 11.5px; border-radius: 999px; }
+      .trusted-pill button { padding: 1px 7px; font-size: 11px; border-radius: 999px; box-shadow: none; border-width: 1.5px; }
 
-      .muted { color: var(--muted); font-size: 13px; }
+      .muted { color: #444444; font-size: 13px; }
 
       dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 4px 0; font-size: 13px; }
-      dt { color: var(--muted); font-weight: 500; }
+      dt { color: #444444; font-weight: 700; }
       dd { margin: 0; word-break: break-word; }
 
       button {
-        font: inherit; font-size: 12.5px; font-weight: 500;
-        border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--text);
-        border-radius: 8px; padding: 4px 10px; cursor: pointer;
+        font: inherit; font-size: 12.5px; font-weight: 700;
+        border: 2px solid #111111; background: #ffffff; color: #111111;
+        box-shadow: 2px 2px 0 #111111; border-radius: 8px; padding: 5px 10px; cursor: pointer;
+        transition: translate .1s, box-shadow .1s;
       }
-      button:hover:not(:disabled) { background: var(--btn-hover); }
-      button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button:hover:not(:disabled) { translate: -1px -1px; box-shadow: 3px 3px 0 #111111; }
+      button:active:not(:disabled) { translate: 1px 1px; box-shadow: 1px 1px 0 #111111; }
+      button.copy-it { background: #26d08c; margin-top: 8px; }
+      button:focus-visible, summary:focus-visible { outline: 2px solid #111111; outline-offset: 2px; }
 
-      details { margin-top: 14px; border-top: 1px solid var(--card-border); padding-top: 10px; }
+      details {
+        margin-top: 14px;
+        background: #ffffff;
+        border: 2px solid #111111;
+        border-radius: 12px;
+        box-shadow: 3px 3px 0 #111111;
+        padding: 9px 12px;
+      }
       summary {
         list-style: none;
         display: flex; align-items: center; gap: 6px;
-        cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted);
+        cursor: pointer; font-weight: 800; font-size: 13px; color: #111111;
         user-select: none; border-radius: 4px;
       }
       summary::-webkit-details-marker { display: none; }
@@ -167,12 +134,12 @@
       }
       details::details-content { interpolate-size: allow-keywords; overflow: clip; contain: layout; }
       details:not([open])::details-content { block-size: 0; }
-      #it-details { margin-top: 8px; }
-      .copy-it { margin-top: 8px; }
+      #it-details { margin-top: 10px; background: #fdf9f0; box-shadow: none; }
 
       @media (forced-colors: active) {
-        .card, .status, .trusted-pill { border: 1px solid CanvasText; }
-        button { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; }
+        body { background-image: none; }
+        .card, .icon-box, .trusted-pill, .mini-sticker, details, button { box-shadow: none; border: 2px solid CanvasText; background: Canvas; color: CanvasText; }
+        .tag { border: 1px solid CanvasText; }
         button:focus-visible, summary:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
       }
     </style>
@@ -180,10 +147,11 @@
   <body>
     <header class="hdr">
       <div id="logo" class="logo"></div>
-      <div>
+      <div class="hdr-copy">
         <h3>Phishing Email Detector</h3>
         <div class="sub">Local email protection</div>
       </div>
+      <span class="mini-sticker" aria-hidden="true">LOCAL CHECK</span>
     </header>
     <div id="out" class="card muted">Open an email to check it.</div>
     <h4>Trusted senders</h4>

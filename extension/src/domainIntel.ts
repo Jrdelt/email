@@ -12,7 +12,7 @@ type Status = 'ok' | 'error';
 export interface DomainIntel {
   domain: string;
   checkedAt: string;
-  rdap: { status: Status | 'notfound'; registered?: string; expires?: string; registrar?: string; flags?: string[] };
+  rdap: { status: Status | 'notfound' | 'unsupported'; registered?: string; expires?: string; registrar?: string; flags?: string[] };
   dns: { status: Status; mx: string[]; spf?: string; dmarc?: string; dmarcPolicy?: string };
   reputation: { status: Status | 'refused'; source: 'URIBL'; listed: string[] };
 }
@@ -28,13 +28,17 @@ const BOOTSTRAP_TTL_MS = 7 * 24 * 3600 * 1000;
 
 async function getJson(fetchFn: FetchFn, url: string, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
   const res = await fetchFn(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS), credentials: 'omit', referrerPolicy: 'no-referrer' });
-  return { status: res.status, body: res.ok ? await res.json() : null };
+  let body: any = null;
+  if (res.ok || res.status === 404) {
+    try { body = await res.json(); } catch { body = null; }
+  }
+  return { status: res.status, body };
 }
 
 interface DohAnswer { type: number; data: string }
 async function doh(fetchFn: FetchFn, name: string, type: 'A' | 'MX' | 'TXT', via: keyof typeof DOH = 'cloudflare'): Promise<{ status: number; answers: DohAnswer[] }> {
-  const { body } = await getJson(fetchFn, `${DOH[via]}?name=${encodeURIComponent(name)}&type=${type}`, { accept: 'application/dns-json' });
-  if (!body) throw new Error('doh failed');
+  const { status, body } = await getJson(fetchFn, `${DOH[via]}?name=${encodeURIComponent(name)}&type=${type}`, { accept: 'application/dns-json' });
+  if (status < 200 || status >= 300 || !body) throw new Error('doh failed');
   return { status: body.Status, answers: body.Answer ?? [] };
 }
 const txt = (a: DohAnswer[]) => a.filter((x) => x.type === 16).map((x) => x.data.replace(/"\s*"/g, '').replace(/^"|"$/g, ''));
@@ -69,7 +73,11 @@ export async function lookupRdap(fetchFn: FetchFn, domain: string, kv?: KV, now 
     const base = await rdapBaseFor(fetchFn, domain.split('.').pop()!, kv, now);
     const url = `${base ?? 'https://rdap.org/'}domain/${encodeURIComponent(domain)}`;
     const { status, body } = await getJson(fetchFn, url, { accept: 'application/rdap+json' });
-    if (status === 404) return { status: 'notfound' };
+    if (status === 404) {
+      const title = String(body?.title ?? '').toLowerCase();
+      if (!base || title.includes('no rdap service')) return { status: 'unsupported' };
+      return { status: 'notfound' };
+    }
     if (!body) return { status: 'error' };
     const ev = (a: string) => (body.events ?? []).find((e: any) => e.eventAction === a)?.eventDate as string | undefined;
     const reg = (body.entities ?? []).find((e: any) => (e.roles ?? []).includes('registrar'));
@@ -141,7 +149,9 @@ export function intelWarnings(i: DomainIntel, now = Date.now()): string[] {
   const w: string[] = [];
   const age = ageDays(i.rdap.registered, now);
   if (age !== undefined && age < 30) w.push(`The sender's website (${i.domain}) is brand new (${age} day${age === 1 ? '' : 's'} old)`);
-  if (i.rdap.status === 'notfound') w.push(`The sender's website (${i.domain}) is not registered`);
+  if (i.rdap.status === 'notfound' && !(i.dns.status === 'ok' && i.dns.mx.length > 0)) {
+    w.push(`The sender's website (${i.domain}) is not registered`);
+  }
   if (i.reputation.listed.some((l) => l === 'black' || l === 'red')) w.push(`The sender's website (${i.domain}) has been reported for spam online`);
   if (i.dns.status === 'ok' && i.dns.mx.length === 0) w.push(`The sender's website (${i.domain}) is not set up to send normal email`);
   return w;

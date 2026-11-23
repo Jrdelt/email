@@ -79,11 +79,11 @@ describe('linkLock', () => {
 });
 
 describe('banner', () => {
-  it('renders once, warning level does not lock, removable', () => {
+  it('renders once and is removable', () => {
     document.body.innerHTML = '';
     const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
-    showBanner({ level: 'warning', title: 'Double-check this sender', reasons: sender.warnings, linksLocked: false, sender, intel: 'loading' }, actions());
-    showBanner({ level: 'warning', title: 'Double-check this sender', reasons: ['<img src=x onerror=alert(1)>'], linksLocked: false, sender }, actions());
+    showBanner({ level: 'warning', title: 'Check this sender.', tag: 'SENDER WARNING', reasons: sender.warnings, linksLocked: false, sender, intel: 'loading' }, actions());
+    showBanner({ level: 'warning', title: 'Check this sender.', tag: 'SENDER WARNING', reasons: ['<img src=x onerror=alert(1)>'], linksLocked: false, sender }, actions());
     expect(document.querySelectorAll('#ped-banner-host')).toHaveLength(1);
     expect(document.querySelector('img')).toBeNull();
     removeBanner();
@@ -109,7 +109,8 @@ describe('decideBanner', () => {
     const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
     const locked = decideBanner({ score: 0.2, level: 'safe', reasons: ['Uses urgent wording about passwords or your account'] }, sender, undefined, false)!;
     expect(locked.level).toBe('warning');
-    expect(locked.title).toBe('Double-check this sender');
+    expect(locked.title).toBe('Check this sender.');
+    expect(locked.tag).toBe('SENDER WARNING');
     expect(locked.linksLocked).toBe(true);
     expect(locked.reasons[0]).toMatch(/Claims to be PayPal/);
     expect(locked.reasons[1]).toBe('Uses urgent wording about passwords or your account');
@@ -128,6 +129,7 @@ describe('decideBanner', () => {
     };
     const banner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, spamIntel, false)!;
     expect(banner.level).toBe('warning');
+    expect(banner.tag).toBe('DOMAIN WARNING');
     expect(banner.linksLocked).toBe(true);
     expect(banner.reasons[0]).toMatch(/reported for spam online/);
   });
@@ -137,7 +139,8 @@ describe('decideBanner', () => {
     const verdict = { score: 0.6, level: 'likely-phishing' as const, reasons: ['A link says paypal.com but actually goes to evil.example'] };
     const locked = decideBanner(verdict, sender, undefined, false)!;
     expect(locked.level).toBe('danger');
-    expect(locked.title).toBe('Possible phishing email');
+    expect(locked.title).toBe('Possible phishing.');
+    expect(locked.tag).toBe('PHISHING WARNING');
     expect(locked.linksLocked).toBe(true);
     const unlocked = decideBanner(verdict, sender, undefined, true)!;
     expect(unlocked.level).toBe('danger');
