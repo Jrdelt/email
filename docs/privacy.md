@@ -13,6 +13,6 @@
 - Intercepted link warning details for `warning.html` are stored ephemerally in `browser.storage.session` (in memory only, never in URL query strings or browser history) and cleared when you proceed or close the browser.
 - Stored locally in `browser.storage.local` only:
   - **Trusted senders** you add: exact email addresses only, validated by a strict format check (no domains, wildcards or display names). View and remove them in the popup.
-  - **Trusted emails** (up to 500): one-way SHA-256 fingerprints only (no email body, links, or sender address stored), so an email you trust with "I trust this email" stays unlocked across refreshes; view the count and clear them in the popup.
+  - **Trusted emails** (up to 500): one-way SHA-256 fingerprints only (no email body, links, or sender address stored), so an email you trust with "I trust this email" stays unlocked across refreshes; revert immediately via the inline **Undo** pill or view/clear them in the popup.
   - **False-positive reports** (up to 50): verdict level, score and reason text, with email addresses redacted.
     No email body or sender is stored. View the count and clear them in the popup. They are never sent anywhere.
