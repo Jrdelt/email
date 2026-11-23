@@ -24,31 +24,29 @@ Warns about phishing in webmail. Email content stays in your browser; only sende
 
 **Detailed Description** [REQUIRED — plain text, copy-paste directly]
 ```text
-Warns you about phishing emails, deceptive links, and unsafe attachments in webmail (compatible with Gmail, Outlook on the web, and iCloud Mail) while keeping your email content private on your device.
+Warns you about phishing emails, deceptive links, and unsafe attachments in Gmail, Outlook on the web, and iCloud Mail while keeping your email content private on your device.
 
 FEATURES
-• Spots impersonation and scam tactics — flags fake sender names, lookalike domains, urgent account threats, unverified senders, and links that display one website in the text while pointing somewhere else.
-• Checks domain reputation without exposing your mail — verifies how recently a sender's or clicked link's website domain was registered, whether its email records are set up properly, and whether it appears on public spam lists.
-• Pauses risky links and untrusted attachments — automatically disables links in flagged emails and blocks attachments from untrusted senders until you choose to trust the email, preventing accidental one-click downloads or fake login pages.
-• Protects you even if you click — inspects external links the moment you click them, unwraps tracking redirects, and stops dangerous or newly registered destinations on a clear warning screen with step-by-step recovery guidance.
+• Spots impersonation and scam tactics — flags fake sender names, lookalike websites, urgent account threats, unverified senders, and links that display one website in the text while pointing somewhere else.
+• Checks website reputation without exposing your mail — verifies how recently a sender's or clicked link's domain was registered, whether its email records are set up properly, and whether it appears on public spam lists.
+• Pauses risky links and untrusted attachments — automatically disables links in flagged emails and blocks attachments from untrusted senders until you choose to trust the email, preventing accidental downloads or fake login pages.
+• Protects you even if you click — inspects external links the moment you click them, unwraps tracking redirects, and stops dangerous or newly registered destinations on a warning screen with step-by-step recovery guidance.
 • Clear, reversible trust controls — shows who really sent the message alongside where its links lead, asks for confirmation before unlocking high-risk alerts, and lets you undo trusting an email with one click.
 
 HOW TO USE
-1. Install Phishing Email Detector and open your webmail (compatible with Gmail, Outlook on the web, and iCloud Mail).
-2. Open any email as usual — clean emails stay out of your way, while suspicious emails or untrusted attachments display a clear warning banner at the top of the page.
-3. Click "See why" on a warning banner (or click the toolbar icon) to view plain-English details about the sender and website domain, or manage your trusted senders and recovery guide.
+1. Install Phishing Email Detector and open your webmail inbox.
+2. Read your email as usual — clean messages stay out of your way, while suspicious emails or untrusted attachments display a clear warning banner at the top of the page.
+3. Click "See why" on any banner (or open the extension icon in your toolbar) to inspect sender details, manage your trusted senders list, or open the recovery guide.
 
 PRIVACY
-Your email text, attachments, sender email addresses, and full link URLs never leave your browser. No account is required, and there is no analytics or tracking. To check domain age and spam listings, only the bare website domain name (for example, example.com — never your email address or the full link) is looked up via public domain registration (RDAP) and DNS services and cached locally on your device for 24 hours. All preferences stay on your device.
+Your email text, attachments, sender email addresses, and full link addresses never leave your browser. No account is required, and there is no analytics or tracking. To check website age and spam listings, only the bare website domain name is looked up via public domain registration (RDAP) and DNS services and cached locally on your device for 24 hours.
 
 PERMISSIONS
-• "Read and change your data on mail.google.com, outlook.live.com, outlook.office.com, outlook.office365.com, outlook.cloud.microsoft, www.icloud.com, and icloud-sandbox.com" — used only on supported webmail pages to check opened emails for phishing signs, display warning banners, and pause risky links and untrusted attachments.
-• "Storage" — saves your trusted senders list, trusted email hashes, local false-alarm notes, and 24-hour domain lookup cache on your device.
+• Webmail site access — used only on supported webmail services so the extension can scan opened emails locally, show warning banners, and pause risky links and untrusted attachments.
+• Local storage — saves your trusted senders list, trusted email fingerprints, local false-alarm notes, and domain lookup cache on your device.
 
 SUPPORT
-Found a bug or false alarm, or have a suggestion? Open an issue at https://github.com/Jrdelt/email/issues
-
-Version 0.1.0 — Initial release with local phishing detection for webmail, untrusted attachment blocking, and click-time link protection.
+Found a bug or false alarm? Use the Support link on this listing to report an issue or share feedback.
 ```
 
 **Category** [REQUIRED]
@@ -142,7 +140,13 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
-| 0.1.0 | 2026-11-23 | Initial store-ready package: local phishing detection for Gmail, Outlook Web, and iCloud Mail; untrusted attachment locking; click-time link guard & `warning.html` recovery guide; domain RDAP/DNS/URIBL checks. | Draft |
+| 0.1.0 | 2026-11-23 | Initial store-ready package: local phishing detection for Gmail, Outlook Web, and iCloud Mail; untrusted attachment locking; click-time link guard & `warning.html` recovery guide; domain RDAP/DNS/URIBL checks. | In Review / Resubmitted |
+
+### Rejection History
+
+| Date | Reference / Violation | Fix Applied |
+|------|-----------------------|-------------|
+| 2026-11-23 | `Yellow Argon` — comma-separated webmail domain list flagged as excessive keywords in Description | Replaced domain list in Description `PERMISSIONS` section with plain-English prose |
 
 ---
 
