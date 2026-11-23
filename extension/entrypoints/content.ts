@@ -1,18 +1,24 @@
 import { scoreEmail } from '../src/features';
 
+const MAX_BODY_CHARS = 20_000; // cap work per email
+const DEBOUNCE_MS = 400;
+
 export default defineContentScript({
   matches: ['https://mail.google.com/*', 'https://outlook.live.com/*', 'https://outlook.office.com/*'],
   main() {
-    // Selectors are best-effort and will need maintenance per webmail provider.
+    // Selectors are best-effort; TODO(T7) move into src/adapters/.
     const SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
     let last = '';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     const scan = () => {
+      if (document.hidden) return; // never work in background tabs
       const el = SELECTORS.map((s) => document.querySelector<HTMLElement>(s)).find(Boolean);
       if (!el) return;
-      const body = el.innerText ?? '';
-      if (body === last) return;
+      const body = (el.textContent ?? '').slice(0, MAX_BODY_CHARS);
+      if (body === last) return; // unchanged email => no work
       last = body;
-      const links = [...el.querySelectorAll<HTMLAnchorElement>('a[href]')].map((a) => ({ text: a.innerText, href: a.href }));
+      const links = [...el.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0, 200).map((a) => ({ text: a.textContent ?? '', href: a.href }));
       const verdict = scoreEmail('', body, links);
       browser.runtime.sendMessage({ type: 'verdict', verdict }).catch(() => {});
       document.getElementById('ped-banner')?.remove();
@@ -24,7 +30,13 @@ export default defineContentScript({
         document.body.appendChild(b);
       }
     };
-    new MutationObserver(() => scan()).observe(document.body, { childList: true, subtree: true });
-    scan();
+
+    // Debounced: bursts of DOM changes (webmail is chatty) collapse into one scan, run when idle.
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => ('requestIdleCallback' in window ? requestIdleCallback(scan) : scan()), DEBOUNCE_MS);
+    };
+    new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+    schedule();
   },
 });

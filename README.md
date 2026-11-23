@@ -4,15 +4,15 @@ Privacy-first phishing **email** detection that runs entirely in your browser.
 One codebase ships to **Chrome, Edge and Firefox** (Manifest V3, built with [WXT](https://wxt.dev)).
 
 > Status: scaffold. The extension currently uses a heuristic scorer; the trained
-> ONNX model replaces it in milestone 4.
+> JSON-model model replaces it in milestone 4.
 
 ## How it works
 ```
 Webmail page (Gmail / Outlook web)
   └─ content script: sender, link text vs. real href, body text
-       └─ scorer (heuristics now, ONNX model later) — runs locally, nothing leaves the browser
+       └─ scorer (heuristics now, tiny JSON model later) — runs locally, nothing leaves the browser
             └─ banner + popup with human-readable reasons
-ml/  (Python): data, features, training, evaluation, ONNX export
+ml/  (Python): data, features, training, evaluation, JSON-model export
 ```
 
 ## Layout
@@ -37,7 +37,7 @@ cd ml && uv sync && uv run pytest
 1. Scaffold + CI  ← you are here
 2. Dataset collection (time-stamped, licensed sources) + baseline model
 3. Time-split evaluation, precision at low false-positive rate
-4. ONNX export and in-extension inference (parity-tested against Python)
+4. JSON-model export and in-extension inference (parity-tested against Python)
 5. Explainable reasons in the UI
 6. Adversarial testing, threat model, store submissions
 

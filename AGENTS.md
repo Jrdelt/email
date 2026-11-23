@@ -19,6 +19,13 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 - No real phishing kits or live attack infrastructure. Use only public datasets and self-made test pages.
 - Webmail selectors live only in `extension/src/adapters/`; never in feature or scoring code.
 
+## Performance budget (hard requirements)
+- Scoring one email: <10 ms. Content script idle CPU: ~0. Extension memory: <10 MB. Total package: <500 KB.
+- **No ONNX Runtime, TensorFlow.js or other ML runtimes.** The model is exported as a small JSON (weights/trees, <200 KB) and evaluated in plain TypeScript.
+- Only scan when an email changes: debounce DOM mutations, skip hidden tabs, cap body length and link count, no polling, no timers while idle.
+- No persistent background work; the background script only stores the latest verdict.
+- Any task that adds a dependency must report package size before and after.
+
 ## Layout
-- `extension/src/features.ts` scorer; `model.ts` ONNX inference (stub); `adapters/` per-webmail DOM extraction (stubs)
-- `ml/src/phishml/` `features.py`, `data.py`, `train.py`, `evaluate.py`, `export_onnx.py` (stubs except features)
+- `extension/src/features.ts` scorer; `model.ts` JSON-model scorer (stub); `adapters/` per-webmail DOM extraction (stubs)
+- `ml/src/phishml/` `features.py`, `data.py`, `train.py`, `evaluate.py`, `export_model.py` (stubs except features)

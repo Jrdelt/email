@@ -11,5 +11,5 @@ def test_precision_at_fpr_perfect_scores():
     """T3: perfect separation gives precision 1.0."""
 
 
-def test_onnx_matches_sklearn():
-    """T5: ONNX output within 1e-5 of sklearn on fixtures."""
+def test_exported_json_matches_sklearn():
+    """T5: exported JSON model matches sklearn within 1e-6 on fixtures."""
