@@ -1,49 +1,83 @@
-import { isTrusted, normalizeSender, trustSender } from '../src/allowlist';
+import { adapterFor } from '../src/adapters';
+import { bodyText, linksIn } from '../src/adapters/extract';
+import type { ExtractedEmail } from '../src/adapters/types';
+import { isTrusted, trustSender } from '../src/allowlist';
+import { intelWarnings, type DomainIntel } from '../src/domainIntel';
 import { scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
 import { WEBMAIL_MATCHES } from '../src/hosts';
+import { analyzeSender } from '../src/sender';
 import { removeBanner, showBanner } from '../src/ui/banner';
+import type { IntelState } from '../src/ui/details';
 import { lockLinks, unlockLinks } from '../src/ui/linkLock';
 
-const MAX_BODY_CHARS = 20_000; // cap work per email
 const DEBOUNCE_MS = 400;
+const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
+
+function fallbackExtract(doc: Document): ExtractedEmail | null {
+  const container = FALLBACK_SELECTORS.map((s) => doc.querySelector<HTMLElement>(s)).find(Boolean);
+  return container ? { senderName: '', senderAddress: '', body: bodyText(container), links: linksIn(container), container } : null;
+}
 
 export default defineContentScript({
   matches: WEBMAIL_MATCHES,
   main() {
     const kv = browser.storage.local;
-    // Selectors are best-effort; TODO(T7) replace with src/adapters/.
-    const SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
-    const trustedThisSession = new Set<string>(); // emails the user unlocked ("I trust this email"), in memory only
-    let last = '';
+    const adapter = adapterFor(new URL(location.href));
+    const trustedThisSession = new Set<string>(); // emails unlocked with "I trust this email" (memory only)
+    const dismissed = new Set<string>();
+    let lastKey = '';
     let current: HTMLElement | undefined;
+    let token = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const scan = async () => {
       if (document.hidden) return; // never work in background tabs
-      const el = SELECTORS.map((s) => document.querySelector<HTMLElement>(s)).find(Boolean);
-      if (!el) return;
-      const body = (el.textContent ?? '').slice(0, MAX_BODY_CHARS);
-      if (body === last && el === current) return; // unchanged email => no work
-      last = body;
-      if (current && current !== el) unlockLinks(current);
-      current = el;
+      const email = adapter?.extract(document) ?? fallbackExtract(document);
+      if (!email) return;
+      const key = `${email.senderAddress}\n${email.body}`;
+      if (key === lastKey && email.container === current) return; // unchanged email => no work
+      lastKey = key;
+      if (current && current !== email.container) unlockLinks(current);
+      current = email.container;
+      const my = ++token;
       removeBanner();
 
-      const sender = ''; // TODO(T7): adapter.extract().sender
-      if (trustedThisSession.has(body) || (await isTrusted(kv, sender))) return;
+      const sender = analyzeSender(email.senderName, email.senderAddress, email.links);
+      if (trustedThisSession.has(key) || (sender.valid && (await isTrusted(kv, sender.address)))) return;
+      if (my !== token) return;
 
-      const links = [...el.querySelectorAll<HTMLAnchorElement>('a[href]')].slice(0, 200).map((a) => ({ text: a.textContent ?? '', href: a.href }));
-      const verdict = scoreEmail(sender, body, links);
-      browser.runtime.sendMessage({ type: 'verdict', verdict }).catch(() => {});
-      if (verdict.level === 'safe') return;
+      const verdict = scoreEmail(sender.address, email.body, email.links);
+      const danger = verdict.level !== 'safe';
+      if (danger) lockLinks(email.container);
+      let intel: IntelState = sender.registrable ? 'loading' : undefined;
 
-      lockLinks(el);
-      showBanner(verdict, normalizeSender(sender) !== '', {
-        onUnlock: () => { trustedThisSession.add(body); unlockLinks(el); },
-        onTrustSender: () => trustSender(kv, sender),
-        onReport: () => recordFalsePositive(kv, verdict),
-      });
+      const render = () => {
+        const reasons = [...verdict.reasons, ...sender.warnings, ...(typeof intel === 'object' ? intelWarnings(intel) : [])];
+        browser.runtime.sendMessage({ type: 'verdict', payload: { verdict, sender, intel } }).catch(() => {});
+        if ((!danger && reasons.length === 0) || dismissed.has(key)) { removeBanner(); return; }
+        showBanner({
+          level: danger ? 'danger' : 'warning',
+          title: danger ? (verdict.level === 'likely-phishing' ? 'Likely phishing' : 'Suspicious email') : 'Check the sender',
+          reasons,
+          linksLocked: danger && !trustedThisSession.has(key),
+          sender,
+          intel,
+        }, {
+          onUnlock: () => { trustedThisSession.add(key); unlockLinks(email.container); },
+          onTrustSender: () => trustSender(kv, sender.address),
+          onReport: () => recordFalsePositive(kv, { ...verdict, reasons }),
+          onDismiss: () => dismissed.add(key),
+        });
+      };
+      render();
+
+      if (sender.registrable) {
+        try {
+          intel = ((await browser.runtime.sendMessage({ type: 'domainIntel', domain: sender.registrable })) as DomainIntel | undefined) ?? 'unavailable';
+        } catch { intel = 'unavailable'; }
+        if (my === token) render();
+      }
     };
 
     // Debounced: bursts of DOM changes (webmail is chatty) collapse into one scan, run when idle.

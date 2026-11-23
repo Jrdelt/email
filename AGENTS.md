@@ -9,7 +9,12 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 - A task is done only when all four checks above pass and its acceptance criteria are met.
 
 ## Rules
-- **Privacy:** no email content, URLs or sender addresses leave the browser. No network calls from the extension. No telemetry.
+- **Privacy:** no email content, URLs or sender addresses leave the browser. No telemetry.
+  The ONLY network traffic is domain lookups in `src/domainIntel.ts`, run from the background script: the sender's
+  registrable domain (validated by `isValidDomain`) sent to IANA/registry RDAP (rdap.org fallback), cloudflare-dns.com
+  and dns.google (URIBL fallback). Cached 24 h. Do not add endpoints or send anything else without updating `docs/privacy.md`.
+- **Warn, never block on sender issues:** sender/domain problems produce banner warnings only. Only the content scorer's
+  phishing verdict locks links.
 - **Parity contract:** `ml/src/phishml/features.py` and `extension/src/features.ts` must produce identical features.
   Any feature change updates both plus `ml/tests/fixtures/parity.json`, which both test suites read.
 - **Permissions:** only `storage` and the webmail hosts in `extension/src/hosts.ts` (single source for host permissions and content-script matches). Justify any addition in `docs/threat-model.md`.
@@ -28,6 +33,6 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 - Any task that adds a dependency must report package size before and after.
 
 ## Layout
-- `extension/src/features.ts` scorer; `model.ts` JSON-model scorer (stub); `hosts.ts` supported webmail URLs; `adapters/` per-webmail DOM extraction (Gmail, Outlook, Yahoo, Proton, iCloud; stubs)
+- `extension/src/features.ts` scorer; `model.ts` JSON-model scorer (stub); `hosts.ts` supported webmail URLs; `sender.ts` local sender checks (brand claim, lookalike, display-name address); `domainIntel.ts` online domain lookups; `brands.ts` impersonated brands; `adapters/` per-webmail DOM extraction (Gmail, Outlook, Yahoo, Proton, iCloud; stubs)
 - `extension/src/allowlist.ts`, `feedback.ts` local trusted senders and false-positive reports (through the `KV` interface in `storage.ts`, so they test without a browser); `src/ui/` banner (closed shadow DOM) and link locking
 - `ml/src/phishml/` `features.py`, `data.py`, `train.py`, `evaluate.py`, `export_model.py` (stubs except features)

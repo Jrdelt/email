@@ -1,24 +1,31 @@
 import { listTrusted, untrustSender } from '../../src/allowlist';
+import { intelWarnings } from '../../src/domainIntel';
 import type { Verdict } from '../../src/features';
 import { clearReports, listReports } from '../../src/feedback';
+import type { SenderInfo } from '../../src/sender';
+import { type IntelState, renderDetails } from '../../src/ui/details';
 
 const kv = browser.storage.local;
 const $ = (id: string) => document.getElementById(id)!;
+
+interface TabState { verdict: Verdict; sender?: SenderInfo; intel?: IntelState }
 
 async function renderVerdict() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined) return;
   const key = `tab:${tab.id}`;
-  const v = (await browser.storage.session?.get?.(key))?.[key] as Verdict | undefined;
-  if (!v) return;
+  const st = (await browser.storage.session?.get?.(key))?.[key] as TabState | undefined;
+  if (!st?.verdict) return;
   const out = $('out');
   out.textContent = '';
   out.className = '';
   const h = document.createElement('strong');
-  h.textContent = `${v.level} (${v.score.toFixed(2)})`;
+  h.textContent = `${st.verdict.level} (${st.verdict.score.toFixed(2)})`;
+  const reasons = [...st.verdict.reasons, ...(st.sender?.warnings ?? []), ...(typeof st.intel === 'object' ? intelWarnings(st.intel) : [])];
   const ul = document.createElement('ul');
-  for (const r of v.reasons) { const li = document.createElement('li'); li.textContent = r; ul.append(li); }
+  for (const r of reasons) { const li = document.createElement('li'); li.textContent = r; ul.append(li); }
   out.append(h, ul);
+  if (st.sender) out.append(renderDetails(document, st.sender, st.intel));
 }
 
 async function renderTrusted() {

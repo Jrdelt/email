@@ -4,9 +4,10 @@
     <meta charset="utf-8" />
     <title>Phishing Email Detector</title>
     <style>
-      body{font:14px system-ui,sans-serif;width:320px;padding:12px;margin:0}
+      body{font:14px system-ui,sans-serif;width:340px;padding:12px;margin:0}
       h3{margin:0 0 8px} h4{margin:14px 0 4px} ul{padding-left:18px;margin:4px 0}
       li button{margin-left:6px;font-size:12px} .muted{color:#666}
+      dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px;margin:6px 0} dt{color:#555} dd{margin:0;word-break:break-all}
     </style>
   </head>
   <body>
@@ -16,6 +17,7 @@
     <ul id="trusted"></ul>
     <h4>False-positive reports <span class="muted">(stored on this device only)</span></h4>
     <div><span id="reports">0</span> saved <button id="clear" type="button">Clear</button></div>
+    <p class="muted">Only the sender's domain is looked up online (RDAP, Cloudflare DNS, URIBL). Email content never leaves your browser.</p>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

@@ -7,6 +7,11 @@
 **Attacker capabilities:** crafts emails to evade the scorer (homoglyph domains, link text/href mismatch,
 image-only bodies, hosting on legitimate platforms).
 
+**Third-party lookups:** the lookup services learn which sender domains the user receives mail from (plus the
+user's IP). Accepted for v1 (always on, by product decision). Mitigations: domain only, 24 h cache, no cookies or
+referrer, strict domain validation before building any URL. URIBL limits public resolvers, so "lookup refused" is
+common and is shown as such, never as "clean".
+
 **Out of scope (v1):** attachments, native mail clients, server-side filtering.
 
 **Link locking limits:** flagged emails have their links disabled through one capturing click/auxclick/dragstart

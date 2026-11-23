@@ -10,7 +10,8 @@ One codebase ships to **Chrome, Edge and Firefox** (Manifest V3, built with [WXT
 ```
 Webmail page (Gmail, Outlook, Yahoo, Proton, iCloud)
   └─ content script: sender, link text vs. real href, body text
-       └─ scorer (heuristics now, tiny JSON model later) — runs locally, nothing leaves the browser
+       ├─ scorer (heuristics now, tiny JSON model later) — runs locally
+       └─ background: sender-domain lookups only (RDAP, DNS, URIBL), cached 24 h
             └─ banner + popup with human-readable reasons
 ml/  (Python): data, features, training, evaluation, JSON-model export
 ```
@@ -42,7 +43,7 @@ cd ml && uv sync && uv run pytest
 6. Adversarial testing, threat model, store submissions
 
 ## Privacy
-No email content is sent anywhere. See [docs/privacy.md](docs/privacy.md).
+No email content is sent anywhere. Only the sender's domain is looked up (registration, DNS, spam lists). See [docs/privacy.md](docs/privacy.md).
 
 ## Authorized use
 Test only with emails and pages you own or have permission to analyze.

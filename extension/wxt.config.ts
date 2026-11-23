@@ -4,7 +4,7 @@ import { WEBMAIL_MATCHES } from './src/hosts';
 export default defineConfig({
   manifest: {
     name: 'Phishing Email Detector',
-    description: 'Warns about likely phishing emails in webmail. Analysis runs locally; nothing leaves your browser.',
+    description: 'Warns about likely phishing emails in webmail. Email content never leaves your browser; only the sender domain is looked up.',
     permissions: ['storage'],
     host_permissions: WEBMAIL_MATCHES,
     browser_specific_settings: {
