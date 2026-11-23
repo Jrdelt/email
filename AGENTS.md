@@ -17,6 +17,7 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 - **Data:** raw data goes in `ml/data/raw/` (gitignored). Record source, license and collection date in `ml/data/SOURCES.md`.
 - **UI safety:** build DOM with `textContent`; never `innerHTML` with email-derived data.
 - No real phishing kits or live attack infrastructure. Use only public datasets and self-made test pages.
+- **Allowlist:** trust is per exact address validated by `STRICT_EMAIL` in `allowlist.ts`. Never add domain or wildcard trust; never match on display names.
 - Webmail selectors live only in `extension/src/adapters/`; never in feature or scoring code.
 
 ## Performance budget (hard requirements)

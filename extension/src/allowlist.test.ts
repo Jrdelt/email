@@ -7,9 +7,17 @@ describe('normalizeSender', () => {
   it.each([
     ['PayPal <Service@PayPal.com>', 'service@paypal.com'],
     ['  a@b.co ', 'a@b.co'],
-    ['', ''],
-    ['not an address', ''],
-  ])('%s -> %s', (input, out) => expect(normalizeSender(input)).toBe(out));
+    ['first.last+tag@mail.example.co.uk', 'first.last+tag@mail.example.co.uk'],
+    ['x@xn--pple-43d.com', 'x@xn--pple-43d.com'],
+  ])('accepts %s -> %s', (input, out) => expect(normalizeSender(input)).toBe(out));
+
+  it.each([
+    '', 'not an address', 'paypal.com', '@paypal.com', 'a@', 'a@b', 'a@b.c', 'a@b.123',
+    'a..b@x.com', '.a@x.com', 'a.@x.com', 'a@-x.com', 'a@x-.com', 'a@x..com',
+    'a@[1.2.3.4]', 'a@1.2.3.4', '"a b"@x.com', 'a b@x.com', 'a@x.com, b@y.com', 'a@x.com;b@y.com',
+    'A <a@x.com> <b@y.com>', 'A <a@x.com', 'A a@x.com>', 'a@x.com (comment)', 'ä@x.com', 'a@exämple.com',
+    `${'a'.repeat(65)}@x.com`, `a@${'b'.repeat(250)}.com`,
+  ])('rejects %j', (input) => expect(normalizeSender(input)).toBe(''));
 });
 
 describe('allowlist', () => {
@@ -21,6 +29,19 @@ describe('allowlist', () => {
     expect(await isTrusted(kv, 'a@bank.com')).toBe(true);
     await untrustSender(kv, 'a@bank.com');
     expect(await isTrusted(kv, 'a@bank.com')).toBe(false);
+  });
+  it('trust is per exact address, not per domain', async () => {
+    const kv = memoryKV();
+    await trustSender(kv, 'alerts@bank.com');
+    expect(await isTrusted(kv, 'alerts@bank.com')).toBe(true);
+    expect(await isTrusted(kv, 'other@bank.com')).toBe(false);
+    expect(await isTrusted(kv, 'alerts@bank.com.evil.example')).toBe(false);
+    expect(await isTrusted(kv, 'alerts@sub.bank.com')).toBe(false);
+  });
+  it('ignores malformed entries already in storage', async () => {
+    const kv = memoryKV();
+    await kv.set({ trustedSenders: ['good@x.com', '*@x.com', 'x.com', 'Bad <b@x.com>', 42] });
+    expect(await listTrusted(kv)).toEqual(['good@x.com']);
   });
   it('refuses unknown senders', async () => {
     const kv = memoryKV();
