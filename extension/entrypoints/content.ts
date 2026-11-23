@@ -13,13 +13,15 @@ import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
 import { WEBMAIL_MATCHES } from '../src/hosts';
+import { analyzeLinkDestination, isSafeHttpUrl, mergeLinkIntel } from '../src/linkGuard';
 import { analyzeSender, canTrustByAllowlist } from '../src/sender';
 import { decideBanner, removeBanner, showBanner } from '../src/ui/banner';
 import type { IntelState } from '../src/ui/details';
-import { lockLinks, unlockLinks } from '../src/ui/linkLock';
+import { isLocked, lockLinks, unlockLinks } from '../src/ui/linkLock';
 
 const DEBOUNCE_MS = 400;
 const MAX_THREAD_MESSAGES = 20;
+const CLICK_INTEL_TIMEOUT_MS = 700;
 const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
 
 interface ScannableMsg {
@@ -47,13 +49,117 @@ const msgKey = (e: ScannableMsg) =>
 
 function createScheduler(runScan: () => Promise<void>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  return () => {
+  let pending = false;
+  let inflight: Promise<void> | null = null;
+  const exec = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (inflight) return inflight;
+    pending = false;
+    inflight = runScan().finally(() => {
+      inflight = null;
+    });
+    return inflight;
+  };
+  const schedule = () => {
+    pending = true;
     clearTimeout(timer);
     timer = setTimeout(() => {
-      const run = () => void runScan();
+      const run = () => void exec();
       'requestIdleCallback' in window ? requestIdleCallback(run) : run();
     }, DEBOUNCE_MS);
   };
+  return { schedule, flush: exec, isPending: () => pending || inflight !== null };
+}
+
+function installClickGuard(opts: {
+  findTarget: (el: Element) => { container: HTMLElement; senderAddress: string; senderRegistrable: string } | null;
+  isPending: () => boolean;
+  flushScan: () => Promise<void>;
+}) {
+  const onLinkClick = (e: Event) => {
+    const me = e as MouseEvent;
+    if (e.type === 'auxclick' && me.button !== 1) return;
+    if (e.type === 'click' && me.button !== 0) return;
+
+    const node = e.target as Node | null;
+    const el = node && node.nodeType === 1 ? (node as Element) : (node?.parentElement ?? null);
+    if (!el) return;
+    const a = el.closest('a[href], area[href]');
+    if (!a) return;
+
+    const hit = opts.findTarget(a);
+    if (!hit || isLocked(hit.container)) return;
+
+    const rawHref =
+      typeof (a as HTMLAnchorElement).href === 'string'
+        ? (a as HTMLAnchorElement).href
+        : (a.getAttribute('href') ?? '');
+    if (!isSafeHttpUrl(rawHref)) return;
+
+    const pending = opts.isPending();
+    const initialRisk = analyzeLinkDestination(rawHref, hit.senderRegistrable, location.origin);
+    if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const activeTab = !(me.metaKey || me.ctrlKey || (e.type === 'auxclick' && me.button === 1));
+
+    void (async () => {
+      if (opts.isPending()) {
+        await opts.flushScan();
+        const refreshed = opts.findTarget(a);
+        if (isLocked(hit.container) || (refreshed && isLocked(refreshed.container))) return;
+      }
+
+      const latest = opts.findTarget(a) ?? hit;
+      const risk = analyzeLinkDestination(rawHref, latest.senderRegistrable, location.origin);
+      if (risk.level !== 'safe') {
+        void browser.runtime
+          .sendMessage({
+            type: 'openWarning',
+            href: risk.href,
+            host: risk.host,
+            registrable: risk.registrable,
+            level: risk.level,
+            reasons: risk.reasons,
+            senderAddress: latest.senderAddress,
+          })
+          .catch(() => {});
+        return;
+      }
+
+      if (risk.needsDomainCheck) {
+        const intel = await Promise.race([
+          (browser.runtime.sendMessage({ type: 'domainIntel', domain: risk.registrable }) as Promise<
+            DomainIntel | undefined
+          >).catch(() => undefined),
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), CLICK_INTEL_TIMEOUT_MS)),
+        ]);
+        const finalRisk = mergeLinkIntel(risk, intel);
+        if (finalRisk.level !== 'safe') {
+          void browser.runtime
+            .sendMessage({
+              type: 'openWarning',
+              href: finalRisk.href,
+              host: finalRisk.host,
+              registrable: finalRisk.registrable,
+              level: finalRisk.level,
+              reasons: finalRisk.reasons,
+              senderAddress: latest.senderAddress,
+              intel,
+            })
+            .catch(() => {});
+          return;
+        }
+      }
+
+      void browser.runtime.sendMessage({ type: 'openSafeLink', href: rawHref, active: activeTab }).catch(() => {});
+    })();
+  };
+
+  document.addEventListener('click', onLinkClick, true);
+  document.addEventListener('auxclick', onLinkClick, true);
 }
 
 async function evaluateAndRender<T extends ScannableMsg>(opts: {
@@ -63,11 +169,12 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   trustedThisSession: Set<string>;
   dismissed: Set<string>;
   isStale: () => boolean;
+  onEvaluated?: (items: { email: T; sender: ReturnType<typeof analyzeSender> }[]) => void;
   applyLocks: (items: { email: T; trusted: boolean }[], anyLinksLocked: boolean) => void;
   unlockAll: (emails: T[]) => void;
   unlockMatching: (emails: T[]) => void;
 }) {
-  const { kv, messages, trustKey, trustedThisSession, dismissed, isStale, applyLocks, unlockAll, unlockMatching } = opts;
+  const { kv, messages, trustKey, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
   const threadUnlocked = trustedThisSession.has(trustKey);
   const [trustedSendersList, trustedEmailsList] = await Promise.all([listTrusted(kv), listTrustedEmails(kv)]);
   const trustedSenders = new Set(trustedSendersList);
@@ -95,6 +202,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     }),
   );
   if (isStale()) return;
+  onEvaluated?.(items);
 
   const intelByDomain = new Map<string, IntelState>();
   for (const item of items) {
@@ -208,7 +316,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   render();
 
   if (intelByDomain.size > 0) {
-    await Promise.all(
+    void Promise.all(
       [...intelByDomain.keys()].map(async (domain) => {
         try {
           const res = (await browser.runtime.sendMessage({ type: 'domainIntel', domain })) as DomainIntel | undefined;
@@ -217,14 +325,16 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           intelByDomain.set(domain, 'unavailable');
         }
       }),
-    );
-    if (!isStale()) render();
+    ).then(() => {
+      if (!isStale()) render();
+    });
   }
 }
 
 function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAdapter | undefined) {
   const trustedThisSession = new Set<string>();
   const dismissed = new Set<string>();
+  const containerSender = new WeakMap<HTMLElement, { address: string; registrable: string }>();
   let lastKey = '';
   let activeContainers: HTMLElement[] = [];
   let token = 0;
@@ -268,6 +378,11 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       trustedThisSession,
       dismissed,
       isStale: () => my !== token,
+      onEvaluated: (items) => {
+        for (const { email, sender } of items) {
+          containerSender.set(email.container, { address: sender.address, registrable: sender.registrable });
+        }
+      },
       applyLocks: (items, anyLocked) => {
         for (const { email, trusted } of items) {
           if (anyLocked && !trusted) lockLinks(email.container);
@@ -283,9 +398,31 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     });
   };
 
-  const schedule = createScheduler(scan);
-  new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
-  schedule();
+  const scheduler = createScheduler(scan);
+
+  installClickGuard({
+    findTarget: (a) => {
+      for (const c of activeContainers) {
+        if (c.contains(a)) {
+          const meta = containerSender.get(c);
+          return { container: c, senderAddress: meta?.address ?? '', senderRegistrable: meta?.registrable ?? '' };
+        }
+      }
+      if (scheduler.isPending()) {
+        const fresh = extractAll(adapter, document).find((m) => m.container.contains(a));
+        if (fresh) {
+          const s = analyzeSender(fresh.senderName, fresh.senderAddress, []);
+          return { container: fresh.container, senderAddress: s.address, senderRegistrable: s.registrable };
+        }
+      }
+      return null;
+    },
+    isPending: () => scheduler.isPending(),
+    flushScan: () => scheduler.flush(),
+  });
+
+  new MutationObserver(scheduler.schedule).observe(document.body, { childList: true, subtree: true });
+  scheduler.schedule();
 }
 
 function runICloudSandbox() {
@@ -312,7 +449,16 @@ function runICloudSandbox() {
     if (desiredLocked) lockLinks(container);
   };
 
-  const schedule = createScheduler(async () => report(false));
+  const scheduler = createScheduler(async () => report(false));
+
+  installClickGuard({
+    findTarget: (a) =>
+      document.body && document.body.contains(a)
+        ? { container: document.body, senderAddress: '', senderRegistrable: '' }
+        : null,
+    isPending: () => scheduler.isPending(),
+    flushScan: () => scheduler.flush(),
+  });
 
   browser.runtime.onMessage.addListener((msg: unknown) => {
     const m = msg as { type?: string; locked?: unknown } | undefined;
@@ -328,17 +474,17 @@ function runICloudSandbox() {
   });
 
   const target = document.body ?? document.documentElement;
-  if (target) new MutationObserver(schedule).observe(target, { childList: true, subtree: true });
+  if (target) new MutationObserver(scheduler.schedule).observe(target, { childList: true, subtree: true });
   if (typeof ResizeObserver !== 'undefined' && document.documentElement) {
-    new ResizeObserver(schedule).observe(document.documentElement);
+    new ResizeObserver(scheduler.schedule).observe(document.documentElement);
   }
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) schedule();
+    if (!document.hidden) scheduler.schedule();
   });
   window.addEventListener('pagehide', () => {
     void browser.runtime.sendMessage({ type: 'icloudBody', active: false, body: '', links: [] }).catch(() => {});
   });
-  schedule();
+  scheduler.schedule();
 }
 
 function runICloudApp(kv: typeof browser.storage.local) {
@@ -408,7 +554,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
     });
   };
 
-  const schedule = createScheduler(scan);
+  const scheduler = createScheduler(scan);
 
   browser.runtime.onMessage.addListener((msg: unknown) => {
     const m = msg as { type?: string; frameId?: unknown; active?: unknown; body?: unknown; links?: unknown } | undefined;
@@ -418,18 +564,18 @@ function runICloudApp(kv: typeof browser.storage.local) {
         body: typeof m.body === 'string' ? m.body : '',
         links: Array.isArray(m.links) ? (m.links as Link[]) : [],
       });
-      schedule();
+      scheduler.schedule();
     } else if (sandboxBodies.delete(m.frameId)) {
-      schedule();
+      scheduler.schedule();
     }
   });
 
-  if (document.body) new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+  if (document.body) new MutationObserver(scheduler.schedule).observe(document.body, { childList: true, subtree: true });
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) schedule();
+    if (!document.hidden) scheduler.schedule();
   });
   void browser.runtime.sendMessage({ type: 'icloudPing' }).catch(() => {});
-  schedule();
+  scheduler.schedule();
 }
 
 export default defineContentScript({

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Link Paused — Phishing Email Detector</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 32px 16px 48px;
+        font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: #111111;
+        background-color: #fdf9f0;
+        background-image:
+          linear-gradient(to right, #ece5d5 1px, transparent 1px),
+          linear-gradient(to bottom, #ece5d5 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+      .brand-title { font-weight: 900; font-size: 16px; letter-spacing: -.02em; }
+      .brand-sub { font-size: 12.5px; color: #444444; font-weight: 500; }
+      .card {
+        position: relative;
+        background: #ffffff;
+        border: 2px solid #111111;
+        border-radius: 18px;
+        box-shadow: 6px 6px 0 #111111;
+        padding: 26px 26px 24px;
+      }
+      .sticker {
+        position: absolute;
+        top: -14px;
+        right: 26px;
+        rotate: 3deg;
+        background: #ffa8c6;
+        color: #111111;
+        border: 2px solid #111111;
+        border-radius: 999px;
+        box-shadow: 3px 3px 0 #111111;
+        padding: 4px 14px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+      }
+      .sticker.safe { background: #26d08c; }
+      .hero {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+      }
+      .icon-box {
+        flex-shrink: 0;
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        border: 2px solid #111111;
+        box-shadow: 3px 3px 0 #111111;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #ff563f;
+        color: #111111;
+      }
+      .icon-box.safe { background: #26d08c; }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 26px;
+        font-weight: 900;
+        letter-spacing: -.03em;
+        line-height: 1.1;
+      }
+      .lead { margin: 0; color: #333333; font-size: 15px; }
+      .dest-box {
+        margin: 18px 0 14px;
+        padding: 12px 14px;
+        background: #fdf9f0;
+        border: 2px solid #111111;
+        border-radius: 12px;
+      }
+      .dest-label {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        color: #444444;
+      }
+      .dest-host { font-size: 17px; font-weight: 900; margin: 2px 0 4px; word-break: break-word; }
+      .dest-url {
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12.5px;
+        color: #222222;
+        max-height: 84px;
+        overflow: auto;
+        overflow-wrap: anywhere;
+      }
+      .dest-meta { margin-top: 6px; font-size: 13px; color: #333333; }
+      .reasons { margin: 0 0 18px; padding-left: 20px; font-weight: 600; }
+      .reasons li + li { margin-top: 4px; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+      button.btn {
+        font: inherit;
+        font-size: 14px;
+        font-weight: 800;
+        padding: 10px 18px;
+        border-radius: 11px;
+        border: 2px solid #111111;
+        box-shadow: 3px 3px 0 #111111;
+        background: #ffffff;
+        color: #111111;
+        cursor: pointer;
+        transition: translate .1s, box-shadow .1s;
+      }
+      button.btn-primary { background: #26d08c; }
+      button.btn-danger { background: #ff563f; }
+      button.btn:hover:not(:disabled) { translate: -1px -1px; box-shadow: 4px 4px 0 #111111; }
+      button.btn:active:not(:disabled) { translate: 2px 2px; box-shadow: 1px 1px 0 #111111; }
+      button:focus-visible, summary:focus-visible { outline: 2px solid #111111; outline-offset: 2px; }
+
+      h2 {
+        margin: 22px 0 10px;
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+        color: #111111;
+      }
+      .accordion { display: grid; gap: 12px; }
+      details {
+        background: #ffffff;
+        border: 2px solid #111111;
+        border-radius: 14px;
+        box-shadow: 4px 4px 0 #111111;
+        padding: 12px 16px;
+      }
+      summary {
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-weight: 800;
+        font-size: 14px;
+        user-select: none;
+        border-radius: 4px;
+      }
+      summary::-webkit-details-marker { display: none; }
+      summary::before {
+        content: "";
+        inline-size: 1em;
+        block-size: 1em;
+        flex-shrink: 0;
+        background-color: currentColor;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M4 6l4 4 4-4'/%3E%3C/svg%3E") no-repeat center / contain;
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M4 6l4 4 4-4'/%3E%3C/svg%3E") no-repeat center / contain;
+        rotate: -90deg;
+      }
+      details[open] > summary::before { rotate: 0deg; }
+      @media (prefers-reduced-motion: no-preference) {
+        summary::before { transition: rotate .2s; }
+        details::details-content {
+          transition: block-size, content-visibility, display;
+          transition-duration: .22s;
+          transition-timing-function: ease-in-out;
+          transition-behavior: allow-discrete;
+        }
+      }
+      details::details-content { interpolate-size: allow-keywords; overflow: clip; contain: layout; }
+      details:not([open])::details-content { block-size: 0; }
+      .panel-body { margin-top: 10px; font-size: 14px; color: #222222; }
+      .steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+      .muted { color: #444444; font-size: 13px; }
+      [hidden] { display: none !important; }
+
+      @media (forced-colors: active) {
+        body { background-image: none; }
+        .card, .icon-box, .sticker, .dest-box, details, button.btn {
+          box-shadow: none;
+          border: 2px solid CanvasText;
+          background: Canvas;
+          color: CanvasText;
+        }
+        button:focus-visible, summary:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <div id="logo" aria-hidden="true"></div>
+        <div>
+          <div class="brand-title">Phishing Email Detector</div>
+          <div class="brand-sub">Click-time link safety &amp; recovery</div>
+        </div>
+      </div>
+
+      <section id="alert-card" class="card" aria-labelledby="title">
+        <div id="sticker" class="sticker" aria-hidden="true">LINK PAUSED</div>
+        <div class="hero">
+          <div id="icon-box" class="icon-box" aria-hidden="true"></div>
+          <div>
+            <h1 id="title">This link was paused for your safety</h1>
+            <p id="lead" class="lead"></p>
+          </div>
+        </div>
+
+        <div id="dest-box" class="dest-box" hidden>
+          <div class="dest-label">Where this link really goes</div>
+          <div id="dest-host" class="dest-host"></div>
+          <p id="dest-url" class="dest-url"></p>
+          <div id="dest-meta" class="dest-meta"></div>
+        </div>
+
+        <ul id="reasons" class="reasons" hidden></ul>
+
+        <div class="actions">
+          <button id="back-btn" type="button" class="btn btn-primary">Back to safety (Close tab)</button>
+        </div>
+      </section>
+
+      <h2 id="help-heading">What to do next</h2>
+      <section class="accordion" aria-labelledby="help-heading">
+        <details id="recovery-details">
+          <summary>Already clicked a suspicious link? What to do next</summary>
+          <div class="panel-body">
+            <ol class="steps">
+              <li><strong>Close the page now.</strong> Simply clicking a link in a modern browser rarely compromises an account on its own.</li>
+              <li><strong>Only if you typed a password, 2FA code, or payment card:</strong> open the real website yourself (from a bookmark or by typing the address), change that password immediately, turn on 2FA or passkeys, and sign out of active sessions.</li>
+              <li><strong>Only if a file downloaded (especially <code>.html</code>, <code>.svg</code>, <code>.zip</code>, <code>.dmg</code>, or <code>.exe</code>):</strong> do not open it — delete it from your Downloads folder and empty your Trash.</li>
+            </ol>
+          </div>
+        </details>
+
+        <details id="advanced-details" hidden>
+          <summary>Advanced: open anyway (not recommended)</summary>
+          <div class="panel-body">
+            <p class="muted">Only continue if you personally expected this exact web address and verified the destination domain above.</p>
+            <button id="proceed-btn" type="button" class="btn btn-danger"></button>
+          </div>
+        </details>
+      </section>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

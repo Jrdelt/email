@@ -20,4 +20,6 @@ common and is shown as such, never as "clean".
 
 **Allowlist abuse:** an attacker who spoofs a trusted sender's address without passing authentication cannot bypass scanning when webmail flags unverified senders or a conflicting non-ESP `via` relay (`canTrustByAllowlist` refuses auto-trust and adds a warning). Remaining limitation: webmail views that strip header authentication cues altogether (e.g., collapsed headers).
 
+**Click-time destination inspector & race-to-click gate:** clicking any link inside a scanned email before the 400 ms scan completes triggers an immediate scan flush (`isPending` gate). Clicking an external `http(s)` link in any email also inspects the unwrapped destination locally (`@` disguise, IP, punycode, raw cloud HTML, risky file extension, URL shortener, plain `http://`) and queries the destination's registrable domain (`domainIntel`, 700 ms timeout), routing risky links to the local `warning.html` interstitial via an ephemeral random `browser.storage.session` token (no URLs in query strings/history; strictly `isSafeHttpUrl`-validated before navigation). Remaining limitation: multi-hop redirects on an initially clean domain after leaving webmail without opt-in navigation permissions.
+
 TODO: evasion test results, model integrity (hash-pinned model file), permission justification.

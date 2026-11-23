@@ -1,6 +1,9 @@
 import { icloudFrameRole } from '../src/adapters/icloud';
 import { isValidDomain } from '../src/domain';
 import { getIntel, type DomainIntel } from '../src/domainIntel';
+import { isSafeHttpUrl } from '../src/linkGuard';
+
+const WARN_TTL_MS = 3600_000;
 
 function frameRoleOf(url?: string) {
   if (!url) return null;
@@ -9,6 +12,18 @@ function frameRoleOf(url?: string) {
   } catch {
     return null;
   }
+}
+
+async function pruneOldWarnings(now: number): Promise<void> {
+  const store = browser.storage.session;
+  if (!store?.get || !store?.remove) return;
+  try {
+    const all = (await (store.get as (k?: null) => Promise<Record<string, unknown>>)(null)) ?? {};
+    const stale = Object.entries(all)
+      .filter(([k, v]) => k.startsWith('warn:') && typeof (v as { createdAt?: unknown })?.createdAt === 'number' && now - ((v as { createdAt: number }).createdAt) > WARN_TTL_MS)
+      .map(([k]) => k);
+    if (stale.length) await store.remove(stale);
+  } catch { /* best effort */ }
 }
 
 export default defineBackground(() => {
@@ -29,6 +44,13 @@ export default defineBackground(() => {
             links?: unknown;
             locked?: unknown;
             frameIds?: unknown;
+            href?: unknown;
+            host?: unknown;
+            registrable?: unknown;
+            level?: unknown;
+            reasons?: unknown;
+            senderAddress?: unknown;
+            intel?: unknown;
           }
         | undefined;
       if (m?.type === 'verdict' && sender.tab?.id !== undefined) {
@@ -43,6 +65,34 @@ export default defineBackground(() => {
           inflight.set(domain, p);
         }
         return p;
+      }
+      if (m?.type === 'openWarning' && sender.tab?.id !== undefined && typeof m.href === 'string' && isSafeHttpUrl(m.href)) {
+        const id = crypto.randomUUID();
+        const now = Date.now();
+        const reasons = Array.isArray(m.reasons)
+          ? m.reasons.filter((r): r is string => typeof r === 'string').slice(0, 10)
+          : [];
+        const entry = {
+          href: m.href,
+          host: typeof m.host === 'string' ? m.host : '',
+          registrable: typeof m.registrable === 'string' ? m.registrable : '',
+          level: m.level === 'warning' ? 'warning' : 'danger',
+          reasons,
+          senderAddress: typeof m.senderAddress === 'string' ? m.senderAddress : '',
+          intel: m.intel && typeof m.intel === 'object' ? m.intel : undefined,
+          createdAt: now,
+        };
+        return (async () => {
+          await pruneOldWarnings(now);
+          await browser.storage.session?.set?.({ [`warn:${id}`]: entry });
+          await browser.tabs.create({
+            url: browser.runtime.getURL(`/warning.html?id=${encodeURIComponent(id)}`),
+            active: true,
+          });
+        })();
+      }
+      if (m?.type === 'openSafeLink' && sender.tab?.id !== undefined && typeof m.href === 'string' && isSafeHttpUrl(m.href)) {
+        return browser.tabs.create({ url: m.href, active: m.active !== false });
       }
       if (
         m?.type === 'icloudBody' &&

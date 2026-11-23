@@ -123,4 +123,7 @@ async function renderReports() {
 
 $('clear-emails').addEventListener('click', async () => { await clearTrustedEmails(kv); await renderTrustedEmails(); });
 $('clear').addEventListener('click', async () => { await clearReports(kv); await renderReports(); });
+$('help-clicked').addEventListener('click', () => {
+  void browser.tabs.create({ url: browser.runtime.getURL('/warning.html?mode=help'), active: true });
+});
 void Promise.all([renderVerdict(), renderTrusted(), renderTrustedEmails(), renderReports()]);

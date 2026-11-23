@@ -137,6 +137,7 @@
       details::details-content { interpolate-size: allow-keywords; overflow: clip; contain: layout; }
       details:not([open])::details-content { block-size: 0; }
       #it-details { margin-top: 10px; background: #fdf9f0; box-shadow: none; }
+      .help-btn { width: 100%; margin-top: 10px; background: #fdf9f0; }
 
       @media (forced-colors: active) {
         body { background-image: none; }
@@ -169,6 +170,7 @@
       <div><span id="reports">0</span> saved <button id="clear" type="button">Clear</button></div>
       <p class="muted">Only the sender's website domain is checked online (RDAP, Cloudflare DNS, URIBL). Email content never leaves your browser.</p>
     </details>
+    <button id="help-clicked" type="button" class="help-btn">Clicked a suspicious link?</button>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
