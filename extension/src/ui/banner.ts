@@ -48,7 +48,7 @@ export function decideBanner(
     level: danger ? 'danger' : 'warning',
     title,
     reasons,
-    linksLocked: danger && !unlockedThisSession,
+    linksLocked: !unlockedThisSession,
     verdict,
     sender,
     intel,

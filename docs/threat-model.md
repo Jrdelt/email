@@ -16,9 +16,7 @@ common and is shown as such, never as "clean".
 
 **Host permissions:** limited strictly to webmail origins in `extension/src/hosts.ts` (Gmail, Outlook Web including `outlook.cloud.microsoft`, Yahoo, Proton, iCloud). No `<all_urls>` permission is requested.
 
-**Link locking limits:** flagged emails have their links disabled through one capturing click/auxclick/dragstart
-listener. It cannot block the browser's native right-click "Open link in new tab" or copying the link address.
-The banner says links are disabled; it does not claim they are impossible to open.
+**Link locking limits:** flagged emails have links (`a`, `area`), embedded image links (`<a><img></a>`), and `<form>` submissions paused by stashing `href`/`action` attributes (`data-ped-href`, `data-ped-action`) and intercepting `click`, `auxclick`, `dragstart`, and `submit` in capture phase. This blocks left/middle clicks, keyboard activation, drag-and-drop, form submissions, and right-click "Open link in new tab" until the user unlocks the email or trusts the sender. Remaining limitation: manually copying and pasting plain-text URLs from the message body.
 
 **Allowlist abuse:** an attacker who spoofs a trusted sender's address bypasses scanning. Mitigation (future):
 only honor the allowlist when the display address is unambiguous and, where available, authentication passes.

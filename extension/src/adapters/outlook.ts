@@ -19,7 +19,8 @@ const isHidden = (el: HTMLElement): boolean =>
   el.hidden || el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [aria-hidden="true"]') !== null;
 
 const hasContent = (el: HTMLElement): boolean =>
-  (el.textContent ?? '').trim().length > 0 || el.querySelector('a[href]') !== null;
+  (el.textContent ?? '').trim().length > 0 ||
+  el.querySelector('a[href], a[data-ped-href], area[href], area[data-ped-href]') !== null;
 
 /** Unwrap Microsoft Defender Safe Links (?url=...) when pointing to http(s). */
 export function unwrapSafeLink(href: string): string {

@@ -13,8 +13,7 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
   The ONLY network traffic is domain lookups in `src/domainIntel.ts`, run from the background script: the sender's
   registrable domain (validated by `isValidDomain`) sent to IANA/registry RDAP (rdap.org fallback), cloudflare-dns.com
   and dns.google (URIBL fallback). Cached 24 h. Do not add endpoints or send anything else without updating `docs/privacy.md`.
-- **Warn, never block on sender issues:** sender/domain problems produce banner warnings only. Only the content scorer's
-  phishing verdict locks links.
+- **Lock links on any warning:** any warning (content phishing flag, sender warning, or domain/spam warning) pauses all links, embedded image links, image maps, and forms until the user unlocks the email or trusts the sender; never block reading the email itself.
 - **Parity contract:** `ml/src/phishml/features.py` and `extension/src/features.ts` must produce identical features.
   Any feature change updates both plus `ml/tests/fixtures/parity.json`, which both test suites read.
 - **Permissions:** only `storage` and the webmail hosts in `extension/src/hosts.ts` (single source for host permissions and content-script matches). Justify any addition in `docs/threat-model.md`.

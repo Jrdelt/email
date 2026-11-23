@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import { gmail } from '../adapters/gmail';
+import { linksIn } from '../adapters/extract';
 import { analyzeSender } from '../sender';
 import { decideBanner, removeBanner, showBanner } from './banner';
 import { formatAge, formatITReport, renderITDetails, renderSimpleDetails } from './details';
@@ -10,20 +11,70 @@ import { isLocked, lockLinks, unlockLinks } from './linkLock';
 const actions = () => ({ onUnlock: vi.fn(), onTrustSender: vi.fn(async () => true), onReport: vi.fn(async () => {}), onDismiss: vi.fn() });
 
 describe('linkLock', () => {
-  it('blocks clicks on links only while locked', () => {
-    document.body.innerHTML = '<div id="m"><a id="l" href="https://evil.example">x</a></div><a id="o" href="https://ok.example">o</a>';
+  it('stashes and restores href, blocks links only while locked, and leaves outside links alone', () => {
+    document.body.innerHTML = '<div id="m"><a id="l" href="https://evil.example/a?x=1">x</a></div><a id="o" href="https://ok.example">o</a>';
     const m = document.getElementById('m')!;
-    const click = (id: string) => {
+    const l = document.getElementById('l')!;
+    const click = (target: Node) => {
       const e = new MouseEvent('click', { bubbles: true, cancelable: true });
-      document.getElementById(id)!.dispatchEvent(e);
+      target.dispatchEvent(e);
       return e.defaultPrevented;
     };
     lockLinks(m);
     expect(isLocked(m)).toBe(true);
-    expect(click('l')).toBe(true);
-    expect(click('o')).toBe(false);
+    expect(l.hasAttribute('href')).toBe(false);
+    expect(l.getAttribute('data-ped-href')).toBe('https://evil.example/a?x=1');
+    expect(l.getAttribute('aria-disabled')).toBe('true');
+    expect(click(l)).toBe(true);
+    expect(click(l.firstChild!)).toBe(true); // Text node inside locked link
+    expect(click(document.getElementById('o')!)).toBe(false);
+    expect(linksIn(m)).toEqual([{ text: 'x', href: 'https://evil.example/a?x=1' }]);
+
     unlockLinks(m);
-    expect(click('l')).toBe(false);
+    expect(isLocked(m)).toBe(false);
+    expect(l.getAttribute('href')).toBe('https://evil.example/a?x=1');
+    expect(l.hasAttribute('data-ped-href')).toBe(false);
+    expect(l.hasAttribute('aria-disabled')).toBe(false);
+    expect(click(l)).toBe(false);
+  });
+
+  it('blocks embedded image links, image maps, and form submissions while locked', () => {
+    document.body.innerHTML = `
+      <div id="m">
+        <a id="img-link" href="https://evil.example/img"><img id="img" src="x.png" alt="banner"></a>
+        <map name="m"><area id="area" shape="rect" coords="0,0,10,10" href="https://evil.example/area"></map>
+        <form id="f" action="https://evil.example/steal"><button id="sub" type="submit">Go</button></form>
+      </div>`;
+    const m = document.getElementById('m')!;
+    const f = document.getElementById('f')!;
+    const area = document.getElementById('area')!;
+
+    lockLinks(m);
+    expect(area.hasAttribute('href')).toBe(false);
+    expect(f.hasAttribute('action')).toBe(false);
+
+    const imgClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    document.getElementById('img')!.dispatchEvent(imgClick);
+    expect(imgClick.defaultPrevented).toBe(true);
+
+    const areaClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    area.dispatchEvent(areaClick);
+    expect(areaClick.defaultPrevented).toBe(true);
+
+    const subClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    document.getElementById('sub')!.dispatchEvent(subClick);
+    expect(subClick.defaultPrevented).toBe(true);
+
+    const submit = new Event('submit', { bubbles: true, cancelable: true });
+    f.dispatchEvent(submit);
+    expect(submit.defaultPrevented).toBe(true);
+
+    unlockLinks(m);
+    expect(area.getAttribute('href')).toBe('https://evil.example/area');
+    expect(f.getAttribute('action')).toBe('https://evil.example/steal');
+    const afterUnlock = new Event('submit', { bubbles: true, cancelable: true });
+    f.dispatchEvent(afterUnlock);
+    expect(afterUnlock.defaultPrevented).toBe(false);
   });
 });
 
@@ -54,14 +105,31 @@ describe('decideBanner', () => {
     expect(banner).toBeNull();
   });
 
-  it('shows warning banner with sender warning first when safe verdict has sender warning', () => {
+  it('shows warning banner and locks links when safe verdict has sender warning', () => {
     const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
-    const banner = decideBanner({ score: 0.2, level: 'safe', reasons: ['Uses urgent wording about passwords or your account'] }, sender, undefined, false)!;
+    const locked = decideBanner({ score: 0.2, level: 'safe', reasons: ['Uses urgent wording about passwords or your account'] }, sender, undefined, false)!;
+    expect(locked.level).toBe('warning');
+    expect(locked.title).toBe('Double-check this sender');
+    expect(locked.linksLocked).toBe(true);
+    expect(locked.reasons[0]).toMatch(/Claims to be PayPal/);
+    expect(locked.reasons[1]).toBe('Uses urgent wording about passwords or your account');
+
+    const unlocked = decideBanner({ score: 0.2, level: 'safe', reasons: ['Uses urgent wording about passwords or your account'] }, sender, undefined, true)!;
+    expect(unlocked.linksLocked).toBe(false);
+  });
+
+  it('shows warning banner and locks links on async spam-listed domain intel', () => {
+    const sender = analyzeSender('Someone', 'a@evil.example', []);
+    const spamIntel = {
+      domain: 'evil.example', checkedAt: '2026-11-22T00:00:00Z',
+      rdap: { status: 'ok' as const, registered: '2015-01-01T00:00:00Z' },
+      dns: { status: 'ok' as const, mx: ['mx.evil.example'] },
+      reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: ['black'] },
+    };
+    const banner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, spamIntel, false)!;
     expect(banner.level).toBe('warning');
-    expect(banner.title).toBe('Double-check this sender');
-    expect(banner.linksLocked).toBe(false);
-    expect(banner.reasons[0]).toMatch(/Claims to be PayPal/);
-    expect(banner.reasons[1]).toBe('Uses urgent wording about passwords or your account');
+    expect(banner.linksLocked).toBe(true);
+    expect(banner.reasons[0]).toMatch(/reported for spam online/);
   });
 
   it('shows danger banner and unlocks only when unlockedThisSession is true', () => {

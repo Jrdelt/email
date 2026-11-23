@@ -51,17 +51,27 @@ export default defineContentScript({
       removeBanner();
 
       const sender = analyzeSender(email.senderName, email.senderAddress, email.links);
-      if (trustedThisSession.has(key) || (sender.valid && (await isTrusted(kv, sender.address)))) return;
+      const trusted = trustedThisSession.has(key) || (sender.valid && (await isTrusted(kv, sender.address)));
       if (my !== token) return;
+      if (trusted) {
+        unlockLinks(email.container);
+        browser.runtime
+          .sendMessage({
+            type: 'verdict',
+            payload: { verdict: { score: 0, level: 'safe', reasons: [] }, sender, intel: undefined },
+          })
+          .catch(() => {});
+        return;
+      }
 
       const verdict = scoreEmail(sender.address, email.body, email.links);
-      const danger = verdict.level !== 'safe';
-      if (danger) lockLinks(email.container);
       let intel: IntelState = sender.registrable ? 'loading' : undefined;
 
       const render = () => {
-        browser.runtime.sendMessage({ type: 'verdict', payload: { verdict, sender, intel } }).catch(() => {});
         const banner = decideBanner(verdict, sender, intel, trustedThisSession.has(key));
+        if (banner?.linksLocked) lockLinks(email.container);
+        else unlockLinks(email.container);
+        browser.runtime.sendMessage({ type: 'verdict', payload: { verdict, sender, intel } }).catch(() => {});
         if (!banner || dismissed.has(key)) { removeBanner(); return; }
         showBanner(banner, {
           onUnlock: () => { trustedThisSession.add(key); unlockLinks(email.container); },
