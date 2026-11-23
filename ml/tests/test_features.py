@@ -1,4 +1,4 @@
-from phishml.features import Link, extract_features, shown_host
+from phishml.features import Link, extract_features, is_cloud_html_link, shown_host
 
 
 def test_mismatched_link_text_is_flagged():
@@ -29,3 +29,25 @@ def test_extracts_embedded_urls_and_handles_multipart_suffixes():
     assert mismatch["n_text_href_mismatch"] == 1
     same_org = extract_features("a@barclays.co.uk", "hi", [Link("www.barclays.co.uk/login", "https://online.barclays.co.uk/x")])
     assert same_org["n_text_href_mismatch"] == 0
+
+
+def test_cloud_storage_html_links_and_billing_urgency():
+    assert is_cloud_html_link("https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl")
+    assert is_cloud_html_link("https://bucket.s3.amazonaws.com/login.htm")
+    assert is_cloud_html_link("https://acct.blob.core.windows.net/c/verify.html")
+    assert is_cloud_html_link("https://firebasestorage.googleapis.com/v0/b/x/o/a%2Flogin.html?alt=media")
+    assert is_cloud_html_link("https://pub-1.r2.dev/a.html")
+    assert not is_cloud_html_link("https://storage.googleapis.com/assets/logo.png")
+    assert not is_cloud_html_link("https://bucket.s3.amazonaws.com/invoice.pdf")
+    assert not is_cloud_html_link("https://account.mongodb.com/login.html")
+
+    f = extract_features(
+        "alert-442-320397@nozfr.itl",
+        "Your photos will be deleted. Update billing details before expiration.",
+        [
+            Link("Review billing", "https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl"),
+            Link("Logo", "https://storage.googleapis.com/assets/logo.png"),
+        ],
+    )
+    assert f["n_cloud_html_links"] == 1
+    assert f["urgency_hits"] >= 3

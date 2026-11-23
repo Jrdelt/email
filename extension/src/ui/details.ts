@@ -40,6 +40,8 @@ export function renderSimpleDetails(doc: Document, s: SenderInfo, intel: IntelSt
       if (intel.rdap.status === 'ok') {
         const age = formatAge(ageDays(intel.rdap.registered));
         if (age) website += ` — ${age}`;
+      } else if (intel.dns.status === 'ok' && intel.dns.nxdomain) {
+        website += ' — does not exist';
       } else if (intel.rdap.status === 'notfound') {
         website += ' — not registered';
       }
@@ -94,9 +96,13 @@ function itRows(s: SenderInfo, intel: IntelState, verdict?: Verdict): [string, s
     }
     const d = intel.dns;
     if (d.status === 'ok') {
-      rows.push(['Mail servers (MX)', d.mx.length ? d.mx.slice(0, 3).join(', ') + (d.mx.length > 3 ? ` +${d.mx.length - 3}` : '') : 'none']);
-      rows.push(['SPF', d.spf ? 'published' : 'missing']);
-      rows.push(['DMARC', d.dmarcPolicy ? `policy ${d.dmarcPolicy}` : 'missing']);
+      if (d.nxdomain) {
+        rows.push(['DNS', 'domain does not exist (NXDOMAIN)']);
+      } else {
+        rows.push(['Mail servers (MX)', d.mx.length ? d.mx.slice(0, 3).join(', ') + (d.mx.length > 3 ? ` +${d.mx.length - 3}` : '') : 'none']);
+        rows.push(['SPF', d.spf ? 'published' : 'missing']);
+        rows.push(['DMARC', d.dmarcPolicy ? `policy ${d.dmarcPolicy}` : 'missing']);
+      }
     } else {
       rows.push(['DNS', 'lookup failed']);
     }

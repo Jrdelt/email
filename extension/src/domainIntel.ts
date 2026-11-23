@@ -13,7 +13,7 @@ export interface DomainIntel {
   domain: string;
   checkedAt: string;
   rdap: { status: Status | 'notfound' | 'unsupported'; registered?: string; expires?: string; registrar?: string; flags?: string[] };
-  dns: { status: Status; mx: string[]; spf?: string; dmarc?: string; dmarcPolicy?: string };
+  dns: { status: Status; mx: string[]; spf?: string; dmarc?: string; dmarcPolicy?: string; nxdomain?: boolean };
   reputation: { status: Status | 'refused'; source: 'URIBL'; listed: string[] };
 }
 
@@ -97,6 +97,7 @@ export async function lookupDns(fetchFn: FetchFn, domain: string): Promise<Domai
       spf,
       dmarc: dm,
       dmarcPolicy: dm?.match(/\bp=([a-z]+)/i)?.[1]?.toLowerCase(),
+      nxdomain: mx.status === 3 && root.status === 3,
     };
   } catch { return { status: 'error', mx: [] }; }
 }
@@ -149,10 +150,16 @@ export function intelWarnings(i: DomainIntel, now = Date.now()): string[] {
   const w: string[] = [];
   const age = ageDays(i.rdap.registered, now);
   if (age !== undefined && age < 30) w.push(`The sender's website (${i.domain}) is brand new (${age} day${age === 1 ? '' : 's'} old)`);
-  if (i.rdap.status === 'notfound' && !(i.dns.status === 'ok' && i.dns.mx.length > 0)) {
-    w.push(`The sender's website (${i.domain}) is not registered`);
+  if (i.dns.status === 'ok' && i.dns.nxdomain) {
+    w.push(`The sender's website (${i.domain}) does not exist`);
+  } else {
+    if (i.rdap.status === 'notfound' && !(i.dns.status === 'ok' && i.dns.mx.length > 0)) {
+      w.push(`The sender's website (${i.domain}) is not registered`);
+    }
+    if (i.dns.status === 'ok' && i.dns.mx.length === 0) {
+      w.push(`The sender's website (${i.domain}) is not set up to send normal email`);
+    }
   }
   if (i.reputation.listed.some((l) => l === 'black' || l === 'red')) w.push(`The sender's website (${i.domain}) has been reported for spam online`);
-  if (i.dns.status === 'ok' && i.dns.mx.length === 0) w.push(`The sender's website (${i.domain}) is not set up to send normal email`);
   return w;
 }

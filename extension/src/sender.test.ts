@@ -21,7 +21,14 @@ describe('analyzeSender', () => {
     expect(s.domain).toBe('example.com');
     expect(s.warnings[0]).toMatch(/invalid or forged/);
   });
-  it('brand name from the wrong domain', () => expect(w('PayPal Support', 'help@gmail.com')[0]).toMatch(/Claims to be PayPal, but was sent from gmail\.com/));
+  it('brand name from the wrong domain (including concatenated names)', () => {
+    expect(w('PayPal Support', 'help@gmail.com')[0]).toMatch(/Claims to be PayPal, but was sent from gmail\.com/);
+    expect(w('GmailSupportTeam', 'alert-442-320397@nozfr.itl')[0]).toMatch(/Claims to be Gmail, but was sent from nozfr\.itl/);
+    expect(w('gmailsupportteam', 'x@evil.example')[0]).toMatch(/Claims to be Gmail, but was sent from evil\.example/);
+    expect(w('PayPalSupport', 'x@evil.example')[0]).toMatch(/Claims to be PayPal, but was sent from evil\.example/);
+    expect(w('iCloudSecurity', 'x@evil.example')[0]).toMatch(/Claims to be iCloud, but was sent from evil\.example/);
+    expect(w('chasesmith', 'chase.smith@gmail.com')).toEqual([]);
+  });
   it('display name containing a different address', () => expect(w('service@paypal.com', 'x@evil.example')[0]).toMatch(/really sent from x@evil\.example/));
   it.each([['security@paypa1.com', 'paypal.com'], ['a@rnicrosoft.com', 'microsoft.com'], ['a@paypal-secure.com', null], ['a@paypal.co', 'paypal.com']])(
     'lookalike %s', (addr, like) => {

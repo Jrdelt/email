@@ -3,12 +3,35 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, asdict
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
-URGENCY = ("urgent", "immediately", "verify", "suspended", "locked", "password", "confirm", "act now", "expires")
+URGENCY = (
+    "urgent", "immediately", "verify", "suspended", "locked", "password", "confirm", "act now", "expires",
+    "expiration", "expired", "will be deleted", "billing details", "payment method", "unauthorized",
+    "unusual activity", "action required",
+)
 IP_HOST = re.compile(r"^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$")
 EXPLICIT_URL = re.compile(r"https?://[^\s<>\"'()]+", re.IGNORECASE)
 DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+CLOUD_STORAGE_HOSTS = frozenset({
+    "storage.googleapis.com",
+    "storage.cloud.google.com",
+    "firebasestorage.googleapis.com",
+    "ipfs.io",
+    "cloudflare-ipfs.com",
+    "gateway.pinata.cloud",
+    "s3.amazonaws.com",
+})
+CLOUD_STORAGE_SUFFIXES = (
+    ".s3.amazonaws.com",
+    ".blob.core.windows.net",
+    ".r2.dev",
+    ".backblazeb2.com",
+    ".digitaloceanspaces.com",
+)
+REGIONAL_S3_HOST = re.compile(r"^s3[.-][a-z0-9-]+\.amazonaws\.com$")
+HTML_EXT_RE = re.compile(r"\.(?:html?|shtml|xhtml)$", re.IGNORECASE)
 
 MULTI_SUFFIXES = frozenset({
     "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "edu.au", "gov.au",
@@ -56,6 +79,29 @@ def _registrable(host: str) -> str:
     return ".".join(parts[-n:])
 
 
+def _is_cloud_storage_host(host: str) -> bool:
+    return (
+        host in CLOUD_STORAGE_HOSTS
+        or bool(REGIONAL_S3_HOST.match(host))
+        or any(host.endswith(s) for s in CLOUD_STORAGE_SUFFIXES)
+    )
+
+
+def is_cloud_html_link(url: str) -> bool:
+    """True when a link points to an HTML page hosted directly on raw cloud object storage."""
+    try:
+        p = urlparse(url)
+    except ValueError:
+        return False
+    if p.scheme not in ("http", "https"):
+        return False
+    host = (p.hostname or "").lower()
+    if not _is_cloud_storage_host(host):
+        return False
+    path = unquote(p.path or "")
+    return bool(HTML_EXT_RE.search(path))
+
+
 def shown_host(text: str) -> str:
     """Extract a hostname only when link text looks like an explicit URL or bare domain/IP."""
     t = text.strip()
@@ -85,12 +131,15 @@ def extract_features(sender: str, body: str, links: list[Link]) -> dict[str, flo
     mismatch = 0
     ip_links = 0
     punycode = 0
+    cloud_html = 0
     for link in links:
         h = _host(link.href)
         if IP_HOST.match(h):
             ip_links += 1
         if "xn--" in h:
             punycode += 1
+        if is_cloud_html_link(link.href):
+            cloud_html += 1
         shown = shown_host(link.text)
         if shown and h and _registrable(shown) != _registrable(h):
             mismatch += 1
@@ -101,6 +150,7 @@ def extract_features(sender: str, body: str, links: list[Link]) -> dict[str, flo
         "n_text_href_mismatch": float(mismatch),
         "n_ip_links": float(ip_links),
         "n_punycode_links": float(punycode),
+        "n_cloud_html_links": float(cloud_html),
         "n_external_links": float(external),
         "urgency_hits": float(sum(lower.count(w) for w in URGENCY)),
         "body_len": float(len(body)),

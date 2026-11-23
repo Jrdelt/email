@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scoreEmail, shownHost } from './features';
+import { isCloudHtmlLink, scoreEmail, shownHost } from './features';
 
 describe('shownHost', () => {
   it.each([
@@ -52,5 +52,29 @@ describe('scoreEmail', () => {
     expect(mismatch.level).not.toBe('safe');
     const sameOrg = scoreEmail('a@barclays.co.uk', 'hi', [{ text: 'www.barclays.co.uk/login', href: 'https://online.barclays.co.uk/x' }]);
     expect(sameOrg.level).toBe('safe');
+  });
+  it('flags cloud-storage HTML lure links while ignoring cloud-hosted images/PDFs', () => {
+    expect(isCloudHtmlLink('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl')).toBe(true);
+    expect(isCloudHtmlLink('https://bucket.s3.amazonaws.com/login.htm')).toBe(true);
+    expect(isCloudHtmlLink('https://acct.blob.core.windows.net/c/verify.html')).toBe(true);
+    expect(isCloudHtmlLink('https://firebasestorage.googleapis.com/v0/b/x/o/a%2Flogin.html?alt=media')).toBe(true);
+    expect(isCloudHtmlLink('https://pub-1.r2.dev/a.html')).toBe(true);
+
+    expect(isCloudHtmlLink('https://storage.googleapis.com/assets/logo.png')).toBe(false);
+    expect(isCloudHtmlLink('https://bucket.s3.amazonaws.com/invoice.pdf')).toBe(false);
+    expect(isCloudHtmlLink('https://account.mongodb.com/login.html')).toBe(false);
+
+    const phish = scoreEmail(
+      'alert-442-320397@nozfr.itl',
+      "We've Blocked Your Account! Your photos and videos will be deleted. Please update your billing details. Expiration date: Today.",
+      [
+        { text: 'Cloud Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' },
+        { text: 'Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' },
+        { text: 'Unsubscribe', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=un' },
+        { text: 'here', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=oop' },
+      ],
+    );
+    expect(phish.level).toBe('likely-phishing');
+    expect(phish.reasons).toContain('A link points to a web page hosted on raw cloud storage');
   });
 });

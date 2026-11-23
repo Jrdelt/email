@@ -271,6 +271,34 @@ describe('gmail adapter', () => {
     expect(all[1].container.id).toBe('bottom');
     expect(all[1].links).toEqual([{ text: 'Link 2', href: 'https://bank.com/2' }]);
   });
+  it('extracts sender from Gmail Spam/via headers without email attribute and prepends h2.hP subject', () => {
+    document.body.innerHTML = `
+      <h2 class="hP">We've Blocked Your Account! Your photos and videos will be deleted</h2>
+      <div class="adn ads">
+        <div class="gs">
+          <div class="gE iv gt">
+            <h3 class="iw gFxsud">
+              <span class="qu yKyxu">
+                <span class="gD"><span>GmailSupportTeam</span></span>
+                <span class="go gD">alert-442-320397@nozfr.itl</span>
+                <span class="go">via 442.320397.jnc7.one.bss0019.narodaro.my.id</span>
+              </span>
+            </h3>
+          </div>
+          <div><div class="ii gt"><div class="a3s">
+            Please update your billing details.
+            <a href="https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl">Review billing</a>
+          </div></div></div>
+        </div>
+      </div>`;
+    const e = gmail.extract(document)!;
+    expect(e.senderName).toBe('GmailSupportTeam');
+    expect(e.senderAddress).toBe('alert-442-320397@nozfr.itl');
+    expect(e.body).toContain("We've Blocked Your Account!");
+    expect(e.body).toContain('Please update your billing details.');
+    expect(e.links).toEqual([{ text: 'Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' }]);
+  });
+
   it('returns null with no open email', () => {
     document.body.innerHTML = '<div>inbox</div>';
     expect(gmail.extract(document)).toBeNull();

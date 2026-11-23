@@ -1,5 +1,5 @@
 import { normalizeSender } from './allowlist';
-import { BRANDS, FREEMAIL, SERVICE_WORDS } from './brands';
+import { BRANDS, FREEMAIL, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
 import { hostOf, isInternational, registrableDomain } from './domain';
 import type { Link } from './features';
 
@@ -48,9 +48,24 @@ export function analyzeSender(name: string, rawAddress: string, links: Link[]): 
   const shownAddr = displayName.match(/[^\s<>"'()]+@[^\s<>"'()]+\.[a-z]{2,}/i)?.[0]?.toLowerCase();
   if (shownAddr && shownAddr !== address) warnings.push(`The display name shows ${shownAddr}, but it was really sent from ${raw}`);
 
+  const splitDisplayName = (s: string) =>
+    s
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .replace(/[_\-.]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const normalizedName = splitDisplayName(displayName);
+  const compactName = displayName.toLowerCase().replace(/[\s_.-]+/g, '');
   for (const brand of BRANDS) {
-    const claims = brand.pattern.test(displayName) && (SERVICE_WORDS.test(displayName) || displayName.toLowerCase() === brand.name.toLowerCase());
-    if (claims && registrable && !brand.domains.includes(registrable)) {
+    const brandCompact = brand.name.toLowerCase().replace(/\s+/g, '');
+    const tokenizedClaim =
+      brand.pattern.test(normalizedName) &&
+      (SERVICE_WORDS.test(normalizedName) || normalizedName.toLowerCase() === brand.name.toLowerCase());
+    const compactClaim =
+      compactName.startsWith(brandCompact) && SERVICE_PREFIX.test(compactName.slice(brandCompact.length));
+    if ((tokenizedClaim || compactClaim) && registrable && !brand.domains.includes(registrable)) {
       warnings.push(`Claims to be ${brand.name}, but was sent from ${registrable}`);
       break;
     }
