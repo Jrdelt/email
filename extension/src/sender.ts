@@ -41,7 +41,10 @@ export function analyzeSender(
 ): SenderInfo {
   const raw = rawAddress.trim();
   const address = normalizeSender(raw);
-  const domain = (raw.includes('@') ? raw.slice(raw.lastIndexOf('@') + 1) : '').toLowerCase().replace(/>$/, '');
+  const domain = (raw.includes('@') ? raw.slice(raw.lastIndexOf('@') + 1) : '')
+    .toLowerCase()
+    .replace(/>$/, '')
+    .replace(/\.$/, '');
   const registrable = registrableDomain(domain);
   const displayName = name.trim();
   const warnings: string[] = [];
@@ -59,7 +62,7 @@ export function analyzeSender(
     warnings,
   };
 
-  const via = meta.viaDomain?.trim().toLowerCase() ?? '';
+  const via = meta.viaDomain?.trim().toLowerCase().replace(/\.$/, '') ?? '';
   const validVia = via && isValidDomain(via) ? via : '';
   const viaReg = validVia ? registrableDomain(validVia) : '';
 
@@ -86,7 +89,9 @@ export function analyzeSender(
   if (domain && isInternational(domain)) warnings.push(`The sender's website (${domain}) uses lookalike characters`);
 
   const shownAddr = displayName.match(/[^\s<>"'()]+@[^\s<>"'()]+\.[a-z]{2,}/i)?.[0]?.toLowerCase();
-  if (shownAddr && shownAddr !== address) warnings.push(`The display name shows ${shownAddr}, but it was really sent from ${raw}`);
+  if (shownAddr && shownAddr !== address && shownAddr !== raw.toLowerCase()) {
+    warnings.push(`The display name shows ${shownAddr}, but it was really sent from ${raw}`);
+  }
 
   const splitDisplayName = (s: string) =>
     s

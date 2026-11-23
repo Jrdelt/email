@@ -1,6 +1,9 @@
 # Defense-in-Depth Research: Effectiveness, Usable Security, Post-Click Protection, and Extension Hardening
 
-This document synthesizes primary research, browser platform specifications (Chrome Manifest V3 and MDN Web Docs), and a line-by-line audit of the current codebase to outline how **Phishing Email Detector** can catch more real-world phishing, become clearer and less fatiguing for everyday users, stay resilient against bypasses, and protect the user **even if they click a malicious link**.
+This document synthesizes primary research, browser platform specifications (Chrome Manifest V3 and MDN Web Docs), and a line-by-line audit of the initial codebase to outline how **Phishing Email Detector** catches real-world phishing, stays clear and low-fatigue for everyday users, resists DOM/extension bypasses, and protects the user **even if they click a malicious link**.
+
+> [!NOTE]
+> **Implementation status:** All **Tier 1** protections (hardened link/form/attachment locking, DOM-clobbering resistance, 400 ms race-to-click scan gate, click-time destination inspector, `warning.html` interstitial & recovery guide, closed Shadow DOM `:host { all: initial !important }`, 2-step `danger` unlock, Undo pill, and auth-guarded allowlist) plus **T1 cross-language parity fixtures** have shipped. See [Section 6](#6-prioritized-implementation-matrix) and [docs/threat-model.md](threat-model.md) for current architecture and remaining Tier 2/3 roadmap items.
 
 ---
 
@@ -11,7 +14,7 @@ Every recommendation below must respect the hard guarantees established in [AGEN
 | Constraint | Current Budget / Rule | Implication for New Protections |
 |---|---|---|
 | **Privacy** | Zero email bodies, full URLs, or sender email addresses leave the browser. Only validated registrable domains are queried (`credentials: 'omit'`, `referrerPolicy: 'no-referrer'`, 24 h cache). | Post-click URL checks must either run locally or query only the destination **registrable domain** (or privacy-preserving local Bloom filters / hash prefixes). |
-| **Performance** | `<10 ms` scoring per email; `~0` idle CPU; `<10 MB` RAM; `<500 KB` total package (currently `~156 kB`); `<200 KB` model JSON; no ONNX/TF.js. | Avoid synchronous image decoding loops on every DOM mutation; keep threat lists compact (e.g., compact Bloom filter or prefix table) and run heavy click-time checks only on actual user clicks. |
+| **Performance** | `<10 ms` scoring per email; `~0` idle CPU; `<10 MB` RAM; `<500 KB` total package (currently `~193 kB`); `<200 KB` model JSON; no ONNX/TF.js. | Avoid synchronous image decoding loops on every DOM mutation; keep threat lists compact (e.g., compact Bloom filter or prefix table) and run heavy click-time checks only on actual user clicks. |
 | **Permissions** | Only `storage` + `WEBMAIL_MATCHES` in `extension/src/hosts.ts` at install time. | Any browser-wide navigation or download shield beyond webmail tabs must use MV3 `optional_permissions` / `optional_host_permissions` requested **only** if the user opts in. |
 | **Precision** | Evaluate at `<=0.1%` false-positive rate (FPR) to avoid warning fatigue. | Compound weak signals (e.g., free hosting alone) rather than triggering `danger` alerts on single benign patterns. |
 
@@ -135,9 +138,9 @@ Seminal usable-security research provides concrete, counterintuitive lessons on 
 
 A security extension running inside adversarial webmail DOMs (and parsing untrusted HTML emails) must resist bypasses against its own DOM locks, UI shadow root, allowlist, and model integrity.
 
-### 5.1 Codebase Audit: Concrete Bypasses Found in Current Code
+### 5.1 Historical Codebase Audit: Bypasses Identified & Remediated
 
-| File | Current Behavior | Vulnerability / Bypass | Concrete Fix |
+| File | Pre-Hardening Behavior | Vulnerability / Bypass Identified | Shipped Fix |
 |---|---|---|---|
 | [linkLock.ts](../extension/src/ui/linkLock.ts) + [extract.ts](../extension/src/adapters/extract.ts) | Stashes `href` on `a, area` and `action` on `form`; queries `a[href], area[href]`. | **1. `formaction` override:** Per MDN / HTML spec, `<button formaction="https://evil.example">` or `<input type="submit" formaction="...">` overrides `<form action>` and still submits even when `action` was removed from `<form>` (only `submit` listener prevents default if triggered via native submit, and `extract.ts` misses extracting `formaction` URLs for scoring!).<br>**2. SVG `xlink:href` & `<a ping>`:** Deprecated SVG 1.1 `<a xlink:href="...">` is ignored by `a[href]`; `<a ping="...">` sends background POST beacons on click.<br>**3. Keyboard / `keydown`:** Pressing `Enter` or `Space` on focused pseudo-interactive elements (`role="link"`, `[onclick]`) isn't captured by `click` in every handler.<br>**4. `MutationObserver` timing gap:** Links inserted dynamically between 400 ms debounced scans stay active until the next scan. | Stash/restore `formaction` (`data-ped-formaction`), `xlink:href` (`data-ped-xlink-href`), and `ping` (`data-ped-ping`); extract `form[action]`, `[formaction]`, and SVG links in `extract.ts`; block `keydown` (`Enter`/`Space`) on locked interactive controls; re-apply `lockLinks` immediately on DOM mutation when container already has `data-ped-locked`. |
 | [banner.ts](../extension/src/ui/banner.ts) | Closed shadow root (`attachShadow({ mode: 'closed' })`), `:host { font-family: ... }`, appended to `(doc.body ?? doc.documentElement)`. | **Inherited CSS leakage & DOM removal:** Without `:host { all: initial !important; ... }`, inherited page styles (`font-size`, `line-height`, `color`, `letter-spacing`, `visibility`, `text-transform`) bleed across the Shadow DOM boundary (per MDN). Mounting inside `doc.body` also lets webmail SPA re-renders wipe `#ped-banner-host`. | Set `:host { all: initial !important; display: block !important; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif !important; }` inside shadow `<style>` and mount directly on `doc.documentElement`! |

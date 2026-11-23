@@ -4,8 +4,11 @@ chrome-mv3/
 .wxt/
 dist/
 __pycache__/
+.pytest_cache/
 .venv/
 *.pyc
+*.egg-info/
+coverage/
 data/raw/
 .DS_Store
 .env

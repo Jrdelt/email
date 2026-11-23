@@ -86,6 +86,10 @@ describe('trustedEmails', () => {
     expect(await hashEmail('other@evil.example', 'Hello world verify now', [{ href: 'https://evil.example/a' }])).not.toBe(h1);
     expect(await hashEmail('alerts@evil.example', 'Different body', [{ href: 'https://evil.example/a' }])).not.toBe(h1);
     expect(await hashEmail('alerts@evil.example', 'Hello world verify now', [{ href: 'https://evil.example/b' }])).not.toBe(h1);
+    expect(await hashEmail('alerts@evil.example', 'Hello world verify now', [{ href: 'https://evil.example/a' }], ['a.pdf'])).not.toBe(h1);
+    const att1 = await hashEmail('alerts@evil.example', 'Hello', [], ['B.pdf', 'a.pdf']);
+    const att2 = await hashEmail('alerts@evil.example', 'Hello', [], ['a.pdf', 'b.pdf']);
+    expect(att1).toBe(att2);
   });
 
   it('persists across reads, dedupes with recency, caps at 500, and clears', async () => {

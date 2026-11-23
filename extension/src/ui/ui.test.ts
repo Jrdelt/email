@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import { gmail } from '../adapters/gmail';
-import { linksIn } from '../adapters/extract';
+import { inlineAttachmentsIn, linksIn } from '../adapters/extract';
+import { analyzeAttachments } from '../attachments';
 import { analyzeSender } from '../sender';
-import { decideBanner, removeBanner, showBanner } from './banner';
+import { isAttachmentLocked, lockAttachments, setAttachmentBlockedHandler, unlockAttachments } from './attachmentLock';
+import { decideBanner, deriveStatusSummary, removeBanner, showBanner } from './banner';
 import { formatAge, formatITReport, renderITDetails, renderSimpleDetails } from './details';
 import { createCloseIcon, createLockIcon, createLogoSvg, createStatusIcon } from './icons';
-import { isLocked, lockLinks, unlockLinks } from './linkLock';
+import { isLocked, lockLinks, setLinkBlockedHandler, unlockLinks } from './linkLock';
 
 const actions = () => ({
   onUnlock: vi.fn(),
@@ -155,6 +157,108 @@ describe('linkLock', () => {
     expect(pingA.getAttribute('ping')).toBe('https://track.evil.example/beacon');
     expect(dyn.getAttribute('href')).toBe('https://evil.example/dynamic');
   });
+
+  it('resists <form> DOM clobbering of getAttribute/hasAttribute/setAttribute/removeAttribute', () => {
+    document.body.innerHTML = `
+      <div id="m">
+        <form id="clobbered" action="https://evil.example/form-steal">
+          <input name="getAttribute">
+          <input name="hasAttribute">
+          <input name="setAttribute">
+          <input name="removeAttribute">
+          <button type="submit">Send</button>
+        </form>
+      </div>`;
+    const m = document.getElementById('m')!;
+    const form = document.getElementById('clobbered')!;
+    expect(linksIn(m)).toEqual([{ text: '', href: 'https://evil.example/form-steal' }]);
+    lockLinks(m);
+    expect(Element.prototype.hasAttribute.call(form, 'action')).toBe(false);
+    expect(Element.prototype.getAttribute.call(form, 'data-ped-action')).toBe('https://evil.example/form-steal');
+    expect(linksIn(m)).toEqual([{ text: '', href: 'https://evil.example/form-steal' }]);
+    unlockLinks(m);
+    expect(Element.prototype.getAttribute.call(form, 'action')).toBe('https://evil.example/form-steal');
+  });
+});
+
+describe('attachmentLock', () => {
+  it('blocks clicks, mousedown, pointerdown, and Enter/Space on untrusted attachments, keeps body readable, and restores on unlock', async () => {
+    document.body.innerHTML = `
+      <div id="body">Email text <a id="inline" download="smuggle.html" href="data:text/html,hi">Download</a></div>
+      <div id="shelf" class="aQH">
+        <span id="chip" class="aZo" download_url="text/html:invoice.pdf.html:https://mail.google.com/att/1">
+          <a id="chip-a" href="https://mail.google.com/att/1" download="invoice.pdf.html">invoice.pdf.html</a>
+        </span>
+      </div>`;
+    const body = document.getElementById('body')!;
+    const inline = document.getElementById('inline')!;
+    const shelf = document.getElementById('shelf')!;
+    const chip = document.getElementById('chip')!;
+    const chipA = document.getElementById('chip-a')!;
+    const onBlocked = vi.fn();
+    setAttachmentBlockedHandler(document, onBlocked);
+
+    const names = new Map<HTMLElement, string>([
+      [inline, 'smuggle.html'],
+      [chip, 'invoice.pdf.html'],
+    ]);
+    lockAttachments([shelf, chip, inline], names);
+
+    expect(isAttachmentLocked(shelf)).toBe(true);
+    expect(isAttachmentLocked(chip)).toBe(true);
+    expect(isAttachmentLocked(inline)).toBe(true);
+    expect(isAttachmentLocked(body)).toBe(false);
+    expect(inline.hasAttribute('href')).toBe(false);
+    expect(inline.hasAttribute('download')).toBe(false);
+    expect(inline.getAttribute('data-ped-att-href')).toBe('data:text/html,hi');
+    expect(chip.hasAttribute('download_url')).toBe(false);
+    expect(chip.getAttribute('data-ped-att-download-url')).toBe('text/html:invoice.pdf.html:https://mail.google.com/att/1');
+    expect(linksIn(body)).toEqual([{ text: 'Download', href: 'data:text/html,hi' }]);
+
+    for (const type of ['mousedown', 'pointerdown', 'click', 'dblclick']) {
+      const ev = new MouseEvent(type, { bubbles: true, cancelable: true });
+      chipA.dispatchEvent(ev);
+      expect(ev.defaultPrevented).toBe(true);
+    }
+    const enterEv = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    inline.dispatchEvent(enterEv);
+    expect(enterEv.defaultPrevented).toBe(true);
+    expect(onBlocked).toHaveBeenCalled();
+    expect(document.getElementById('ped-toast-host')).not.toBeNull();
+
+    const dynBtn = document.createElement('a');
+    dynBtn.href = 'https://mail.google.com/att/2';
+    dynBtn.setAttribute('download', 'extra.exe');
+    shelf.appendChild(dynBtn);
+    await vi.waitFor(() => expect(dynBtn.hasAttribute('href')).toBe(false));
+    expect(dynBtn.getAttribute('data-ped-att-download')).toBe('extra.exe');
+
+    unlockAttachments([shelf, chip, inline]);
+    setAttachmentBlockedHandler(document, null);
+    expect(isAttachmentLocked(shelf)).toBe(false);
+    expect(inline.getAttribute('href')).toBe('data:text/html,hi');
+    expect(inline.getAttribute('download')).toBe('smuggle.html');
+    expect(chip.getAttribute('download_url')).toBe('text/html:invoice.pdf.html:https://mail.google.com/att/1');
+    expect(dynBtn.getAttribute('href')).toBe('https://mail.google.com/att/2');
+
+    const postClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    chipA.dispatchEvent(postClick);
+    expect(postClick.defaultPrevented).toBe(false);
+  });
+
+  it('invokes setLinkBlockedHandler when clicking a locked link', () => {
+    document.body.innerHTML = '<div id="m"><a id="l" href="https://evil.example">Go</a></div>';
+    const m = document.getElementById('m')!;
+    const onLinkBlocked = vi.fn();
+    setLinkBlockedHandler(document, onLinkBlocked);
+    lockLinks(m);
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+    document.getElementById('l')!.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(onLinkBlocked).toHaveBeenCalledTimes(1);
+    unlockLinks(m);
+    setLinkBlockedHandler(document, null);
+  });
 });
 
 describe('banner', () => {
@@ -221,6 +325,25 @@ describe('banner', () => {
       confirmUnlockBtn.click();
       await vi.waitFor(() => expect(act3.onUnlock).toHaveBeenCalledTimes(1));
       expect(root3.textContent).toContain('Email trusted — links enabled');
+
+      const act4 = actions();
+      showBanner({
+        level: 'warning',
+        title: 'Attachments blocked.',
+        tag: 'ATTACHMENT LOCK',
+        reasons: ['Attachments from untrusted emails are blocked (statement.pdf)'],
+        linksLocked: false,
+        attachmentsLocked: true,
+        attachmentNames: ['statement.pdf'],
+        sender,
+      }, act4);
+      const root4 = roots[roots.length - 1]!;
+      expect(root4.querySelector('.compare')?.textContent).toContain('Attachments: statement.pdf');
+      expect(root4.querySelector('.sticker-side')?.textContent).toContain('FILES BLOCKED!');
+      const trustAttBtn = [...root4.querySelectorAll('button')].find((b) => b.textContent === 'I trust this email')!;
+      trustAttBtn.click();
+      await vi.waitFor(() => expect(act4.onUnlock).toHaveBeenCalledTimes(1));
+      expect(root4.textContent).toContain('Email trusted — attachments enabled');
     } finally {
       spy.mockRestore();
       removeBanner();
@@ -247,6 +370,54 @@ describe('banner', () => {
       spy.mockRestore();
       removeBanner();
     }
+  });
+
+  it('disables Always trust sender when sender failed authentication or used a suspicious relay', () => {
+    document.body.innerHTML = '';
+    const unauthSender = analyzeSender('Bank', 'alerts@bank.com', [], { unauthenticated: true });
+    let capturedRoot: ShadowRoot | undefined;
+    const origAttach = HTMLElement.prototype.attachShadow;
+    const spy = vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      capturedRoot = origAttach.call(this, init);
+      return capturedRoot;
+    });
+    try {
+      const act = actions();
+      showBanner(
+        {
+          level: 'warning',
+          title: 'Check this sender.',
+          tag: 'SENDER WARNING',
+          reasons: unauthSender.warnings,
+          linksLocked: true,
+          sender: unauthSender,
+        },
+        act,
+      );
+      const trustBtn = [...capturedRoot!.querySelectorAll('button')].find(
+        (b) => b.textContent === 'Always trust sender',
+      )!;
+      expect(trustBtn.disabled).toBe(true);
+      trustBtn.click();
+      expect(act.onTrustSender).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      removeBanner();
+    }
+  });
+});
+
+describe('deriveStatusSummary', () => {
+  it('returns TRUSTED safe summary when trusted is true', () => {
+    const sender = analyzeSender('PayPal', 'help@gmail.com', []);
+    const s = deriveStatusSummary(
+      { score: 0.9, level: 'likely-phishing', reasons: ['bad'] },
+      sender,
+      undefined,
+      undefined,
+      true,
+    );
+    expect(s).toMatchObject({ kind: 'safe', title: 'Email trusted.', tag: 'TRUSTED', reasons: [] });
   });
 });
 
@@ -304,6 +475,26 @@ describe('decideBanner', () => {
     const unlocked = decideBanner(verdict, sender, undefined, true)!;
     expect(unlocked.level).toBe('danger');
     expect(unlocked.linksLocked).toBe(false);
+  });
+
+  it('locks attachments on safe untrusted emails without locking regular links, and escalates danger attachments', () => {
+    const sender = analyzeSender('Vendor', 'billing@vendor.com', [{ text: 'Docs', href: 'https://vendor.com/docs' }]);
+    const benignAtt = analyzeAttachments(['statement.pdf']);
+    const lockedBanner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, cleanIntel, false, benignAtt)!;
+    expect(lockedBanner.level).toBe('warning');
+    expect(lockedBanner.title).toBe('Attachments blocked.');
+    expect(lockedBanner.tag).toBe('ATTACHMENT LOCK');
+    expect(lockedBanner.linksLocked).toBe(false);
+    expect(lockedBanner.attachmentsLocked).toBe(true);
+    expect(lockedBanner.attachmentNames).toEqual(['statement.pdf']);
+
+    const dangerAtt = analyzeAttachments(['invoice.html']);
+    const dangerBanner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, cleanIntel, false, dangerAtt)!;
+    expect(dangerBanner.level).toBe('danger');
+    expect(dangerBanner.title).toBe('Dangerous attachment.');
+    expect(dangerBanner.tag).toBe('ATTACHMENT WARNING');
+    expect(dangerBanner.linksLocked).toBe(true);
+    expect(dangerBanner.attachmentsLocked).toBe(true);
   });
 });
 
@@ -454,6 +645,26 @@ describe('gmail adapter', () => {
   it('returns null with no open email', () => {
     document.body.innerHTML = '<div>inbox</div>';
     expect(gmail.extract(document)).toBeNull();
+  });
+
+  it('extracts Gmail attachment shelves, chips, bulk actions, and inline download links while ignoring compose', () => {
+    document.body.innerHTML = `
+      <div class="M9"><span class="aZo" download_url="text/plain:draft.txt:https://mail.google.com/draft">draft.txt</span></div>
+      <div class="adn">
+        <span class="gD" email="news@vendor.com" name="Vendor">Vendor</span>
+        <div class="a3s" id="msg-body">Hello <a id="inline-dl" download="notice.html" href="blob:https://mail.google.com/1">Get file</a></div>
+        <div class="aQH" id="shelf">
+          <span class="aZo" id="chip1" download_url="application/pdf:statement.pdf:https://mail.google.com/att/1">
+            <span class="aV3">statement.pdf</span>
+          </span>
+          <a aria-label="Download all attachments" id="dl-all" href="#all">Download all</a>
+        </div>
+      </div>`;
+    const e = gmail.extract(document)!;
+    expect(e.attachments?.map((a) => a.name)).toEqual(['notice.html', 'statement.pdf']);
+    expect(e.attachments?.map((a) => a.element.id)).toEqual(['inline-dl', 'chip1']);
+    expect(e.attachmentContainers?.map((el) => el.id)).toEqual(['shelf']);
+    expect(inlineAttachmentsIn(document.getElementById('msg-body')!).map((a) => a.name)).toEqual(['notice.html']);
   });
 });
 

@@ -1,7 +1,8 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Phishing Email Detector</title>
     <style>
       body {
@@ -26,7 +27,7 @@
       }
       .logo { flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
       .hdr-copy { flex: 1; min-width: 0; }
-      h3 { margin: 0; font-size: 16px; font-weight: 900; letter-spacing: -.02em; line-height: 1.15; }
+      h1 { margin: 0; font-size: 16px; font-weight: 900; letter-spacing: -.02em; line-height: 1.15; }
       .sub { font-size: 12px; color: #444444; font-weight: 500; }
       .mini-sticker {
         flex-shrink: 0;
@@ -37,7 +38,7 @@
         padding: 3px 9px;
       }
 
-      h4 { margin: 14px 0 6px; font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #111111; }
+      h2 { margin: 14px 0 6px; font-size: 12.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: #111111; }
 
       .card {
         background: #ffffff;
@@ -63,6 +64,7 @@
         color: #111111;
       }
       .icon-safe { background: #26d08c; }
+      .icon-warn { background: #ffd166; }
       .icon-alert { background: #ff563f; }
       .status-title { font-size: 17px; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; }
       .tag {
@@ -79,9 +81,9 @@
       .trusted-pill {
         display: inline-flex; align-items: center; gap: 6px;
         background: #ffffff; border: 1.5px solid #111111; box-shadow: 2px 2px 0 #111111;
-        border-radius: 999px; padding: 3px 8px 3px 10px; font-size: 12px; font-weight: 600;
+        border-radius: 999px; padding: 3px 6px 3px 10px; font-size: 12px; font-weight: 600;
       }
-      .trusted-pill button { padding: 1px 7px; font-size: 11px; border-radius: 999px; box-shadow: none; border-width: 1.5px; }
+      .trusted-pill button { min-height: 24px; padding: 2px 9px; font-size: 11px; border-radius: 999px; box-shadow: none; border-width: 1.5px; }
       .trusted-emails-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
       .trusted-emails-row[hidden] { display: none; }
 
@@ -99,6 +101,7 @@
       }
       button:hover:not(:disabled) { translate: -1px -1px; box-shadow: 3px 3px 0 #111111; }
       button:active:not(:disabled) { translate: 1px 1px; box-shadow: 1px 1px 0 #111111; }
+      button:disabled { opacity: .55; cursor: default; }
       button.copy-it { background: #26d08c; margin-top: 8px; }
       button:focus-visible, summary:focus-visible { outline: 2px solid #111111; outline-offset: 2px; }
 
@@ -128,20 +131,25 @@
       details[open] > summary::before { rotate: 0deg; }
       @media (prefers-reduced-motion: no-preference) {
         summary::before { transition: rotate .2s; }
-        details::details-content {
-          transition: block-size, content-visibility, display;
-          transition-duration: .22s; transition-timing-function: ease-in-out;
-          transition-behavior: allow-discrete;
+      }
+      @supports (interpolate-size: allow-keywords) {
+        details::details-content { interpolate-size: allow-keywords; overflow: clip; contain: layout; padding: 2px 4px 6px 2px; }
+        details:not([open])::details-content { block-size: 0; padding-block: 0; }
+        @media (prefers-reduced-motion: no-preference) {
+          details::details-content {
+            transition: block-size, padding-block, content-visibility, display;
+            transition-duration: .22s; transition-timing-function: ease-in-out;
+            transition-behavior: allow-discrete;
+          }
         }
       }
-      details::details-content { interpolate-size: allow-keywords; overflow: clip; contain: layout; }
-      details:not([open])::details-content { block-size: 0; }
       #it-details { margin-top: 10px; background: #fdf9f0; box-shadow: none; }
       .help-btn { width: 100%; margin-top: 10px; background: #fdf9f0; }
 
       @media (forced-colors: active) {
         body { background-image: none; }
         .card, .icon-box, .trusted-pill, .mini-sticker, details, button { box-shadow: none; border: 2px solid CanvasText; background: Canvas; color: CanvasText; }
+        button:disabled { color: GrayText; border-color: GrayText; opacity: 1; }
         .tag { border: 1px solid CanvasText; }
         button:focus-visible, summary:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
       }
@@ -149,28 +157,30 @@
   </head>
   <body>
     <header class="hdr">
-      <div id="logo" class="logo"></div>
+      <div id="logo" class="logo" aria-hidden="true"></div>
       <div class="hdr-copy">
-        <h3>Phishing Email Detector</h3>
+        <h1>Phishing Email Detector</h1>
         <div class="sub">Local email protection</div>
       </div>
       <span class="mini-sticker" aria-hidden="true">LOCAL CHECK</span>
     </header>
-    <div id="out" class="card muted">Open an email to check it.</div>
-    <h4>Trusted senders</h4>
-    <ul id="trusted" class="trusted-list"></ul>
-    <div id="trusted-emails-row" class="trusted-emails-row" hidden>
-      <span id="trusted-emails-label" class="muted"></span>
-      <button id="clear-emails" type="button">Clear</button>
-    </div>
-    <details id="it-section">
-      <summary>More options for IT</summary>
-      <div id="it-details" class="card muted">Open an email to view technical details.</div>
-      <h4>False-positive reports <span class="muted">(on this device only)</span></h4>
-      <div><span id="reports">0</span> saved <button id="clear" type="button">Clear</button></div>
-      <p class="muted">Only the sender's website domain is checked online (RDAP, Cloudflare DNS, URIBL). Email content never leaves your browser.</p>
-    </details>
-    <button id="help-clicked" type="button" class="help-btn">Clicked a suspicious link?</button>
+    <main>
+      <div id="out" class="card muted">Open an email to check it.</div>
+      <h2>Trusted senders</h2>
+      <ul id="trusted" class="trusted-list"></ul>
+      <div id="trusted-emails-row" class="trusted-emails-row" hidden>
+        <span id="trusted-emails-label" class="muted"></span>
+        <button id="clear-emails" type="button" aria-label="Clear saved trusted emails">Clear</button>
+      </div>
+      <details id="it-section">
+        <summary>More options for IT</summary>
+        <div id="it-details" class="card muted">Open an email to view technical details.</div>
+        <h2>False-positive reports <span class="muted">(on this device only)</span></h2>
+        <div><span id="reports">0</span> saved <button id="clear" type="button" aria-label="Clear saved false-positive reports">Clear</button></div>
+        <p class="muted">Only sender and clicked link domains are checked online (RDAP, Cloudflare/Google DNS, URIBL). Email content, attachments, and full URLs never leave your browser.</p>
+      </details>
+      <button id="help-clicked" type="button" class="help-btn">Clicked a suspicious link?</button>
+    </main>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

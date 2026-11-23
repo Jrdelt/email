@@ -1,5 +1,31 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { isCloudHtmlLink, scoreEmail, shownHost } from './features';
+import { extractFeatures, FEATURE_NAMES, isCloudHtmlLink, type Link, scoreEmail, shownHost } from './features';
+
+interface ParityCase {
+  name: string;
+  sender: string;
+  body: string;
+  links: Link[];
+  expected: Record<string, number>;
+}
+
+const PARITY_CASES = JSON.parse(
+  readFileSync(new URL('../../ml/tests/fixtures/parity.json', import.meta.url), 'utf8'),
+) as ParityCase[];
+
+describe('parity.json contract (TS <-> Python)', () => {
+  it('contains at least 20 cross-language parity cases covering all FEATURE_NAMES', () => {
+    expect(PARITY_CASES.length).toBeGreaterThanOrEqual(20);
+    for (const c of PARITY_CASES) {
+      expect(Object.keys(c.expected).sort()).toEqual([...FEATURE_NAMES].sort());
+    }
+  });
+
+  it.each(PARITY_CASES)('matches expected features for $name', ({ sender, body, links, expected }) => {
+    expect(extractFeatures(sender, body, links)).toEqual(expected);
+  });
+});
 
 describe('shownHost', () => {
   it.each([

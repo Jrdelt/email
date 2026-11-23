@@ -1,4 +1,24 @@
-from phishml.features import Link, extract_features, is_cloud_html_link, shown_host
+import json
+from pathlib import Path
+
+import pytest
+
+from phishml.features import FEATURE_NAMES, Link, extract_features, is_cloud_html_link, shown_host
+
+PARITY_PATH = Path(__file__).parent / "fixtures" / "parity.json"
+PARITY_CASES = json.loads(PARITY_PATH.read_text(encoding="utf-8"))
+
+
+def test_parity_fixture_count_and_schema():
+    assert len(PARITY_CASES) >= 20
+    for case in PARITY_CASES:
+        assert sorted(case["expected"].keys()) == sorted(FEATURE_NAMES)
+
+
+@pytest.mark.parametrize("case", PARITY_CASES, ids=[c["name"] for c in PARITY_CASES])
+def test_parity_fixture_vectors(case):
+    links = [Link(text=item["text"], href=item["href"]) for item in case["links"]]
+    assert extract_features(case["sender"], case["body"], links) == case["expected"]
 
 
 def test_mismatched_link_text_is_flagged():

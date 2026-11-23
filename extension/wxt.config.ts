@@ -9,9 +9,11 @@ const ICONS = {
 };
 
 export default defineConfig({
-  manifest: {
+  manifest: ({ browser }) => ({
     name: 'Phishing Email Detector',
-    description: 'Warns about likely phishing emails in webmail. Email content never leaves your browser; only the sender domain is looked up.',
+    description:
+      'Warns about phishing in webmail. Email content stays in your browser; only sender and clicked link domains are checked.',
+    homepage_url: 'https://github.com/Jrdelt/email',
     icons: ICONS,
     action: {
       default_icon: ICONS,
@@ -21,8 +23,18 @@ export default defineConfig({
     content_security_policy: {
       extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none';",
     },
-    browser_specific_settings: {
-      gecko: { id: 'phishing-email-detector@jrdelt.github.io', strict_min_version: '115.0' },
-    },
-  },
+    ...(browser === 'firefox'
+      ? {
+          browser_specific_settings: {
+            gecko: {
+              id: 'phishing-email-detector@jrdelt.github.io',
+              strict_min_version: '142.0',
+              data_collection_permissions: {
+                required: ['none'],
+              },
+            },
+          },
+        }
+      : {}),
+  }),
 });

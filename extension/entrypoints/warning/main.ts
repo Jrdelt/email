@@ -14,16 +14,29 @@ interface StoredWarning {
   createdAt?: number;
 }
 
+const WARN_TTL_MS = 3600_000;
+
 const $ = (id: string) => document.getElementById(id)!;
 
 $('logo').append(createLogoSvg(document, 32));
 
-function closeOrBack() {
+async function closeOrBack() {
+  try {
+    const tab = await browser.tabs?.getCurrent?.();
+    if (tab?.id !== undefined) {
+      await browser.tabs.remove(tab.id);
+      return;
+    }
+  } catch {
+    // Fall back to window.close / history.back when tabs API is unavailable.
+  }
   window.close();
   if (history.length > 1) history.back();
 }
 
-$('back-btn').addEventListener('click', closeOrBack);
+$('back-btn').addEventListener('click', () => {
+  void closeOrBack();
+});
 
 function renderReasons(list: string[]) {
   const ul = $('reasons');
@@ -57,22 +70,43 @@ function describeDestIntel(intel: DomainIntel): string {
   return parts.join(' • ');
 }
 
+function applyAlertSeverity(kind: 'warning' | 'danger') {
+  document.title =
+    kind === 'danger' ? 'Dangerous Link Stopped — Phishing Email Detector' : 'Check Link — Phishing Email Detector';
+  const sticker = $('sticker');
+  sticker.className = `sticker ${kind}`;
+  sticker.textContent = kind === 'danger' ? 'PHISHING RISK' : 'CHECK LINK';
+  const iconBox = $('icon-box');
+  iconBox.className = kind === 'warning' ? 'icon-box warning' : 'icon-box';
+  iconBox.replaceChildren(createStatusIcon(document, kind, 24));
+  $('title').textContent = kind === 'danger' ? 'Dangerous link stopped' : 'Check where this link goes';
+  $('lead').textContent =
+    kind === 'danger'
+      ? 'Opening this link could expose your passwords, accounts, or device.'
+      : 'This link hides or weakens the destination address. Confirm where it goes before continuing.';
+}
+
 function renderHelpMode() {
   document.title = 'Clicked a Suspicious Link? — Phishing Email Detector';
   $('sticker').textContent = 'RECOVERY GUIDE';
-  $('sticker').classList.add('safe');
-  $('icon-box').classList.add('safe');
-  $('icon-box').append(createStatusIcon(document, 'safe', 24));
+  $('sticker').className = 'sticker safe';
+  $('icon-box').className = 'icon-box safe';
+  $('icon-box').replaceChildren(createStatusIcon(document, 'safe', 24));
   $('title').textContent = 'Clicked a suspicious link? Stay calm.';
   $('lead').textContent = 'Follow the steps below based on what actually happened after you clicked.';
+  $('back-btn').textContent = 'Close recovery guide';
   ($('recovery-details') as HTMLDetailsElement).open = true;
 }
 
 function renderExpiredMode() {
+  document.title = 'Warning Expired — Phishing Email Detector';
   $('sticker').textContent = 'LINK EXPIRED';
-  $('icon-box').append(createStatusIcon(document, 'warning', 24));
+  $('sticker').className = 'sticker warning';
+  $('icon-box').className = 'icon-box warning';
+  $('icon-box').replaceChildren(createStatusIcon(document, 'warning', 24));
   $('title').textContent = 'This warning link has expired';
-  $('lead').textContent = 'Temporary link warnings are cleared when you close your browser. Review the steps below if you already visited a suspicious site.';
+  $('lead').textContent =
+    'Temporary link warnings expire after an hour or when you close your browser. Review the steps below if you already visited a suspicious site.';
   ($('recovery-details') as HTMLDetailsElement).open = true;
 }
 
@@ -89,7 +123,9 @@ async function init() {
 
   const key = `warn:${id}`;
   const stored = (await browser.storage.session?.get?.(key))?.[key] as StoredWarning | undefined;
-  if (!stored || !isSafeHttpUrl(stored.href)) {
+  const expired = typeof stored?.createdAt === 'number' && Date.now() - stored.createdAt > WARN_TTL_MS;
+  if (!stored || expired || !isSafeHttpUrl(stored.href)) {
+    if (expired) await browser.storage.session?.remove?.(key).catch(() => {});
     renderExpiredMode();
     return;
   }
@@ -98,13 +134,7 @@ async function init() {
   card.setAttribute('role', 'alert');
 
   const kind = stored.level === 'warning' ? 'warning' : 'danger';
-  $('icon-box').append(createStatusIcon(document, kind, 24));
-  $('sticker').textContent = kind === 'danger' ? 'PHISHING RISK' : 'CHECK LINK';
-  $('title').textContent = kind === 'danger' ? 'Dangerous link stopped' : 'Check where this link goes';
-  $('lead').textContent =
-    kind === 'danger'
-      ? 'Opening this link could expose your passwords, accounts, or device.'
-      : 'This link hides or weakens the destination address. Confirm where it goes before continuing.';
+  applyAlertSeverity(kind);
 
   $('dest-box').hidden = false;
   $('dest-host').textContent = stored.host || stored.registrable || 'Unknown destination';
@@ -127,8 +157,7 @@ async function init() {
         const extra = destinationIntelWarnings(intel);
         if (extra.length) {
           renderReasons([...new Set([...reasons, ...extra])]);
-          $('sticker').textContent = 'PHISHING RISK';
-          $('title').textContent = 'Dangerous link stopped';
+          applyAlertSeverity('danger');
         }
       } else {
         $('dest-meta').textContent = '';

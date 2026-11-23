@@ -100,6 +100,31 @@ describe('extractICloudHeaders', () => {
     expect(headers[0].senderAddress).toBe('alert@fake-login.example');
   });
 
+  it('extracts iCloud mail2 attachment elements and combines sandbox inline attachmentNames', () => {
+    document.body.innerHTML = `
+      <div id="message-iframe-Junk/12">
+        <div class="conversation-list-item">
+          <span class="contact-token" title="alerts@evil.example">Alerts</span>
+          <h2>Receipt</h2>
+          <div class="attachments-bar attachment-list" id="att-bar">
+            <button id="att-btn" aria-label="Download statement.pdf.html">statement.pdf.html</button>
+          </div>
+          <iframe src="about:blank"></iframe>
+        </div>
+      </div>`;
+    const headers = extractICloudHeaders(document);
+    expect(headers[0].attachments.map((a) => a.name)).toEqual(['statement.pdf.html']);
+    expect(headers[0].attachments.map((a) => a.element.id)).toEqual(['att-btn']);
+    expect(headers[0].attachmentContainers.map((c) => c.id)).toEqual(['att-bar']);
+
+    const combined = combineICloudThread(
+      headers,
+      new Map([[55, { body: 'See file', links: [], attachmentNames: ['extra.zip'] }]]),
+    );
+    expect(combined[0].attachmentNames).toEqual(['statement.pdf.html', 'extra.zip']);
+    expect(combined[0].frameId).toBe(55);
+  });
+
   it('extracts multiple expanded messages in a thread top to bottom', () => {
     document.body.innerHTML = `
       <div class="conversation-list">
@@ -146,12 +171,21 @@ describe('extractICloudSandbox', () => {
     unlockLinks(document.body);
   });
 
+  it('detects inline download/data attachments in sandbox frames', () => {
+    document.body.innerHTML = `<a id="dl" download="smuggled.html" href="blob:https://mail.icloud-sandbox.com/1">Download</a>`;
+    const res = extractICloudSandbox(document, { width: 640, height: 480 });
+    expect(res.active).toBe(true);
+    expect(res.attachments).toHaveLength(1);
+    expect(res.attachments[0].name).toBe('smuggled.html');
+  });
+
   it('marks empty bodies or 0x0 pooled iframes as inactive', () => {
     document.body.innerHTML = '<p>Pooled content</p><a href="https://example.com">Link</a>';
     expect(extractICloudSandbox(document, { width: 0, height: 0 })).toEqual({
       active: false,
       body: '',
       links: [],
+      attachments: [],
       container: null,
     });
 
@@ -196,6 +230,35 @@ describe('combineICloudThread', () => {
         frameId: 102,
       },
     ]);
+  });
+
+  it('pairs active sandbox payload with expanded card (iframeCount > 0) rather than collapsed earlier card', () => {
+    document.body.innerHTML = `
+      <div id="message-iframe-INBOX/1"><div class="conversation-list-item">
+        <span class="contact-token" title="collapsed@bank.com">Collapsed</span><h2>Re: Hello</h2>
+      </div></div>
+      <div id="message-iframe-INBOX/2"><div class="conversation-list-item">
+        <span class="contact-token" title="expanded@evil.example">Expanded</span><h2>Re: Hello</h2>
+        <iframe src="about:blank"></iframe>
+      </div></div>`;
+    const headers = extractICloudHeaders(document);
+    expect(headers.map((h) => h.iframeCount)).toEqual([0, 1]);
+    const bodies = new Map([
+      [202, { body: 'Malicious expanded body', links: [{ text: 'Verify', href: 'https://evil.example/p' }] }],
+    ]);
+    const combined = combineICloudThread(headers, bodies);
+    expect(combined[0]).toMatchObject({
+      senderAddress: 'collapsed@bank.com',
+      body: 'Re: Hello',
+      links: [],
+      frameId: undefined,
+    });
+    expect(combined[1]).toMatchObject({
+      senderAddress: 'expanded@evil.example',
+      body: 'Re: Hello\nMalicious expanded body',
+      links: [{ text: 'Verify', href: 'https://evil.example/p' }],
+      frameId: 202,
+    });
   });
 });
 

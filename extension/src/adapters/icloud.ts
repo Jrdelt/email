@@ -1,8 +1,18 @@
-import { MAX_BODY_CHARS, bodyText, linksIn } from './extract';
+import { cleanAttachmentName } from '../attachments';
 import type { Link } from '../features';
-import type { ExtractedEmail, WebmailAdapter } from './types';
+import { type ICloudFrameRole, icloudFrameRole } from '../hosts';
+import {
+  MAX_ATTACHMENTS,
+  MAX_BODY_CHARS,
+  bodyText,
+  extractSenderFromElement,
+  inlineAttachmentsIn,
+  isHidden,
+  linksIn,
+} from './extract';
+import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
-export type ICloudFrameRole = 'shell' | 'app' | 'sandbox' | null;
+export { type ICloudFrameRole, icloudFrameRole };
 
 export interface ICloudHeader {
   id: string;
@@ -10,12 +20,15 @@ export interface ICloudHeader {
   senderAddress: string;
   subject: string;
   iframeCount: number;
+  attachments: AttachmentRef[];
+  attachmentContainers: HTMLElement[];
   container: HTMLElement;
 }
 
 export interface ICloudSandboxPayload {
   body: string;
   links: Link[];
+  attachmentNames?: string[];
 }
 
 export interface ICloudThreadMessage {
@@ -23,41 +36,10 @@ export interface ICloudThreadMessage {
   senderAddress: string;
   body: string;
   links: Link[];
+  attachments?: AttachmentRef[];
+  attachmentContainers?: HTMLElement[];
+  attachmentNames?: string[];
   frameId?: number;
-}
-
-/** Identify which iCloud Mail frame a URL belongs to, or null if not iCloud Mail. */
-export function icloudFrameRole(url: URL): ICloudFrameRole {
-  const host = url.hostname.toLowerCase();
-  if (host === 'www.icloud.com' && url.pathname.startsWith('/applications/mail2')) return 'app';
-  if (host === 'www.icloud.com' && url.pathname.startsWith('/mail')) return 'shell';
-  if (host.endsWith('.icloud-sandbox.com') && url.pathname.startsWith('/applications/mail2-message')) return 'sandbox';
-  return null;
-}
-
-const isHidden = (el: HTMLElement): boolean =>
-  el.hidden || el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [aria-hidden="true"]') !== null;
-
-function parseSender(raw: string, fallbackName = ''): { senderName: string; senderAddress: string } | null {
-  const cleaned = raw.trim().replace(/^(?:from|sender)\s*:\s*/i, '').trim();
-  if (!cleaned) return null;
-  const fb = fallbackName.trim();
-  const fallback = fb && !fb.includes('@') ? fb : '';
-
-  const angle = cleaned.match(/^(.*?)<([^<>@\s]+@[^<>@\s]+)>\s*$/);
-  if (angle) {
-    return { senderName: angle[1].trim().replace(/^["']|["']$/g, '') || fallback, senderAddress: angle[2].trim() };
-  }
-  const paren = cleaned.match(/^(.*?)\(([^()@\s]+@[^()@\s]+)\)\s*$/);
-  if (paren) {
-    return { senderName: paren[1].trim().replace(/^["']|["']$/g, '') || fallback, senderAddress: paren[2].trim() };
-  }
-  const bare = cleaned.match(/([^\s<>"'(),;]+@[^\s<>"'(),;]+\.[^\s<>"'(),;]+)/);
-  if (bare && bare.index !== undefined) {
-    const before = cleaned.slice(0, bare.index).replace(/^[\s,:;\-"']+|[\s,:;\-"'<]+$/g, '').trim();
-    return { senderName: before || fallback, senderAddress: bare[1].trim() };
-  }
-  return null;
 }
 
 function isRecipientNode(el: Element): boolean {
@@ -74,31 +56,8 @@ function isRecipientNode(el: Element): boolean {
   return false;
 }
 
-function extractFromEl(el: Element, fallbackName = ''): { senderName: string; senderAddress: string } | null {
-  const text = (el.textContent ?? '').trim();
-  const fb = (text.length <= 120 && !text.includes('@') ? text : '') || fallbackName;
-  if (el.tagName === 'A') {
-    const href = el.getAttribute('href') ?? '';
-    if (href.toLowerCase().startsWith('mailto:')) {
-      const addr = href.slice(7).split('?')[0].trim();
-      if (addr) return { senderName: fb, senderAddress: addr };
-    }
-  }
-  const dataEmail = el.getAttribute('data-email')?.trim() ?? '';
-  if (dataEmail) {
-    const parsed = parseSender(dataEmail, fb);
-    if (parsed) return parsed;
-  }
-  return (
-    parseSender(el.getAttribute('aria-label') ?? '', fb) ??
-    parseSender(el.getAttribute('title') ?? '', fb) ??
-    parseSender(text, fb)
-  );
-}
-
 function extractHeaderSender(card: HTMLElement): { senderName: string; senderAddress: string } {
-  const skip = (el: Element): boolean =>
-    el.closest('iframe, h2') !== null || isRecipientNode(el);
+  const skip = (el: Element): boolean => el.closest('iframe, h2') !== null || isRecipientNode(el);
 
   let fallbackName = '';
 
@@ -107,7 +66,7 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
     if (isHidden(token) || skip(token)) continue;
     const text = (token.textContent ?? '').trim();
     if (!fallbackName && text && !text.includes('@')) fallbackName = text;
-    const hit = extractFromEl(token, fallbackName);
+    const hit = extractSenderFromElement(token, fallbackName);
     if (hit) return hit;
     if (!fallbackName && text) fallbackName = text;
     break;
@@ -116,11 +75,11 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
   // Pass 2a: explicit From / sender nodes
   for (const el of card.querySelectorAll('[aria-label^="From" i], [data-testid*="sender" i], [data-testid*="from" i]')) {
     if (skip(el)) continue;
-    const direct = extractFromEl(el, fallbackName);
+    const direct = extractSenderFromElement(el, fallbackName);
     if (direct) return { senderName: direct.senderName || fallbackName, senderAddress: direct.senderAddress };
     for (const d of el.querySelectorAll('a[href^="mailto:"], [title*="@"], [aria-label*="@"]')) {
       if (skip(d)) continue;
-      const hit = extractFromEl(d, fallbackName);
+      const hit = extractSenderFromElement(d, fallbackName);
       if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress };
     }
   }
@@ -142,10 +101,10 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
       if (inRecipients && !isFromRow) continue;
       for (const node of row.querySelectorAll('a[href^="mailto:"], [title*="@"], [aria-label*="@"]')) {
         if (skip(node)) continue;
-        const hit = extractFromEl(node, fallbackName);
+        const hit = extractSenderFromElement(node, fallbackName);
         if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress };
       }
-      const hit = extractFromEl(row, fallbackName);
+      const hit = extractSenderFromElement(row, fallbackName);
       if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress };
     }
   }
@@ -153,11 +112,76 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
   // Pass 2c: fallback header links/attributes outside h2 and iframe
   for (const el of card.querySelectorAll('a[href^="mailto:"], [title*="@"], [aria-label*="@"]')) {
     if (skip(el)) continue;
-    const hit = extractFromEl(el, fallbackName);
+    const hit = extractSenderFromElement(el, fallbackName);
     if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress };
   }
 
   return { senderName: fallbackName, senderAddress: '' };
+}
+
+function extractICloudCardAttachments(card: HTMLElement): {
+  attachments: AttachmentRef[];
+  attachmentContainers: HTMLElement[];
+} {
+  const attachments: AttachmentRef[] = [];
+  const attachmentContainers: HTMLElement[] = [];
+  const itemSel =
+    '[class*="attachment" i], [aria-label*="attachment" i], [aria-label*="Download" i], [title*="Download" i], a[download], a[data-ped-att-download]';
+  const childSel = '[aria-label*="Download" i], [title*="Download" i], a[download], a[data-ped-att-download], [role="button"], button, a';
+
+  const skip = (el: HTMLElement): boolean => {
+    if (isHidden(el)) return true;
+    if (el.closest('iframe, h2, span.contact-token, .allow-select, [contenteditable="true"]') !== null) return true;
+    if (el.querySelector('iframe, h2, .allow-select') !== null) return true;
+    const lbl = (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? '').trim();
+    return /^(?:attach|insert)\b/i.test(lbl);
+  };
+
+  for (const el of card.querySelectorAll<HTMLElement>(itemSel)) {
+    if (skip(el)) continue;
+    const lbl = `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.textContent ?? ''}`;
+    if (/\bdownload\s+all\b/i.test(lbl)) {
+      if (!attachmentContainers.some((c) => c === el || c.contains(el))) attachmentContainers.push(el);
+      continue;
+    }
+    const innerButtons = el.querySelectorAll<HTMLElement>(childSel);
+    if (innerButtons.length > 0 && /attachment/i.test(el.className)) {
+      if (!attachmentContainers.some((c) => c === el || c.contains(el))) attachmentContainers.push(el);
+      for (const btn of innerButtons) {
+        if (attachments.length >= MAX_ATTACHMENTS || skip(btn)) continue;
+        if (attachments.some((prev) => prev.element === btn || prev.element.contains(btn))) continue;
+        const name = cleanAttachmentName(
+          btn.getAttribute('download') ??
+            btn.getAttribute('data-ped-att-download') ??
+            btn.getAttribute('aria-label') ??
+            btn.getAttribute('title') ??
+            btn.textContent ??
+            '',
+        );
+        attachments.push({ name, element: btn });
+      }
+      continue;
+    }
+    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.some((prev) => prev.element === el || prev.element.contains(el))) continue;
+    const name = cleanAttachmentName(
+      el.getAttribute('download') ??
+        el.getAttribute('data-ped-att-download') ??
+        el.getAttribute('aria-label') ??
+        el.getAttribute('title') ??
+        (el.textContent ?? '').slice(0, 180),
+    );
+    attachments.push({ name, element: el });
+  }
+
+  for (const box of attachmentContainers) {
+    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (!attachments.some((a) => box.contains(a.element) || a.element === box)) {
+      attachments.push({ name: '', element: box });
+    }
+  }
+
+  return { attachments, attachmentContainers };
 }
 
 /** Extract header metadata for all visible message cards inside the iCloud mail2 frame. */
@@ -177,28 +201,39 @@ export function extractICloudHeaders(doc: Document): ICloudHeader[] {
     const { senderName, senderAddress } = extractHeaderSender(card);
     const subject = (card.querySelector('h2')?.textContent ?? '').trim();
     const iframeCount = card.querySelectorAll('iframe').length;
-    return { id: wrapper.id || '', senderName, senderAddress, subject, iframeCount, container: card };
+    const { attachments, attachmentContainers } = extractICloudCardAttachments(card);
+    return {
+      id: wrapper.id || '',
+      senderName,
+      senderAddress,
+      subject,
+      iframeCount,
+      attachments,
+      attachmentContainers,
+      container: card,
+    };
   });
 }
 
-/** Extract body text and links from an iCloud sandboxed message-body iframe document. */
+/** Extract body text, links, and inline attachments from an iCloud sandboxed message-body iframe document. */
 export function extractICloudSandbox(
   doc: Document,
   viewport?: { width: number; height: number },
-): { active: boolean; body: string; links: Link[]; container: HTMLElement | null } {
+): { active: boolean; body: string; links: Link[]; attachments: AttachmentRef[]; container: HTMLElement | null } {
   const bodyEl = doc.body;
-  if (!bodyEl) return { active: false, body: '', links: [], container: null };
+  if (!bodyEl) return { active: false, body: '', links: [], attachments: [], container: null };
 
   const vp = viewport ?? (doc.defaultView ? { width: doc.defaultView.innerWidth, height: doc.defaultView.innerHeight } : undefined);
   if (vp && (vp.width <= 0 || vp.height <= 0)) {
-    return { active: false, body: '', links: [], container: null };
+    return { active: false, body: '', links: [], attachments: [], container: null };
   }
 
   const body = bodyText(bodyEl);
   const links = linksIn(bodyEl);
-  const active = body.trim().length > 0 || links.length > 0 || bodyEl.querySelector('form') !== null;
-  if (!active) return { active: false, body: '', links: [], container: null };
-  return { active: true, body, links, container: bodyEl };
+  const attachments = inlineAttachmentsIn(bodyEl);
+  const active = body.trim().length > 0 || links.length > 0 || attachments.length > 0 || bodyEl.querySelector('form') !== null;
+  if (!active) return { active: false, body: '', links: [], attachments: [], container: null };
+  return { active: true, body, links, attachments, container: bodyEl };
 }
 
 /** Pair header cards from mail2 with active sandboxed body payloads in DOM order. */
@@ -208,17 +243,47 @@ export function combineICloudThread(
 ): ICloudThreadMessage[] {
   if (headers.length === 0) return [];
   const entries = [...bodies.entries()];
+  const expandedIndices = headers
+    .map((h, idx) => (h.iframeCount > 0 ? idx : -1))
+    .filter((idx) => idx !== -1);
+
+  // When a thread mixes collapsed cards (iframeCount === 0) with expanded cards (iframeCount > 0),
+  // align sandbox iframe payloads strictly to the expanded cards rather than shifting onto collapsed headers.
+  if (expandedIndices.length > 0 && expandedIndices.length === entries.length && expandedIndices.length < headers.length) {
+    const entryByHeader = new Map<number, [number, ICloudSandboxPayload]>();
+    expandedIndices.forEach((hIdx, i) => entryByHeader.set(hIdx, entries[i]));
+    return headers.map((h, idx) => {
+      const entry = entryByHeader.get(idx);
+      const body = [h.subject, entry?.[1].body ?? ''].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+      const attachmentNames = [...h.attachments.map((a) => a.name), ...(entry?.[1].attachmentNames ?? [])];
+      return {
+        senderName: h.senderName,
+        senderAddress: h.senderAddress,
+        body,
+        links: entry?.[1].links ?? [],
+        ...(h.attachments.length ? { attachments: h.attachments } : {}),
+        ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
+        ...(attachmentNames.length ? { attachmentNames } : {}),
+        frameId: entry?.[0],
+      };
+    });
+  }
+
   const count = Math.max(headers.length, entries.length);
   const out: ICloudThreadMessage[] = [];
   for (let i = 0; i < count; i++) {
     const h = headers[Math.min(i, headers.length - 1)];
     const entry = entries[i];
     const body = [h.subject, entry?.[1].body ?? ''].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+    const attachmentNames = [...h.attachments.map((a) => a.name), ...(entry?.[1].attachmentNames ?? [])];
     out.push({
       senderName: h.senderName,
       senderAddress: h.senderAddress,
       body,
       links: entry?.[1].links ?? [],
+      ...(h.attachments.length ? { attachments: h.attachments } : {}),
+      ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
+      ...(attachmentNames.length ? { attachmentNames } : {}),
       frameId: entry?.[0],
     });
   }
@@ -247,11 +312,15 @@ export const icloud: WebmailAdapter = {
         const rawBody = bodyEl ? bodyText(bodyEl) : '';
         const body = [h.subject, rawBody].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
         const links = bodyEl ? linksIn(bodyEl) : [];
+        const inlineAtts = bodyEl ? inlineAttachmentsIn(bodyEl) : [];
+        const attachments = [...h.attachments, ...inlineAtts];
         return {
           senderName: h.senderName,
           senderAddress: h.senderAddress,
           body,
           links,
+          ...(attachments.length ? { attachments } : {}),
+          ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
           container: bodyEl ?? h.container,
         };
       });
@@ -259,7 +328,14 @@ export const icloud: WebmailAdapter = {
     if (doc.querySelector('iframe#early-child')) return [];
     const sb = extractICloudSandbox(doc);
     if (sb.active && sb.container) {
-      return [{ senderName: '', senderAddress: '', body: sb.body, links: sb.links, container: sb.container }];
+      return [{
+        senderName: '',
+        senderAddress: '',
+        body: sb.body,
+        links: sb.links,
+        ...(sb.attachments.length ? { attachments: sb.attachments } : {}),
+        container: sb.container,
+      }];
     }
     return [];
   },

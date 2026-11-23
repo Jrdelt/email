@@ -1,5 +1,10 @@
 import type { Link } from '../features';
 
+export interface AttachmentRef {
+  name: string;
+  element: HTMLElement;
+}
+
 export interface ExtractedEmail {
   senderName: string; // display name as shown ('' if unknown)
   senderAddress: string; // address as shown, unvalidated ('' if unknown)
@@ -7,6 +12,8 @@ export interface ExtractedEmail {
   unauthenticated?: boolean; // true when webmail flags sender verification failure
   body: string;
   links: Link[];
+  attachments?: AttachmentRef[];
+  attachmentContainers?: HTMLElement[];
   container: HTMLElement; // element holding the message body (used for link locking)
 }
 

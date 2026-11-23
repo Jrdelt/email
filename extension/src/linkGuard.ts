@@ -1,6 +1,8 @@
-import { isValidDomain, registrableDomain } from './domain';
-import { ageDays, type DomainIntel } from './domainIntel';
-import { isCloudHtmlLink } from './features';
+import { isIpHost, isValidDomain, registrableDomain } from './domain';
+import { destinationIntelWarnings, type DomainIntel } from './domainIntel';
+import { isCloudHtmlLink, safePercentDecode } from './features';
+
+export { destinationIntelWarnings };
 
 export interface LinkRisk {
   href: string;
@@ -11,14 +13,15 @@ export interface LinkRisk {
   needsDomainCheck: boolean;
 }
 
-const IP_HOST = /^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+const MAX_UNWRAP_DEPTH = 4;
 
 const SHORTENER_HOSTS = new Set([
   'bit.ly', 'tinyurl.com', 't.co', 'rebrand.ly', 'rb.gy', 'cutt.ly', 'shorturl.at', 'is.gd',
   'ow.ly', 'goo.gl', 'buff.ly', 'tiny.cc', 'bl.ink', 's.id', 'v.gd', 'clck.ru',
 ]);
 
-const DANGEROUS_EXT_RE = /\.(exe|msi|dmg|pkg|apk|iso|img|lnk|scr|bat|cmd|ps1|vbs|hta|svg)$/i;
+const DANGEROUS_EXT_RE =
+  /\.(exe|msi|dmg|pkg|apk|iso|img|lnk|scr|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|hta|jar|mht|mhtml|docm|xlsm|pptm|svg)$/i;
 
 /** Returns true strictly for valid http(s) URLs. */
 export function isSafeHttpUrl(raw: string): boolean {
@@ -30,23 +33,31 @@ export function isSafeHttpUrl(raw: string): boolean {
   }
 }
 
-/** Unwrap common redirect/tracking wrappers locally to inspect the real http(s) target. */
+/** Unwrap common redirect/tracking wrappers locally (up to 4 nested hops) to inspect the real http(s) target. */
 export function unwrapRedirectUrl(href: string): string {
-  try {
-    const u = new URL(href);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return href;
-    const host = u.hostname.toLowerCase();
-    let target: string | null = null;
-    if (host.endsWith('.safelinks.protection.outlook.com')) {
-      target = u.searchParams.get('url');
-    } else if ((host === 'www.google.com' || host === 'google.com') && u.pathname === '/url') {
-      target = u.searchParams.get('q') ?? u.searchParams.get('url');
-    } else if ((host === 'l.facebook.com' || host === 'lm.facebook.com') && u.pathname === '/l.php') {
-      target = u.searchParams.get('u');
+  let current = href;
+  for (let depth = 0; depth < MAX_UNWRAP_DEPTH; depth++) {
+    let next: string | null = null;
+    try {
+      const u = new URL(current);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') break;
+      const host = u.hostname.toLowerCase().replace(/\.$/, '');
+      if (host.endsWith('.safelinks.protection.outlook.com')) {
+        next = u.searchParams.get('url');
+      } else if ((host === 'www.google.com' || host === 'google.com') && u.pathname === '/url') {
+        next = u.searchParams.get('q') ?? u.searchParams.get('url');
+      } else if ((host === 'l.facebook.com' || host === 'lm.facebook.com') && u.pathname === '/l.php') {
+        next = u.searchParams.get('u');
+      } else if ((host === 'www.youtube.com' || host === 'youtube.com') && u.pathname === '/redirect') {
+        next = u.searchParams.get('q');
+      }
+    } catch {
+      break;
     }
-    if (target && isSafeHttpUrl(target)) return target;
-  } catch { /* keep original href */ }
-  return href;
+    if (!next || next === current || !isSafeHttpUrl(next)) break;
+    current = next;
+  }
+  return current;
 }
 
 /** Analyze a clicked link destination locally and report whether online destination-domain intel is needed. */
@@ -61,11 +72,11 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     return { href: rawHref, host: '', registrable: '', reasons: [], level: 'safe', needsDomainCheck: false };
   }
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (pageOrigin && u.origin === pageOrigin) {
-    return { href, host: u.hostname.toLowerCase(), registrable: '', reasons: [], level: 'safe', needsDomainCheck: false };
+    return { href, host, registrable: '', reasons: [], level: 'safe', needsDomainCheck: false };
   }
 
-  const host = u.hostname.toLowerCase();
   const registrable = registrableDomain(host);
   const reasons: string[] = [];
   let hasDanger = false;
@@ -75,7 +86,7 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
     hasDanger = true;
     reasons.push('This link uses a disguised address format (@) often used to fake a trusted website');
   }
-  if (IP_HOST.test(host)) {
+  if (isIpHost(host)) {
     hasDanger = true;
     reasons.push('This link goes to a raw numeric web address instead of a real website');
   }
@@ -87,8 +98,7 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
     hasDanger = true;
     reasons.push('This link points to a web page hosted on raw cloud storage (commonly abused in phishing)');
   }
-  let path = u.pathname;
-  try { path = decodeURIComponent(path); } catch { /* keep raw pathname */ }
+  const path = safePercentDecode(u.pathname);
   const extMatch = path.match(DANGEROUS_EXT_RE);
   if (extMatch) {
     hasDanger = true;
@@ -105,29 +115,11 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
   }
 
   const level = hasDanger ? 'danger' : hasWarning ? 'warning' : 'safe';
-  const senderReg = senderRegistrable.trim().toLowerCase();
+  const senderReg = senderRegistrable.trim().toLowerCase().replace(/\.$/, '');
   const needsDomainCheck =
     level === 'safe' && Boolean(registrable) && isValidDomain(registrable) && registrable !== senderReg;
 
   return { href, host, registrable, reasons, level, needsDomainCheck };
-}
-
-/** Destination-appropriate domain warnings (intentionally ignores missing MX on web-only hosts). */
-export function destinationIntelWarnings(intel: DomainIntel, now = Date.now()): string[] {
-  const w: string[] = [];
-  const age = ageDays(intel.rdap.registered, now);
-  if (age !== undefined && age < 30) {
-    w.push(`This destination website (${intel.domain}) is brand new (${age} day${age === 1 ? '' : 's'} old)`);
-  }
-  if (intel.dns.status === 'ok' && intel.dns.nxdomain) {
-    w.push(`This destination website (${intel.domain}) does not exist`);
-  } else if (intel.rdap.status === 'notfound' && !(intel.dns.status === 'ok' && intel.dns.mx.length > 0)) {
-    w.push(`This destination website (${intel.domain}) is not registered`);
-  }
-  if (intel.reputation.listed.some((l) => l === 'black' || l === 'red')) {
-    w.push(`This destination website (${intel.domain}) has been reported for spam or phishing online`);
-  }
-  return w;
 }
 
 export function mergeLinkIntel(risk: LinkRisk, intel: DomainIntel | undefined, now = Date.now()): LinkRisk {

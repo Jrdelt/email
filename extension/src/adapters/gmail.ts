@@ -1,9 +1,7 @@
+import { cleanAttachmentName } from '../attachments';
 import { isValidDomain } from '../domain';
-import { MAX_BODY_CHARS, bodyText, linksIn } from './extract';
-import type { ExtractedEmail, WebmailAdapter } from './types';
-
-const isHidden = (el: HTMLElement): boolean =>
-  el.hidden || el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [aria-hidden="true"]') !== null;
+import { MAX_ATTACHMENTS, MAX_BODY_CHARS, bodyText, inlineAttachmentsIn, isHidden, linksIn } from './extract';
+import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
 const extractEmailText = (raw: string): string =>
   raw.match(/([^\s<>"'(),;]+@[^\s<>"'(),;]+\.[^\s<>"'(),;]+)/)?.[1]?.trim() ?? '';
@@ -42,6 +40,102 @@ function isUnauthenticated(scope: Document | HTMLElement, container: HTMLElement
     if (!container.contains(el) && /gmail couldn['’]t verify/i.test(el.textContent ?? '')) return true;
   }
   return false;
+}
+
+function nameFromDownloadUrl(raw: string): string {
+  if (!raw) return '';
+  const firstColon = raw.indexOf(':');
+  if (firstColon === -1) return '';
+  const urlStart = raw.search(/:https?:\/\//i);
+  const encoded = urlStart > firstColon ? raw.slice(firstColon + 1, urlStart) : raw.slice(firstColon + 1).split(':')[0];
+  try {
+    return cleanAttachmentName(decodeURIComponent(encoded));
+  } catch {
+    return cleanAttachmentName(encoded);
+  }
+}
+
+function isGmailBulkAction(el: Element): boolean {
+  const label = `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('data-tooltip') ?? ''} ${el.getAttribute('title') ?? ''}`;
+  return /\b(?:download\s+all|save\s+all\s+to\s+drive|add\s+all\s+to\s+drive)\b/i.test(label);
+}
+
+function gmailChipName(chip: HTMLElement): string {
+  const dlUrl = chip.getAttribute('download_url') ?? chip.getAttribute('data-ped-att-download-url') ?? '';
+  const fromUrl = nameFromDownloadUrl(dlUrl);
+  if (fromUrl) return fromUrl;
+
+  const v3 = cleanAttachmentName(chip.querySelector('.aV3')?.textContent ?? '');
+  if (v3) return v3;
+
+  const dl = cleanAttachmentName(chip.getAttribute('download') ?? chip.getAttribute('data-ped-att-download') ?? '');
+  if (dl) return dl;
+
+  for (const attr of ['aria-label', 'title', 'data-tooltip'] as const) {
+    const candidate = cleanAttachmentName(chip.getAttribute(attr) ?? '');
+    if (candidate) return candidate;
+  }
+
+  const text = (chip.textContent ?? '').trim();
+  return text.length <= 180 ? cleanAttachmentName(text) : '';
+}
+
+function extractGmailAttachments(
+  scope: Document | HTMLElement | null,
+  container: HTMLElement,
+): { attachments: AttachmentRef[]; attachmentContainers: HTMLElement[] } {
+  const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
+  const shelves: HTMLElement[] = [];
+  const attachmentContainers: HTMLElement[] = [];
+
+  if (!scope) return { attachments, attachmentContainers };
+
+  const shouldSkip = (el: Element): boolean =>
+    el === container ||
+    el.contains(container) ||
+    (el instanceof HTMLElement && isHidden(el)) ||
+    el.closest('div.M9, [role="dialog"], [contenteditable="true"]') !== null;
+
+  for (const shelf of scope.querySelectorAll<HTMLElement>('div.aQH, .hq')) {
+    if (shouldSkip(shelf) || shelves.some((prev) => prev.contains(shelf))) continue;
+    shelves.push(shelf);
+    attachmentContainers.push(shelf);
+  }
+
+  const chipSel = [
+    'span.aZo',
+    '[download_url]',
+    '[data-ped-att-download-url]',
+    'a[download]',
+    'a[data-ped-att-download]',
+    'a[href*="mail-attachment.googleusercontent.com"]',
+    'a[data-ped-att-href*="mail-attachment.googleusercontent.com"]',
+    'a[href*="view=att"]',
+    'a[data-ped-att-href*="view=att"]',
+  ].join(', ');
+
+  for (const chip of scope.querySelectorAll<HTMLElement>(chipSel)) {
+    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (shouldSkip(chip) || isGmailBulkAction(chip)) continue;
+    if (attachments.some((prev) => prev.element === chip || prev.element.contains(chip))) continue;
+    attachments.push({ name: gmailChipName(chip), element: chip });
+  }
+
+  const bulkSel =
+    '[aria-label*="Download all" i], [data-tooltip*="Download all" i], [aria-label*="Save all to Drive" i], [data-tooltip*="Add all to Drive" i]';
+  for (const btn of scope.querySelectorAll<HTMLElement>(bulkSel)) {
+    if (shouldSkip(btn) || attachmentContainers.some((c) => c === btn || c.contains(btn))) continue;
+    attachmentContainers.push(btn);
+  }
+
+  for (const shelf of shelves) {
+    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (!attachments.some((a) => shelf.contains(a.element) || a.element === shelf)) {
+      attachments.push({ name: '', element: shelf });
+    }
+  }
+
+  return { attachments, attachmentContainers };
 }
 
 // Best-effort Gmail selectors (T7: verify against saved fixtures and live Gmail).
@@ -91,6 +185,7 @@ export const gmail: WebmailAdapter = {
 
       const viaDomain = scope ? extractViaDomain(scope, container) : undefined;
       const unauthenticated = scope ? isUnauthenticated(scope, container) : false;
+      const { attachments, attachmentContainers } = extractGmailAttachments(scope, container);
       const body = [subject, bodyText(container)].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
       return {
         senderName,
@@ -99,6 +194,8 @@ export const gmail: WebmailAdapter = {
         ...(unauthenticated ? { unauthenticated: true } : {}),
         body,
         links: linksIn(container),
+        ...(attachments.length ? { attachments } : {}),
+        ...(attachmentContainers.length ? { attachmentContainers } : {}),
         container,
       };
     });

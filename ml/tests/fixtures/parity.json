@@ -1,0 +1,243 @@
+[
+  {
+    "name": "empty_email",
+    "sender": "",
+    "body": "",
+    "links": [],
+    "expected": {
+      "n_links": 0, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 0, "body_len": 0
+    }
+  },
+  {
+    "name": "clean_same_domain",
+    "sender": "service@paypal.com",
+    "body": "Here is your monthly summary.",
+    "links": [{ "text": "www.paypal.com/summary", "href": "https://www.paypal.com/summary" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 0, "body_len": 29
+    }
+  },
+  {
+    "name": "angle_bracket_sender_same_domain",
+    "sender": "PayPal Support <Service@PayPal.com>",
+    "body": "Hello there",
+    "links": [{ "text": "View account", "href": "https://account.paypal.com/home" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 0, "body_len": 11
+    }
+  },
+  {
+    "name": "mismatched_link_text",
+    "sender": "alerts@bank.com",
+    "body": "Check your statement.",
+    "links": [{ "text": "www.bank.com/login", "href": "https://evil.example/login" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 1, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 0, "body_len": 21
+    }
+  },
+  {
+    "name": "ipv4_and_punycode_and_urgency",
+    "sender": "a@x.com",
+    "body": "URGENT: verify your password immediately or your account will be locked!",
+    "links": [
+      { "text": "Click", "href": "http://192.0.2.15/login" },
+      { "text": "Verify", "href": "https://xn--pple-43d.com/auth" }
+    ],
+    "expected": {
+      "n_links": 2, "n_text_href_mismatch": 0, "n_ip_links": 1, "n_punycode_links": 1,
+      "n_cloud_html_links": 0, "n_external_links": 2, "urgency_hits": 5, "body_len": 72
+    }
+  },
+  {
+    "name": "ipv6_literal_url_and_text",
+    "sender": "a@bank.com",
+    "body": "Sign in",
+    "links": [{ "text": "[2001:db8::1]:8080/login", "href": "http://[2001:db8::abcd]/login" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 1, "n_ip_links": 1, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 0, "body_len": 7
+    }
+  },
+  {
+    "name": "unicode_idn_homoglyph_href",
+    "sender": "security@apple.com",
+    "body": "Action required",
+    "links": [{ "text": "apple.com", "href": "https://аррӏе.com/verify" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 1, "n_ip_links": 0, "n_punycode_links": 1,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 1, "body_len": 15
+    }
+  },
+  {
+    "name": "cloud_storage_html_gcs_and_trailing_dot",
+    "sender": "alert@nozfr.itl",
+    "body": "Your photos will be deleted. Update billing details before expiration.",
+    "links": [
+      { "text": "Review billing", "href": "https://storage.googleapis.com./hmdbox/hmd_v2.html#?act=cl" },
+      { "text": "Logo", "href": "https://storage.googleapis.com/assets/logo.png" }
+    ],
+    "expected": {
+      "n_links": 2, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 1, "n_external_links": 2, "urgency_hits": 3, "body_len": 70
+    }
+  },
+  {
+    "name": "cloud_storage_semicolon_param_not_html_ext",
+    "sender": "a@x.com",
+    "body": "Test",
+    "links": [
+      { "text": "Open", "href": "https://bucket.s3.amazonaws.com/login.html;v=1" },
+      { "text": "Firebase", "href": "https://firebasestorage.googleapis.com/v0/b/x/o/100%25%2Flogin.%68tml?alt=media" }
+    ],
+    "expected": {
+      "n_links": 2, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 1, "n_external_links": 2, "urgency_hits": 0, "body_len": 4
+    }
+  },
+  {
+    "name": "multipart_suffix_co_uk_same_vs_diff",
+    "sender": "alerts@barclays.co.uk",
+    "body": "Hello",
+    "links": [
+      { "text": "www.barclays.co.uk/login", "href": "https://online.barclays.co.uk/x" },
+      { "text": "www.barclays.co.uk/help", "href": "https://evil.co.uk/help" }
+    ],
+    "expected": {
+      "n_links": 2, "n_text_href_mismatch": 1, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 0, "body_len": 5
+    }
+  },
+  {
+    "name": "multipart_suffix_indonesia_co_id",
+    "sender": "alerts@bca.co.id",
+    "body": "Notifikasi",
+    "links": [
+      { "text": "klik.bca.co.id", "href": "https://phish.co.id/login" },
+      { "text": "bca.co.id", "href": "https://klik.bca.co.id/home" }
+    ],
+    "expected": {
+      "n_links": 2, "n_text_href_mismatch": 1, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 0, "body_len": 10
+    }
+  },
+  {
+    "name": "non_http_mailto_and_anchor_ignored_as_external",
+    "sender": "billing@vendor.com",
+    "body": "Contact us",
+    "links": [
+      { "text": "Email support", "href": "mailto:support@other.com" },
+      { "text": "Top", "href": "#top" },
+      { "text": "JS", "href": "javascript:void(0)" }
+    ],
+    "expected": {
+      "n_links": 3, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 0, "body_len": 10
+    }
+  },
+  {
+    "name": "prose_filenames_and_emails_in_link_text",
+    "sender": "cloud-manager-support@mongodb.com",
+    "body": "If you didn't request this, please reset your password immediately.",
+    "links": [
+      { "text": "please reset your password immediately.", "href": "https://account.mongodb.com/reset" },
+      { "text": "report.pdf", "href": "https://account.mongodb.com/report.pdf" },
+      { "text": "Node.js", "href": "https://nodejs.org/en" },
+      { "text": "support@mongodb.com", "href": "https://mongodb.com/support" }
+    ],
+    "expected": {
+      "n_links": 4, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 2, "body_len": 67
+    }
+  },
+  {
+    "name": "embedded_explicit_url_in_prose_link_text",
+    "sender": "a@paypal.com",
+    "body": "Notice",
+    "links": [{ "text": "Visit https://www.paypal.com/login.", "href": "https://evil-login.example/p" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 1, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 0, "body_len": 6
+    }
+  },
+  {
+    "name": "emoji_in_subject_codepoint_length",
+    "sender": "alert@evil.example",
+    "body": "🚨 Action required: unauthorized payment method!",
+    "links": [{ "text": "Confirm now", "href": "https://evil.example/pay" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 3, "body_len": 47
+    }
+  },
+  {
+    "name": "backslash_authority_normalization",
+    "sender": "a@paypal.com",
+    "body": "Check",
+    "links": [{ "text": "paypal.com", "href": "https://evil.example\\@paypal.com/login" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 1, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 1, "urgency_hits": 0, "body_len": 5
+    }
+  },
+  {
+    "name": "invalid_port_rejected",
+    "sender": "a@paypal.com",
+    "body": "Test",
+    "links": [{ "text": "paypal.com", "href": "http://evil.example:abc/path" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 0, "body_len": 4
+    }
+  },
+  {
+    "name": "fullwidth_digits_not_treated_as_ipv4",
+    "sender": "a@bank.com",
+    "body": "Note",
+    "links": [{ "text": "１.２.３.４", "href": "https://bank.com/info" }],
+    "expected": {
+      "n_links": 1, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 0, "body_len": 4
+    }
+  },
+  {
+    "name": "regional_s3_and_r2_and_azure_cloud_html",
+    "sender": "x@y.org",
+    "body": "Files",
+    "links": [
+      { "text": "1", "href": "https://s3.us-east-2.amazonaws.com/b/index.xhtml" },
+      { "text": "2", "href": "https://pub-99.r2.dev/auth.shtml" },
+      { "text": "3", "href": "https://acct.blob.core.windows.net/c/doc.htm" }
+    ],
+    "expected": {
+      "n_links": 3, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 3, "n_external_links": 3, "urgency_hits": 0, "body_len": 5
+    }
+  },
+  {
+    "name": "ipfs_gateway_html_vs_pdf",
+    "sender": "a@ipfs.io",
+    "body": "Docs",
+    "links": [
+      { "text": "Login", "href": "https://cloudflare-ipfs.com/ipfs/QmHash/login.html" },
+      { "text": "Paper", "href": "https://ipfs.io/ipfs/QmHash/whitepaper.pdf" }
+    ],
+    "expected": {
+      "n_links": 2, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 1, "n_external_links": 1, "urgency_hits": 0, "body_len": 4
+    }
+  },
+  {
+    "name": "all_urgency_phrases_counted_case_insensitively",
+    "sender": "",
+    "body": "Act Now! Unusual Activity detected. Account Suspended and Expires soon.",
+    "links": [],
+    "expected": {
+      "n_links": 0, "n_text_href_mismatch": 0, "n_ip_links": 0, "n_punycode_links": 0,
+      "n_cloud_html_links": 0, "n_external_links": 0, "urgency_hits": 4, "body_len": 71
+    }
+  }
+]

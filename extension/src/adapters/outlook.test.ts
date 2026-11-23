@@ -87,6 +87,32 @@ describe('outlook adapter', () => {
     document.body.innerHTML = `<div role="main"><div role="listbox">Inbox list</div></div>`;
     expect(outlook.extract(document)).toBeNull();
   });
+
+  it('extracts attachment wells and cards while excluding compose attach buttons', () => {
+    document.body.innerHTML = `
+      <div aria-label="Compose">
+        <button aria-label="Attach file">Attach</button>
+      </div>
+      <div aria-label="Reading Pane">
+        <div aria-label="Email message">
+          <button aria-label="From: Billing &lt;bill@vendor.com&gt;">Billing</button>
+          <div role="region" aria-label="Attachments" id="well">
+            <div data-testid="attachment-card" id="card1" aria-label="Attached file: invoice.html, 12 KB">
+              <span>invoice.html</span>
+              <button aria-label="Download invoice.html">Download</button>
+            </div>
+            <button id="dl-all" aria-label="Download all attachments">Download all</button>
+          </div>
+          <div aria-label="Message body" id="body">
+            Please review <a id="inline" download="manual.pdf" href="data:application/pdf;base64,AA==">manual.pdf</a>.
+          </div>
+        </div>
+      </div>`;
+    const e = outlook.extract(document)!;
+    expect(e.attachments?.map((a) => a.name)).toEqual(['manual.pdf', 'invoice.html']);
+    expect(e.attachments?.map((a) => a.element.id)).toEqual(['inline', 'card1']);
+    expect(e.attachmentContainers?.map((el) => el.id)).toEqual(['well']);
+  });
 });
 
 describe('unwrapSafeLink', () => {

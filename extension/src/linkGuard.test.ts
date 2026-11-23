@@ -35,6 +35,13 @@ describe('unwrapRedirectUrl', () => {
     );
   });
 
+  it('unwraps multi-hop redirect chains (Safe Links -> Google -> target) and handles trailing dots', () => {
+    const inner = encodeURIComponent('https://www.google.com/url?q=https%3A%2F%2Fevil.example%2Fsteal.svg');
+    expect(unwrapRedirectUrl(`https://nam04.safelinks.protection.outlook.com./?url=${inner}`)).toBe(
+      'https://evil.example/steal.svg',
+    );
+  });
+
   it('ignores non-http(s) wrapped targets and leaves normal URLs alone', () => {
     const js = 'https://www.google.com/url?q=javascript%3Aalert(1)';
     expect(unwrapRedirectUrl(js)).toBe(js);
@@ -43,12 +50,14 @@ describe('unwrapRedirectUrl', () => {
 });
 
 describe('analyzeLinkDestination', () => {
-  it('flags danger for @ credential disguises, raw IPs, punycode, cloud HTML, and risky file extensions', () => {
+  it('flags danger for @ credential disguises, IPv4/IPv6 literals, punycode, trailing-dot cloud HTML, and risky file extensions', () => {
     expect(analyzeLinkDestination('https://paypal.com@evil.example/login').level).toBe('danger');
     expect(analyzeLinkDestination('http://1.2.3.4/a').level).toBe('danger');
+    expect(analyzeLinkDestination('http://[2001:db8::1]/login').level).toBe('danger');
     expect(analyzeLinkDestination('https://xn--pple-43d.com/verify').level).toBe('danger');
     expect(analyzeLinkDestination('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl').level).toBe('danger');
-    for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso']) {
+    expect(analyzeLinkDestination('https://storage.googleapis.com./hmdbox/hmd_v2.html').level).toBe('danger');
+    for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso', 'docm', 'mhtml', 'jar']) {
       const risk = analyzeLinkDestination(`https://cdn.example.com/files/doc.${ext}`);
       expect(risk.level).toBe('danger');
       expect(risk.reasons.join(' ')).toContain(`.${ext}`);
@@ -58,8 +67,8 @@ describe('analyzeLinkDestination', () => {
     expect(wrapped.href).toBe('https://evil.example/payload.svg');
   });
 
-  it('flags warning for URL shorteners and unencrypted http links', () => {
-    for (const u of ['https://bit.ly/3xyz', 'https://rebrand.ly/abc']) {
+  it('flags warning for URL shorteners (including trailing-dot FQDNs) and unencrypted http links', () => {
+    for (const u of ['https://bit.ly/3xyz', 'https://bit.ly./3xyz', 'https://rebrand.ly/abc']) {
       const r = analyzeLinkDestination(u);
       expect(r.level).toBe('warning');
       expect(r.needsDomainCheck).toBe(false);

@@ -1,9 +1,11 @@
-import { icloudFrameRole } from '../src/adapters/icloud';
 import { isValidDomain } from '../src/domain';
 import { getIntel, type DomainIntel } from '../src/domainIntel';
+import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { isSafeHttpUrl } from '../src/linkGuard';
 
 const WARN_TTL_MS = 3600_000;
+const MAX_BODY_CHARS = 20_000;
+const MAX_LINKS = 500;
 
 function frameRoleOf(url?: string) {
   if (!url) return null;
@@ -14,26 +16,49 @@ function frameRoleOf(url?: string) {
   }
 }
 
+async function openTab(url: string, active: boolean, openerTabId?: number) {
+  if (openerTabId !== undefined) {
+    try {
+      return await browser.tabs.create({ url, active, openerTabId });
+    } catch {
+      // Fall back when openerTabId is closed or unsupported in the current window context.
+    }
+  }
+  return browser.tabs.create({ url, active });
+}
+
 async function pruneOldWarnings(now: number): Promise<void> {
   const store = browser.storage.session;
   if (!store?.get || !store?.remove) return;
   try {
     const all = (await (store.get as (k?: null) => Promise<Record<string, unknown>>)(null)) ?? {};
     const stale = Object.entries(all)
-      .filter(([k, v]) => k.startsWith('warn:') && typeof (v as { createdAt?: unknown })?.createdAt === 'number' && now - ((v as { createdAt: number }).createdAt) > WARN_TTL_MS)
+      .filter(
+        ([k, v]) =>
+          k.startsWith('warn:') &&
+          typeof (v as { createdAt?: unknown })?.createdAt === 'number' &&
+          now - (v as { createdAt: number }).createdAt > WARN_TTL_MS,
+      )
       .map(([k]) => k);
     if (stale.length) await store.remove(stale);
-  } catch { /* best effort */ }
+  } catch {
+    /* best effort */
+  }
 }
 
 export default defineBackground(() => {
   const inflight = new Map<string, Promise<DomainIntel>>();
 
+  browser.tabs?.onRemoved?.addListener((tabId: number) => {
+    void browser.storage.session?.remove?.(`tab:${tabId}`).catch(() => {});
+  });
+
   browser.runtime.onMessage.addListener(
     (
       msg: unknown,
-      sender: { tab?: { id?: number }; frameId?: number; url?: string },
+      sender: { id?: string; tab?: { id?: number }; frameId?: number; url?: string },
     ): Promise<unknown> | undefined => {
+      if (browser.runtime?.id && sender.id && sender.id !== browser.runtime.id) return undefined;
       const m = msg as
         | {
             type?: string;
@@ -42,7 +67,9 @@ export default defineBackground(() => {
             active?: unknown;
             body?: unknown;
             links?: unknown;
+            attachmentNames?: unknown;
             locked?: unknown;
+            attachmentsLocked?: unknown;
             frameIds?: unknown;
             href?: unknown;
             host?: unknown;
@@ -53,7 +80,12 @@ export default defineBackground(() => {
             intel?: unknown;
           }
         | undefined;
-      if (m?.type === 'verdict' && sender.tab?.id !== undefined) {
+      if (
+        m?.type === 'verdict' &&
+        sender.tab?.id !== undefined &&
+        isSupportedWebmailUrl(sender.url) &&
+        (sender.frameId === 0 || frameRoleOf(sender.url) === 'app')
+      ) {
         void browser.storage.session?.set?.({ [`tab:${sender.tab.id}`]: m.payload });
         return undefined;
       }
@@ -66,7 +98,14 @@ export default defineBackground(() => {
         }
         return p;
       }
-      if (m?.type === 'openWarning' && sender.tab?.id !== undefined && typeof m.href === 'string' && isSafeHttpUrl(m.href)) {
+      if (
+        m?.type === 'openWarning' &&
+        sender.tab?.id !== undefined &&
+        isSupportedWebmailUrl(sender.url) &&
+        typeof m.href === 'string' &&
+        isSafeHttpUrl(m.href)
+      ) {
+        const tabId = sender.tab.id;
         const id = crypto.randomUUID();
         const now = Date.now();
         const reasons = Array.isArray(m.reasons)
@@ -85,14 +124,17 @@ export default defineBackground(() => {
         return (async () => {
           await pruneOldWarnings(now);
           await browser.storage.session?.set?.({ [`warn:${id}`]: entry });
-          await browser.tabs.create({
-            url: browser.runtime.getURL(`/warning.html?id=${encodeURIComponent(id)}`),
-            active: true,
-          });
+          await openTab(browser.runtime.getURL(`/warning.html?id=${encodeURIComponent(id)}`), true, tabId);
         })();
       }
-      if (m?.type === 'openSafeLink' && sender.tab?.id !== undefined && typeof m.href === 'string' && isSafeHttpUrl(m.href)) {
-        return browser.tabs.create({ url: m.href, active: m.active !== false });
+      if (
+        m?.type === 'openSafeLink' &&
+        sender.tab?.id !== undefined &&
+        isSupportedWebmailUrl(sender.url) &&
+        typeof m.href === 'string' &&
+        isSafeHttpUrl(m.href)
+      ) {
+        return openTab(m.href, m.active !== false, sender.tab.id);
       }
       if (
         m?.type === 'icloudBody' &&
@@ -100,13 +142,32 @@ export default defineBackground(() => {
         sender.frameId !== undefined &&
         frameRoleOf(sender.url) === 'sandbox'
       ) {
+        const attachmentNames = Array.isArray(m.attachmentNames)
+          ? m.attachmentNames
+              .filter((n): n is string => typeof n === 'string')
+              .slice(0, 50)
+              .map((n) => n.slice(0, 160))
+          : [];
+        const links = Array.isArray(m.links)
+          ? m.links
+              .filter(
+                (l): l is { text: string; href: string } =>
+                  Boolean(l) &&
+                  typeof l === 'object' &&
+                  typeof (l as { text?: unknown }).text === 'string' &&
+                  typeof (l as { href?: unknown }).href === 'string',
+              )
+              .slice(0, MAX_LINKS)
+              .map((l) => ({ text: l.text.slice(0, 300), href: l.href.slice(0, 2048) }))
+          : [];
         void browser.tabs
           .sendMessage(sender.tab.id, {
             type: 'icloudBody',
             frameId: sender.frameId,
             active: Boolean(m.active),
-            body: typeof m.body === 'string' ? m.body : '',
-            links: Array.isArray(m.links) ? m.links : [],
+            body: typeof m.body === 'string' ? m.body.slice(0, MAX_BODY_CHARS) : '',
+            links,
+            attachmentNames,
           })
           .catch(() => {});
         return undefined;
@@ -116,8 +177,11 @@ export default defineBackground(() => {
           ? m.frameIds.filter((id): id is number => typeof id === 'number').slice(0, 20)
           : [];
         const locked = Boolean(m.locked);
+        const attachmentsLocked = Boolean(m.attachmentsLocked);
         for (const frameId of frameIds) {
-          void browser.tabs.sendMessage(sender.tab.id, { type: 'icloudLock', locked }, { frameId }).catch(() => {});
+          void browser.tabs
+            .sendMessage(sender.tab.id, { type: 'icloudLock', locked, attachmentsLocked }, { frameId })
+            .catch(() => {});
         }
         return undefined;
       }

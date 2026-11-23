@@ -1,26 +1,35 @@
 import { adapterFor } from '../src/adapters';
-import { bodyText, linksIn } from '../src/adapters/extract';
+import { bodyText, inlineAttachmentsIn, linksIn } from '../src/adapters/extract';
 import {
   type ICloudSandboxPayload,
   combineICloudThread,
   extractICloudHeaders,
   extractICloudSandbox,
-  icloudFrameRole,
 } from '../src/adapters/icloud';
-import type { ExtractedEmail, WebmailAdapter } from '../src/adapters/types';
+import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from '../src/adapters/types';
 import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender, untrustEmails } from '../src/allowlist';
+import { type AttachmentAnalysis, analyzeAttachments } from '../src/attachments';
+import { eventElement, getAttr, getAttrNS, resolveAnchorHref, XLINK_NS } from '../src/dom';
 import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
-import { WEBMAIL_MATCHES } from '../src/hosts';
+import { icloudFrameRole, WEBMAIL_MATCHES } from '../src/hosts';
 import { analyzeLinkDestination, isSafeHttpUrl, mergeLinkIntel } from '../src/linkGuard';
 import { analyzeSender, canTrustByAllowlist } from '../src/sender';
+import {
+  isAttachmentLocked,
+  lockAttachments,
+  setAttachmentBlockedHandler,
+  unlockAttachments,
+} from '../src/ui/attachmentLock';
 import { decideBanner, removeBanner, showBanner } from '../src/ui/banner';
 import type { IntelState } from '../src/ui/details';
-import { isLocked, lockLinks, unlockLinks } from '../src/ui/linkLock';
+import { isLocked, lockLinks, setLinkBlockedHandler, unlockLinks } from '../src/ui/linkLock';
+import { showPausedAttachmentToast } from '../src/ui/linkToast';
 
 const DEBOUNCE_MS = 400;
 const MAX_THREAD_MESSAGES = 20;
+const MAX_SESSION_SET = 200;
 const CLICK_INTEL_TIMEOUT_MS = 700;
 const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
 
@@ -31,11 +40,32 @@ interface ScannableMsg {
   unauthenticated?: boolean;
   body: string;
   links: Link[];
+  attachments?: AttachmentRef[];
+  attachmentContainers?: HTMLElement[];
+  attachmentNames?: string[];
+}
+
+function addBounded(set: Set<string>, key: string): void {
+  if (set.has(key)) return;
+  if (set.size >= MAX_SESSION_SET) {
+    const oldest = set.values().next().value;
+    if (oldest !== undefined) set.delete(oldest);
+  }
+  set.add(key);
 }
 
 function fallbackExtract(doc: Document): ExtractedEmail | null {
   const container = FALLBACK_SELECTORS.map((s) => doc.querySelector<HTMLElement>(s)).find(Boolean);
-  return container ? { senderName: '', senderAddress: '', body: bodyText(container), links: linksIn(container), container } : null;
+  if (!container) return null;
+  const attachments = inlineAttachmentsIn(container);
+  return {
+    senderName: '',
+    senderAddress: '',
+    body: bodyText(container),
+    links: linksIn(container),
+    ...(attachments.length ? { attachments } : {}),
+    container,
+  };
 }
 
 function extractAll(adapter: WebmailAdapter | undefined, doc: Document): ExtractedEmail[] {
@@ -44,8 +74,38 @@ function extractAll(adapter: WebmailAdapter | undefined, doc: Document): Extract
   return one ? [one] : [];
 }
 
-const msgKey = (e: ScannableMsg) =>
-  `${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}`;
+const attachmentNamesOf = (e: ScannableMsg): string[] =>
+  e.attachmentNames ?? e.attachments?.map((a) => a.name) ?? [];
+
+function attachmentElementsOf(e: ScannableMsg): HTMLElement[] {
+  return [...new Set([...(e.attachmentContainers ?? []), ...(e.attachments?.map((a) => a.element) ?? [])])];
+}
+
+function attachmentNameMapOf(e: ScannableMsg): Map<HTMLElement, string> {
+  const map = new Map<HTMLElement, string>();
+  for (const a of e.attachments ?? []) {
+    if (a.name) map.set(a.element, a.name);
+  }
+  return map;
+}
+
+function lockMessageAttachments(e: ScannableMsg): void {
+  const els = attachmentElementsOf(e);
+  if (els.length > 0) lockAttachments(els, attachmentNameMapOf(e));
+}
+
+function unlockMessageAttachments(e: ScannableMsg): void {
+  const els = attachmentElementsOf(e);
+  if (els.length > 0) unlockAttachments(els);
+}
+
+const arraysEqual = <T>(a: readonly T[], b: readonly T[]): boolean =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
+const msgKey = (e: ScannableMsg) => {
+  const names = attachmentNamesOf(e);
+  return `${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}\natt:${names.join('|')}:${names.length}:${e.attachments?.length ?? 0}:${e.attachmentContainers?.length ?? 0}`;
+};
 
 function createScheduler(runScan: () => Promise<void>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -55,8 +115,18 @@ function createScheduler(runScan: () => Promise<void>) {
     clearTimeout(timer);
     timer = undefined;
     if (inflight) return inflight;
-    pending = false;
-    inflight = runScan().finally(() => {
+    inflight = (async () => {
+      do {
+        pending = false;
+        clearTimeout(timer);
+        timer = undefined;
+        try {
+          await runScan();
+        } catch {
+          // Keep scheduler loop alive on unexpected DOM mutations
+        }
+      } while (pending);
+    })().finally(() => {
       inflight = null;
     });
     return inflight;
@@ -66,37 +136,90 @@ function createScheduler(runScan: () => Promise<void>) {
     clearTimeout(timer);
     timer = setTimeout(() => {
       const run = () => void exec();
-      'requestIdleCallback' in window ? requestIdleCallback(run) : run();
+      'requestIdleCallback' in window ? requestIdleCallback(run, { timeout: 250 }) : run();
     }, DEBOUNCE_MS);
   };
   return { schedule, flush: exec, isPending: () => pending || inflight !== null };
 }
 
+function matchAttachmentInMessages(
+  messages: readonly ScannableMsg[],
+  el: Element,
+): { element: HTMLElement; name: string } | null {
+  for (const m of messages) {
+    for (const att of m.attachments ?? []) {
+      if (att.element === el || att.element.contains(el)) return { element: att.element, name: att.name };
+    }
+    for (const box of m.attachmentContainers ?? []) {
+      if (box === el || box.contains(el)) return { element: box, name: '' };
+    }
+  }
+  return null;
+}
+
 function installClickGuard(opts: {
   findTarget: (el: Element) => { container: HTMLElement; senderAddress: string; senderRegistrable: string } | null;
+  findAttachment?: (el: Element) => { element: HTMLElement; name: string } | null;
   isPending: () => boolean;
   flushScan: () => Promise<void>;
 }) {
-  const onLinkClick = (e: Event) => {
-    const me = e as MouseEvent;
-    if (e.type === 'auxclick' && me.button !== 1) return;
-    if (e.type === 'click' && me.button !== 0) return;
-
-    const node = e.target as Node | null;
-    const el = node && node.nodeType === 1 ? (node as Element) : (node?.parentElement ?? null);
+  const onEvent = (e: Event) => {
+    const el = eventElement(e);
     if (!el) return;
-    const a = el.closest('a[href], area[href]');
+
+    if (e.type === 'submit') {
+      const form = el.closest('form');
+      if (!form) return;
+      const hit = opts.findTarget(form);
+      if (!hit || isLocked(hit.container) || !opts.isPending()) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void opts.flushScan();
+      return;
+    }
+
+    if (e.type === 'keydown') {
+      const key = (e as KeyboardEvent).key;
+      if (key !== 'Enter' && key !== ' ') return;
+    } else if (e.type === 'auxclick') {
+      if ((e as MouseEvent).button !== 1) return;
+    } else if (e.type === 'click') {
+      if ((e as MouseEvent).button !== 0) return;
+    }
+
+    const attHit = opts.findAttachment?.(el);
+    if (attHit && !isAttachmentLocked(attHit.element) && opts.isPending()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.type === 'mousedown' || e.type === 'pointerdown') return;
+      void (async () => {
+        await opts.flushScan();
+        const post = opts.findAttachment?.(el) ?? attHit;
+        if (isAttachmentLocked(post.element) || post.element.closest('[data-ped-att-locked]')) {
+          showPausedAttachmentToast(
+            document,
+            getAttr(post.element, 'data-ped-att-name') ?? post.name,
+            el instanceof HTMLElement ? el : post.element,
+          );
+        }
+      })();
+      return;
+    }
+
+    if (e.type !== 'click' && e.type !== 'auxclick') return;
+
+    const a = el.closest('a, area');
     if (!a) return;
+    const rawAttr = (getAttr(a, 'href') ?? getAttrNS(a, XLINK_NS, 'href') ?? getAttr(a, 'xlink:href') ?? '').trim();
+    if (!rawAttr || rawAttr.startsWith('#')) return;
 
     const hit = opts.findTarget(a);
     if (!hit || isLocked(hit.container)) return;
 
-    const rawHref =
-      typeof (a as HTMLAnchorElement).href === 'string'
-        ? (a as HTMLAnchorElement).href
-        : (a.getAttribute('href') ?? '');
+    const rawHref = resolveAnchorHref(a);
     if (!isSafeHttpUrl(rawHref)) return;
 
+    const me = e as MouseEvent;
     const pending = opts.isPending();
     const initialRisk = analyzeLinkDestination(rawHref, hit.senderRegistrable, location.origin);
     if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
@@ -130,12 +253,15 @@ function installClickGuard(opts: {
       }
 
       if (risk.needsDomainCheck) {
+        let timerId: ReturnType<typeof setTimeout> | undefined;
         const intel = await Promise.race([
           (browser.runtime.sendMessage({ type: 'domainIntel', domain: risk.registrable }) as Promise<
             DomainIntel | undefined
           >).catch(() => undefined),
-          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), CLICK_INTEL_TIMEOUT_MS)),
-        ]);
+          new Promise<undefined>((resolve) => {
+            timerId = setTimeout(() => resolve(undefined), CLICK_INTEL_TIMEOUT_MS);
+          }),
+        ]).finally(() => clearTimeout(timerId));
         const finalRisk = mergeLinkIntel(risk, intel);
         if (finalRisk.level !== 'safe') {
           void browser.runtime
@@ -154,53 +280,73 @@ function installClickGuard(opts: {
         }
       }
 
+      let sameOrigin = false;
+      try {
+        sameOrigin = new URL(rawHref).origin === location.origin;
+      } catch {
+        sameOrigin = false;
+      }
+      if (sameOrigin && activeTab && (getAttr(a, 'target') ?? '').toLowerCase() !== '_blank' && window === window.top) {
+        location.assign(rawHref);
+        return;
+      }
       void browser.runtime.sendMessage({ type: 'openSafeLink', href: rawHref, active: activeTab }).catch(() => {});
     })();
   };
 
-  document.addEventListener('click', onLinkClick, true);
-  document.addEventListener('auxclick', onLinkClick, true);
+  for (const type of ['click', 'auxclick', 'mousedown', 'pointerdown', 'keydown', 'submit']) {
+    document.addEventListener(type, onEvent, true);
+  }
 }
 
 async function evaluateAndRender<T extends ScannableMsg>(opts: {
   kv: typeof browser.storage.local;
   messages: T[];
-  trustKey: string;
   trustedThisSession: Set<string>;
   dismissed: Set<string>;
   isStale: () => boolean;
   onEvaluated?: (items: { email: T; sender: ReturnType<typeof analyzeSender> }[]) => void;
-  applyLocks: (items: { email: T; trusted: boolean }[], anyLinksLocked: boolean) => void;
+  applyLocks: (items: { email: T; trusted: boolean; hasAttachments: boolean }[], anyLinksLocked: boolean) => void;
   unlockAll: (emails: T[]) => void;
   unlockMatching: (emails: T[]) => void;
 }) {
-  const { kv, messages, trustKey, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
-  const threadUnlocked = trustedThisSession.has(trustKey);
-  const [trustedSendersList, trustedEmailsList] = await Promise.all([listTrusted(kv), listTrustedEmails(kv)]);
+  const { kv, messages, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
+  const [trustedSendersList, trustedEmailsList, prelim] = await Promise.all([
+    listTrusted(kv),
+    listTrustedEmails(kv),
+    Promise.all(
+      messages.map(async (email) => {
+        const attNames = attachmentNamesOf(email);
+        const attCount = Math.max(attNames.length, email.attachments?.length ?? 0);
+        const hash = await hashEmail(email.senderAddress, email.body, email.links, attNames);
+        return { email, attNames, attCount, hash };
+      }),
+    ),
+  ]);
   const trustedSenders = new Set(trustedSendersList);
   const trustedEmails = new Set(trustedEmailsList);
-  const items = await Promise.all(
-    messages.map(async (email) => {
-      const k = msgKey(email);
-      const hash = await hashEmail(email.senderAddress, email.body, email.links);
-      const sender = analyzeSender(email.senderName, email.senderAddress, email.links, {
-        viaDomain: email.viaDomain,
-        unauthenticated: email.unauthenticated,
-      });
-      const allowlisted = sender.valid && trustedSenders.has(sender.address);
-      const allowlistTrusted = allowlisted && canTrustByAllowlist(sender);
-      if (allowlisted && !allowlistTrusted) {
-        sender.warnings.unshift(
-          `Claims to be a trusted sender (${sender.address}), but failed authentication or used an unexpected relay`,
-        );
-      }
-      const trusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash) || allowlistTrusted;
-      const verdict: Verdict = trusted
-        ? { score: 0, level: 'safe', reasons: [] }
-        : scoreEmail(sender.address, email.body, email.links);
-      return { email, key: k, hash, sender, trusted, verdict };
-    }),
-  );
+  const threadHashKey = prelim.map((p) => p.hash).join(',');
+  const threadUnlocked = trustedThisSession.has(threadHashKey);
+
+  const items = prelim.map(({ email, attNames, attCount, hash }) => {
+    const sender = analyzeSender(email.senderName, email.senderAddress, email.links, {
+      viaDomain: email.viaDomain,
+      unauthenticated: email.unauthenticated,
+    });
+    const allowlisted = sender.valid && trustedSenders.has(sender.address);
+    const allowlistTrusted = allowlisted && canTrustByAllowlist(sender);
+    if (allowlisted && !allowlistTrusted) {
+      sender.warnings.unshift(
+        `Claims to be a trusted sender (${sender.address}), but failed authentication or used an unexpected relay`,
+      );
+    }
+    const trusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash) || allowlistTrusted;
+    const verdict: Verdict = trusted
+      ? { score: 0, level: 'safe', reasons: [] }
+      : scoreEmail(sender.address, email.body, email.links);
+    const attAnalysis: AttachmentAnalysis | undefined = trusted ? undefined : analyzeAttachments(attNames, attCount);
+    return { email, attNames, attCount, hash, sender, allowlistTrusted, trusted, verdict, attAnalysis };
+  });
   if (isStale()) return;
   onEvaluated?.(items);
 
@@ -211,13 +357,21 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     }
   }
 
+  let showingUndoPill = false;
+
   const render = () => {
-    const unlockedThread = trustedThisSession.has(trustKey);
+    const unlockedThread = trustedThisSession.has(threadHashKey);
     const evaluated = items.map((item) => {
       const intel = item.sender.registrable ? intelByDomain.get(item.sender.registrable) : undefined;
       const banner = item.trusted
         ? null
-        : decideBanner(item.verdict, item.sender, intel, unlockedThread || trustedThisSession.has(item.key));
+        : decideBanner(
+            item.verdict,
+            item.sender,
+            intel,
+            unlockedThread || trustedThisSession.has(item.hash),
+            item.attAnalysis,
+          );
       return { item, intel, banner };
     });
 
@@ -225,7 +379,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     let bestRank = -1;
     for (const entry of evaluated) {
       if (!entry.banner) continue;
-      const rank = (entry.banner.level === 'danger' ? 10 : 0) + entry.item.verdict.score;
+      const attBoost = entry.item.attAnalysis?.level === 'warning' ? 0.2 : entry.item.attAnalysis?.count ? 0.1 : 0;
+      const rank = (entry.banner.level === 'danger' ? 10 : 0) + entry.item.verdict.score + attBoost;
       if (rank >= bestRank) {
         bestRank = rank;
         primaryEntry = entry;
@@ -233,8 +388,9 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     }
 
     const anyLinksLocked = evaluated.some((e) => e.banner?.linksLocked);
+    const anyAttachmentsLocked = evaluated.some((e) => e.banner?.attachmentsLocked);
     applyLocks(
-      evaluated.map(({ item }) => ({ email: item.email, trusted: item.trusted })),
+      evaluated.map(({ item }) => ({ email: item.email, trusted: item.trusted, hasAttachments: item.attCount > 0 })),
       anyLinksLocked,
     );
 
@@ -246,24 +402,49 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           verdict: primaryEntry.item.verdict,
           sender: primaryEntry.item.sender,
           intel: primaryEntry.intel,
+          attachments: primaryEntry.item.trusted ? undefined : primaryEntry.item.attAnalysis,
+          trusted: primaryEntry.item.trusted,
         },
       })
       .catch(() => {});
 
-    if (!primaryBanner || dismissed.has(trustKey)) {
+    if (!primaryBanner) {
+      setAttachmentBlockedHandler(document, null);
+      setLinkBlockedHandler(document, null);
+      if (!showingUndoPill) removeBanner();
+      return;
+    }
+
+    const reopenBanner = () => {
+      if (!dismissed.delete(threadHashKey)) return;
+      render();
+    };
+    setAttachmentBlockedHandler(document, reopenBanner);
+    setLinkBlockedHandler(document, reopenBanner);
+
+    if (dismissed.has(threadHashKey)) {
       removeBanner();
       return;
     }
+
     showBanner(
-      { ...primaryBanner, linksLocked: anyLinksLocked },
+      {
+        ...primaryBanner,
+        linksLocked: anyLinksLocked,
+        ...(anyAttachmentsLocked ? { attachmentsLocked: true } : {}),
+      },
       {
         onUnlock: async () => {
-          trustedThisSession.add(trustKey);
+          showingUndoPill = true;
+          addBounded(trustedThisSession, threadHashKey);
           for (const { item } of evaluated) {
-            trustedThisSession.add(item.hash);
+            addBounded(trustedThisSession, item.hash);
             item.trusted = true;
             item.verdict = { score: 0, level: 'safe', reasons: [] };
+            item.attAnalysis = undefined;
           }
+          setAttachmentBlockedHandler(document, null);
+          setLinkBlockedHandler(document, null);
           unlockAll(evaluated.map((e) => e.item.email));
           browser.runtime
             .sendMessage({
@@ -272,55 +453,52 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
                 verdict: { score: 0, level: 'safe', reasons: [] },
                 sender: primaryEntry.item.sender,
                 intel: primaryEntry.intel,
+                trusted: true,
               },
             })
             .catch(() => {});
           await trustEmails(kv, evaluated.map((e) => e.item.hash));
         },
         onUndoUnlock: async () => {
-          trustedThisSession.delete(trustKey);
+          showingUndoPill = false;
+          trustedThisSession.delete(threadHashKey);
           const hashes = evaluated.map((e) => e.item.hash);
           for (const { item } of evaluated) {
             trustedThisSession.delete(item.hash);
-            item.trusted = false;
-            item.verdict = scoreEmail(item.sender.address, item.email.body, item.email.links);
+            item.trusted = item.allowlistTrusted;
+            item.verdict = item.trusted
+              ? { score: 0, level: 'safe', reasons: [] }
+              : scoreEmail(item.sender.address, item.email.body, item.email.links);
+            item.attAnalysis = item.trusted ? undefined : analyzeAttachments(item.attNames, item.attCount);
           }
           await untrustEmails(kv, hashes);
           render();
         },
         onTrustSender: async () => {
+          if (!canTrustByAllowlist(primaryEntry.item.sender)) return false;
           const addr = primaryEntry.item.sender.address;
           const ok = await trustSender(kv, addr);
           if (ok) {
             const matched: T[] = [];
             for (const { item } of evaluated) {
-              if (item.sender.address === addr) {
+              if (item.sender.address === addr && canTrustByAllowlist(item.sender)) {
+                item.allowlistTrusted = true;
                 item.trusted = true;
                 item.verdict = { score: 0, level: 'safe', reasons: [] };
+                item.attAnalysis = undefined;
                 matched.push(item.email);
               }
             }
-            const anyRemainingBanner = evaluated.some(({ item }) => {
-              if (item.trusted) return false;
-              const intel = item.sender.registrable ? intelByDomain.get(item.sender.registrable) : undefined;
-              return decideBanner(item.verdict, item.sender, intel, false) !== null;
-            });
-            if (!anyRemainingBanner) {
-              unlockAll(evaluated.map((e) => e.item.email));
-              browser.runtime
-                .sendMessage({
-                  type: 'verdict',
-                  payload: { verdict: { score: 0, level: 'safe', reasons: [] }, sender: primaryEntry.item.sender, intel: undefined },
-                })
-                .catch(() => {});
-            } else {
-              unlockMatching(matched);
-            }
+            unlockMatching(matched);
+            render();
           }
           return ok;
         },
         onReport: () => recordFalsePositive(kv, { ...primaryEntry.item.verdict, reasons: primaryBanner.reasons }),
-        onDismiss: () => dismissed.add(trustKey),
+        onDismiss: () => {
+          showingUndoPill = false;
+          addBounded(dismissed, threadHashKey);
+        },
       },
     );
   };
@@ -348,6 +526,8 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   const containerSender = new WeakMap<HTMLElement, { address: string; registrable: string }>();
   let lastKey = '';
   let activeContainers: HTMLElement[] = [];
+  let activeMessages: ExtractedEmail[] = [];
+  let activeAttachmentEls: HTMLElement[] = [];
   let token = 0;
 
   const scan = async () => {
@@ -355,7 +535,12 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     const emails = extractAll(adapter, document);
     if (emails.length === 0) {
       for (const c of activeContainers) unlockLinks(c);
+      if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
+      setAttachmentBlockedHandler(document, null);
+      setLinkBlockedHandler(document, null);
       activeContainers = [];
+      activeMessages = [];
+      activeAttachmentEls = [];
       lastKey = '';
       ++token;
       removeBanner();
@@ -365,19 +550,28 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
 
     const messages = emails.slice(-MAX_THREAD_MESSAGES);
     const threadKey = messages.map(msgKey).join('\n---\n');
+    const nextContainers = messages.map((m) => m.container);
+    const nextAttachmentEls = [...new Set(messages.flatMap(attachmentElementsOf))];
+
     if (
       threadKey === lastKey &&
-      messages.length === activeContainers.length &&
-      messages.every((m, i) => m.container === activeContainers[i])
+      arraysEqual(nextContainers, activeContainers) &&
+      arraysEqual(nextAttachmentEls, activeAttachmentEls)
     ) {
-      return; // unchanged thread => no work
+      return; // unchanged thread and attachment DOM => no work
     }
 
-    const newContainers = new Set(messages.map((m) => m.container));
+    const newContainers = new Set(nextContainers);
     for (const c of activeContainers) {
       if (!newContainers.has(c)) unlockLinks(c);
     }
-    activeContainers = messages.map((m) => m.container);
+    const newAttSet = new Set(nextAttachmentEls);
+    const staleAtts = activeAttachmentEls.filter((el) => !newAttSet.has(el));
+    if (staleAtts.length) unlockAttachments(staleAtts);
+
+    activeContainers = nextContainers;
+    activeMessages = messages;
+    activeAttachmentEls = nextAttachmentEls;
     lastKey = threadKey;
     const my = ++token;
     removeBanner();
@@ -385,7 +579,6 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     await evaluateAndRender({
       kv,
       messages,
-      trustKey: threadKey,
       trustedThisSession,
       dismissed,
       isStale: () => my !== token,
@@ -394,17 +587,26 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
           containerSender.set(email.container, { address: sender.address, registrable: sender.registrable });
         }
       },
-      applyLocks: (items, anyLocked) => {
-        for (const { email, trusted } of items) {
-          if (anyLocked && !trusted) lockLinks(email.container);
+      applyLocks: (items, anyLinksLocked) => {
+        for (const { email, trusted, hasAttachments } of items) {
+          if (anyLinksLocked && !trusted) lockLinks(email.container);
           else unlockLinks(email.container);
+          if (!trusted && hasAttachments) lockMessageAttachments(email);
+          else unlockMessageAttachments(email);
         }
       },
       unlockAll: (all) => {
-        for (const m of all) unlockLinks(m.container);
+        for (const m of all) {
+          unlockLinks(m.container);
+          unlockMessageAttachments(m);
+        }
+        if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
       },
       unlockMatching: (matched) => {
-        for (const m of matched) unlockLinks(m.container);
+        for (const m of matched) {
+          unlockLinks(m.container);
+          unlockMessageAttachments(m);
+        }
       },
     });
   };
@@ -428,36 +630,74 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       }
       return null;
     },
+    findAttachment: (el) =>
+      matchAttachmentInMessages(activeMessages, el) ??
+      (scheduler.isPending() ? matchAttachmentInMessages(extractAll(adapter, document), el) : null),
     isPending: () => scheduler.isPending(),
     flushScan: () => scheduler.flush(),
   });
 
-  new MutationObserver(scheduler.schedule).observe(document.body, { childList: true, subtree: true });
+  const rootTarget = document.body ?? document.documentElement;
+  if (rootTarget) new MutationObserver(scheduler.schedule).observe(rootTarget, { childList: true, subtree: true });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) scheduler.schedule();
+  });
   scheduler.schedule();
 }
 
 function runICloudSandbox() {
   let lastSig = '';
   let desiredLocked = false;
+  let desiredAttachmentsLocked = false;
+  let activeInlineAtts: HTMLElement[] = [];
+
+  const syncInlineAttachmentLocks = (attachments: AttachmentRef[], locked: boolean) => {
+    const els = attachments.map((a) => a.element);
+    const nextSet = new Set(els);
+    const stale = activeInlineAtts.filter((el) => !nextSet.has(el));
+    if (stale.length) unlockAttachments(stale);
+    activeInlineAtts = els;
+    if (els.length === 0) return;
+    if (locked) {
+      const names = new Map<HTMLElement, string>();
+      for (const a of attachments) {
+        if (a.name) names.set(a.element, a.name);
+      }
+      lockAttachments(els, names);
+    } else {
+      unlockAttachments(els);
+    }
+  };
 
   const report = (force = false) => {
     if (document.hidden) return;
-    const { active, body, links, container } = extractICloudSandbox(document);
+    const { active, body, links, attachments, container } = extractICloudSandbox(document);
     if (!active || !container) {
       if (document.body) unlockLinks(document.body);
+      if (activeInlineAtts.length) {
+        unlockAttachments(activeInlineAtts);
+        activeInlineAtts = [];
+      }
       desiredLocked = false;
+      desiredAttachmentsLocked = false;
       if (force || lastSig !== 'inactive') {
         lastSig = 'inactive';
-        void browser.runtime.sendMessage({ type: 'icloudBody', active: false, body: '', links: [] }).catch(() => {});
+        void browser.runtime
+          .sendMessage({ type: 'icloudBody', active: false, body: '', links: [], attachmentNames: [] })
+          .catch(() => {});
       }
       return;
     }
-    const sig = JSON.stringify({ active, body, links });
+    const attachmentNames = attachments.map((a) => a.name);
+    const sig = JSON.stringify({ active, body, links, attachmentNames });
     if (force || sig !== lastSig) {
       lastSig = sig;
-      void browser.runtime.sendMessage({ type: 'icloudBody', active: true, body, links }).catch(() => {});
+      void browser.runtime
+        .sendMessage({ type: 'icloudBody', active: true, body, links, attachmentNames })
+        .catch(() => {});
     }
     if (desiredLocked) lockLinks(container);
+    syncInlineAttachmentLocks(attachments, desiredAttachmentsLocked);
   };
 
   const scheduler = createScheduler(async () => report(false));
@@ -467,18 +707,26 @@ function runICloudSandbox() {
       document.body && document.body.contains(a)
         ? { container: document.body, senderAddress: '', senderRegistrable: '' }
         : null,
+    findAttachment: (el) => {
+      for (const a of extractICloudSandbox(document).attachments) {
+        if (a.element === el || a.element.contains(el)) return { element: a.element, name: a.name };
+      }
+      return null;
+    },
     isPending: () => scheduler.isPending(),
     flushScan: () => scheduler.flush(),
   });
 
   browser.runtime.onMessage.addListener((msg: unknown) => {
-    const m = msg as { type?: string; locked?: unknown } | undefined;
+    const m = msg as { type?: string; locked?: unknown; attachmentsLocked?: unknown } | undefined;
     if (m?.type === 'icloudLock') {
       desiredLocked = Boolean(m.locked);
+      desiredAttachmentsLocked = Boolean(m.attachmentsLocked);
       if (document.body) {
         if (desiredLocked) lockLinks(document.body);
         else unlockLinks(document.body);
       }
+      syncInlineAttachmentLocks(extractICloudSandbox(document).attachments, desiredAttachmentsLocked);
     } else if (m?.type === 'icloudPing') {
       report(true);
     }
@@ -493,7 +741,9 @@ function runICloudSandbox() {
     if (!document.hidden) scheduler.schedule();
   });
   window.addEventListener('pagehide', () => {
-    void browser.runtime.sendMessage({ type: 'icloudBody', active: false, body: '', links: [] }).catch(() => {});
+    void browser.runtime
+      .sendMessage({ type: 'icloudBody', active: false, body: '', links: [], attachmentNames: [] })
+      .catch(() => {});
   });
   scheduler.schedule();
 }
@@ -504,11 +754,13 @@ function runICloudApp(kv: typeof browser.storage.local) {
   const dismissed = new Set<string>();
   let lastKey = '';
   let lastHeaderIds = '';
+  let activeMessages: ScannableMsg[] = [];
+  let activeAttachmentEls: HTMLElement[] = [];
   let token = 0;
 
-  const setFramesLocked = (frameIds: number[], locked: boolean) => {
+  const setFramesLocked = (frameIds: number[], locked: boolean, attachmentsLocked: boolean) => {
     if (frameIds.length > 0) {
-      void browser.runtime.sendMessage({ type: 'icloudLock', locked, frameIds }).catch(() => {});
+      void browser.runtime.sendMessage({ type: 'icloudLock', locked, attachmentsLocked, frameIds }).catch(() => {});
     }
   };
   const frameIdsOf = (list: { frameId?: number }[]) =>
@@ -525,7 +777,12 @@ function runICloudApp(kv: typeof browser.storage.local) {
 
     const messages = combineICloudThread(headers, sandboxBodies).slice(-MAX_THREAD_MESSAGES);
     if (messages.length === 0) {
-      setFramesLocked([...sandboxBodies.keys()], false);
+      setFramesLocked([...sandboxBodies.keys()], false, false);
+      if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
+      setAttachmentBlockedHandler(document, null);
+      setLinkBlockedHandler(document, null);
+      activeMessages = [];
+      activeAttachmentEls = [];
       lastKey = '';
       ++token;
       removeBanner();
@@ -533,11 +790,18 @@ function runICloudApp(kv: typeof browser.storage.local) {
       return;
     }
 
-    const trustKey = messages.map((m) => `${m.senderAddress}\n${m.body}\n${m.links.length}`).join('\n---\n');
+    const nextAttEls = [...new Set(messages.flatMap(attachmentElementsOf))];
+    const trustKey = messages.map(msgKey).join('\n---\n');
     const frameKey = messages.map((m) => m.frameId ?? '').join(',');
     const fullKey = `${trustKey}\n@@\n${frameKey}`;
-    if (fullKey === lastKey) return;
+    if (fullKey === lastKey && arraysEqual(nextAttEls, activeAttachmentEls)) return;
 
+    const newAttSet = new Set(nextAttEls);
+    const staleAtts = activeAttachmentEls.filter((el) => !newAttSet.has(el));
+    if (staleAtts.length) unlockAttachments(staleAtts);
+
+    activeMessages = messages;
+    activeAttachmentEls = nextAttEls;
     lastKey = fullKey;
     const my = ++token;
     removeBanner();
@@ -545,35 +809,76 @@ function runICloudApp(kv: typeof browser.storage.local) {
     await evaluateAndRender({
       kv,
       messages,
-      trustKey,
       trustedThisSession,
       dismissed,
       isStale: () => my !== token,
-      applyLocks: (items, anyLocked) => {
-        const lockedIds: number[] = [];
-        const unlockedIds: number[] = [];
-        for (const { email, trusted } of items) {
+      applyLocks: (items, anyLinksLocked) => {
+        const frameLockMap = new Map<number, { links: boolean; atts: boolean }>();
+        for (const { email, trusted, hasAttachments } of items) {
+          const lockAtts = !trusted && hasAttachments;
+          if (lockAtts) lockMessageAttachments(email);
+          else unlockMessageAttachments(email);
+
           if (typeof email.frameId !== 'number') continue;
-          if (anyLocked && !trusted) lockedIds.push(email.frameId);
-          else unlockedIds.push(email.frameId);
+          const prev = frameLockMap.get(email.frameId);
+          frameLockMap.set(email.frameId, {
+            links: (prev?.links ?? false) || (anyLinksLocked && !trusted),
+            atts: (prev?.atts ?? false) || lockAtts,
+          });
         }
-        setFramesLocked(lockedIds, true);
-        setFramesLocked(unlockedIds, false);
+        for (const [frameId, state] of frameLockMap) {
+          setFramesLocked([frameId], state.links, state.atts);
+        }
       },
-      unlockAll: (all) => setFramesLocked(frameIdsOf(all), false),
-      unlockMatching: (matched) => setFramesLocked(frameIdsOf(matched), false),
+      unlockAll: (all) => {
+        for (const m of all) unlockMessageAttachments(m);
+        if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
+        setFramesLocked(frameIdsOf(all), false, false);
+      },
+      unlockMatching: (matched) => {
+        for (const m of matched) unlockMessageAttachments(m);
+        setFramesLocked(frameIdsOf(matched), false, false);
+      },
     });
   };
 
   const scheduler = createScheduler(scan);
 
+  installClickGuard({
+    findTarget: () => null,
+    findAttachment: (el) => {
+      const activeHit = matchAttachmentInMessages(activeMessages, el);
+      if (activeHit) return activeHit;
+      if (scheduler.isPending()) {
+        const headers = extractICloudHeaders(document);
+        for (const h of headers) {
+          for (const att of h.attachments) {
+            if (att.element === el || att.element.contains(el)) return { element: att.element, name: att.name };
+          }
+          for (const box of h.attachmentContainers) {
+            if (box === el || box.contains(el)) return { element: box, name: '' };
+          }
+        }
+      }
+      return null;
+    },
+    isPending: () => scheduler.isPending(),
+    flushScan: () => scheduler.flush(),
+  });
+
   browser.runtime.onMessage.addListener((msg: unknown) => {
-    const m = msg as { type?: string; frameId?: unknown; active?: unknown; body?: unknown; links?: unknown } | undefined;
+    const m = msg as
+      | { type?: string; frameId?: unknown; active?: unknown; body?: unknown; links?: unknown; attachmentNames?: unknown }
+      | undefined;
     if (m?.type !== 'icloudBody' || typeof m.frameId !== 'number') return;
     if (m.active) {
+      const attachmentNames = Array.isArray(m.attachmentNames)
+        ? m.attachmentNames.filter((n): n is string => typeof n === 'string')
+        : [];
       sandboxBodies.set(m.frameId, {
         body: typeof m.body === 'string' ? m.body : '',
         links: Array.isArray(m.links) ? (m.links as Link[]) : [],
+        ...(attachmentNames.length ? { attachmentNames } : {}),
       });
       scheduler.schedule();
     } else if (sandboxBodies.delete(m.frameId)) {

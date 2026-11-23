@@ -136,6 +136,26 @@ export function formatITReport(s: SenderInfo, intel: IntelState, verdict?: Verdi
   return lines.join('\n');
 }
 
+function copyTextWithFallback(doc: Document, text: string): boolean {
+  const host = doc.body ?? doc.documentElement;
+  if (!host) return false;
+  const ta = doc.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+  host.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = typeof doc.execCommand === 'function' && doc.execCommand('copy');
+  } catch {
+    ok = false;
+  } finally {
+    ta.remove();
+  }
+  return ok;
+}
+
 /** Technical diagnostics + copy button for IT. textContent only. */
 export function renderITDetailsContent(
   doc: Document,
@@ -166,15 +186,16 @@ export function renderITDetailsContent(
   copyBtn.textContent = 'Copy details for IT';
   copyBtn.addEventListener('click', () => {
     const text = formatITReport(s, intel, verdict, allReasons);
-    const clip = navigator.clipboard?.writeText;
-    if (!clip) {
-      copyBtn.textContent = 'Copy failed';
-      return;
-    }
-    clip.call(navigator.clipboard, text).then(
-      () => { copyBtn.textContent = 'Copied!'; },
-      () => { copyBtn.textContent = 'Copy failed'; },
-    );
+    void (async () => {
+      try {
+        const clip = navigator.clipboard?.writeText;
+        if (!clip) throw new Error('clipboard unavailable');
+        await Promise.resolve(clip.call(navigator.clipboard, text));
+        copyBtn.textContent = 'Copied!';
+      } catch {
+        copyBtn.textContent = copyTextWithFallback(doc, text) ? 'Copied!' : 'Copy failed';
+      }
+    })();
   });
   frag.append(copyBtn);
   return frag;

@@ -1,5 +1,15 @@
-import { bodyText, linksIn } from './extract';
-import type { WebmailAdapter } from './types';
+import { cleanAttachmentName } from '../attachments';
+import { unwrapRedirectUrl } from '../linkGuard';
+import {
+  MAX_ATTACHMENTS,
+  MAX_BODY_CHARS,
+  bodyText,
+  extractSenderFromElement,
+  inlineAttachmentsIn,
+  isHidden,
+  linksIn,
+} from './extract';
+import type { AttachmentRef, WebmailAdapter } from './types';
 
 const HOSTS = new Set(['outlook.live.com', 'outlook.office.com', 'outlook.office365.com', 'outlook.cloud.microsoft']);
 
@@ -15,24 +25,12 @@ const BODY_SELECTORS = [
 const isEditable = (el: HTMLElement): boolean =>
   el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.closest('[contenteditable="true"]') !== null;
 
-const isHidden = (el: HTMLElement): boolean =>
-  el.hidden || el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [aria-hidden="true"]') !== null;
-
 const hasContent = (el: HTMLElement): boolean =>
   (el.textContent ?? '').trim().length > 0 ||
   el.querySelector('a[href], a[data-ped-href], area[href], area[data-ped-href]') !== null;
 
-/** Unwrap Microsoft Defender Safe Links (?url=...) when pointing to http(s). */
-export function unwrapSafeLink(href: string): string {
-  try {
-    const u = new URL(href);
-    if (u.hostname.toLowerCase().endsWith('.safelinks.protection.outlook.com')) {
-      const target = u.searchParams.get('url');
-      if (target && /^https?:\/\//i.test(target)) return target;
-    }
-  } catch { /* keep original href */ }
-  return href;
-}
+/** Unwrap Microsoft Defender Safe Links (and nested redirect wrappers) when pointing to http(s). */
+export const unwrapSafeLink = unwrapRedirectUrl;
 
 function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElement }[] {
   for (const sel of BODY_SELECTORS) {
@@ -55,34 +53,17 @@ function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElemen
   return results;
 }
 
-function parseSender(raw: string, fallbackName = ''): { senderName: string; senderAddress: string } | null {
-  const cleaned = raw.trim().replace(/^(?:from|sender)\s*:\s*/i, '').replace(/^opens card for\s+/i, '').trim();
-  if (!cleaned) return null;
-  const fb = fallbackName.trim();
-  const fallback = fb && !fb.includes('@') ? fb : '';
-
-  const angle = cleaned.match(/^(.*?)<([^<>@\s]+@[^<>@\s]+)>\s*$/);
-  if (angle) {
-    return { senderName: angle[1].trim().replace(/^["']|["']$/g, '') || fallback, senderAddress: angle[2].trim() };
-  }
-  const paren = cleaned.match(/^(.*?)\(([^()@\s]+@[^()@\s]+)\)\s*$/);
-  if (paren) {
-    return { senderName: paren[1].trim().replace(/^["']|["']$/g, '') || fallback, senderAddress: paren[2].trim() };
-  }
-  const bare = cleaned.match(/([^\s<>"'(),;]+@[^\s<>"'(),;]+\.[^\s<>"'(),;]+)/);
-  if (bare && bare.index !== undefined) {
-    const before = cleaned.slice(0, bare.index).replace(/^[\s,:;\-"']+|[\s,:;\-"'<]+$/g, '').trim();
-    return { senderName: before || fallback, senderAddress: bare[1].trim() };
-  }
-  return null;
-}
-
-function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
-  const scope =
+function findMessageScope(doc: Document, hostEl: HTMLElement): HTMLElement | null {
+  return (
     hostEl.closest<HTMLElement>('[aria-label="Email message"], [role="listitem"]') ??
     hostEl.closest<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]') ??
     doc.querySelector<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]') ??
-    doc.body;
+    doc.body
+  );
+}
+
+function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
+  const scope = findMessageScope(doc, hostEl);
   if (!scope) return { senderName: '', senderAddress: '' };
 
   const skip = (el: Element): boolean =>
@@ -91,31 +72,14 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
     el.closest('[role="banner"], nav, [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i], [data-testid*="recipient" i]') !== null ||
     /^(to|cc|bcc)\b/i.test(el.getAttribute('aria-label') ?? '');
 
-  const extractFromEl = (el: Element): { senderName: string; senderAddress: string } | null => {
-    const text = (el.textContent ?? '').trim();
-    const fallback = text.length <= 120 && !text.includes('@') ? text : '';
-    if (el.tagName === 'A') {
-      const href = el.getAttribute('href') ?? '';
-      if (href.toLowerCase().startsWith('mailto:')) {
-        const addr = href.slice(7).split('?')[0].trim();
-        if (addr) return { senderName: fallback, senderAddress: addr };
-      }
-    }
-    return (
-      parseSender(el.getAttribute('aria-label') ?? '', fallback) ??
-      parseSender(el.getAttribute('title') ?? '', fallback) ??
-      parseSender(text, fallback)
-    );
-  };
-
   // Pass 1: explicit From / sender nodes inside scope
   for (const el of scope.querySelectorAll('[aria-label^="From" i], [data-testid*="sender" i], [data-testid*="from" i], span.OZZZK')) {
     if (skip(el)) continue;
-    const direct = extractFromEl(el);
+    const direct = extractSenderFromElement(el);
     if (direct) return direct;
     for (const d of el.querySelectorAll('[title*="@"], [aria-label*="@"], a[href^="mailto:"]')) {
       if (skip(d)) continue;
-      const hit = extractFromEl(d);
+      const hit = extractSenderFromElement(d);
       if (hit) return hit;
     }
   }
@@ -123,7 +87,7 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
   // Pass 2: header attribute nodes in DOM order inside scope
   for (const el of scope.querySelectorAll('[title*="@"], [aria-label*="@"], a[href^="mailto:"]')) {
     if (skip(el)) continue;
-    const hit = extractFromEl(el);
+    const hit = extractSenderFromElement(el);
     if (hit) return hit;
   }
 
@@ -134,7 +98,7 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
     if (skip(el)) continue;
     const text = (el.textContent ?? '').trim();
     if (!text.includes('@') || text.length > 200) continue;
-    const hit = extractFromEl(el);
+    const hit = extractSenderFromElement(el);
     if (!hit) continue;
     const hasChildAt = [...el.children].some((c) => (c.textContent ?? '').includes('@'));
     if (!hasChildAt) {
@@ -147,14 +111,132 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
   return (nonLeafHit?.senderName ? nonLeafHit : bareLeafHit) ?? nonLeafHit ?? { senderName: '', senderAddress: '' };
 }
 
+function findSubject(doc: Document, container: HTMLElement): string {
+  const pane = doc.querySelector<HTMLElement>(
+    '[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i]',
+  );
+  if (!pane) return '';
+  for (const h of pane.querySelectorAll<HTMLElement>('[role="heading"], h1, h2')) {
+    if (container.contains(h) || isHidden(h)) continue;
+    const text = (h.textContent ?? '').trim();
+    if (text && text.length <= 300) return text;
+  }
+  return '';
+}
+
+function outlookItemName(el: HTMLElement): string {
+  const dl = cleanAttachmentName(el.getAttribute('download') ?? el.getAttribute('data-ped-att-download') ?? '');
+  if (dl) return dl;
+  const fileEl = el.querySelector<HTMLElement>('[class*="fileName" i]');
+  const fromFileEl = cleanAttachmentName(fileEl?.textContent ?? '');
+  if (fromFileEl) return fromFileEl;
+  for (const attr of ['aria-label', 'title'] as const) {
+    const candidate = cleanAttachmentName(el.getAttribute(attr) ?? '');
+    if (candidate) return candidate;
+  }
+  const text = (el.textContent ?? '').trim();
+  return text.length <= 180 ? cleanAttachmentName(text) : '';
+}
+
+function isOutlookBulkLabel(el: Element): boolean {
+  const txt = `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.textContent ?? ''}`;
+  return /\b(?:download\s+all|save\s+all\s+to\s+onedrive)\b/i.test(txt);
+}
+
+function extractOutlookAttachments(
+  doc: Document,
+  container: HTMLElement,
+  hostEl: HTMLElement,
+): { attachments: AttachmentRef[]; attachmentContainers: HTMLElement[] } {
+  const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
+  const wells: HTMLElement[] = [];
+  const attachmentContainers: HTMLElement[] = [];
+
+  const scope =
+    hostEl.closest<HTMLElement>('[aria-label="Email message"], [role="listitem"]') ??
+    hostEl.closest<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]') ??
+    doc.querySelector<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]');
+  if (!scope) return { attachments, attachmentContainers };
+
+  const shouldSkip = (el: Element): boolean => {
+    if (el === container || el.contains(container)) return true;
+    if (el instanceof HTMLElement && isHidden(el)) return true;
+    if (el.closest('[role="banner"], nav, [contenteditable="true"], [aria-label*="Compose" i]') !== null) return true;
+    const lbl = (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? '').trim();
+    return /^(?:attach|insert)\b/i.test(lbl);
+  };
+
+  const wellSel = [
+    '[role="region"][aria-label*="attachment" i]',
+    '[role="group"][aria-label*="attachment" i]',
+    '[data-testid*="attachment" i]:not([data-testid*="attachment-card" i]):not([data-testid*="file-attachment" i])',
+    '[class*="attachmentWell" i]',
+    '[class*="AttachmentWell" i]',
+  ].join(', ');
+  for (const well of scope.querySelectorAll<HTMLElement>(wellSel)) {
+    if (shouldSkip(well) || wells.some((prev) => prev.contains(well))) continue;
+    wells.push(well);
+    attachmentContainers.push(well);
+  }
+
+  const cardSel = [
+    '[aria-label*="Attached file" i]',
+    '[role="listitem"][aria-label*="attachment" i]',
+    '[role="option"][aria-label*="attachment" i]',
+    '[data-testid*="attachment-card" i]',
+    '[data-testid*="file-attachment" i]',
+    'a[download]',
+    'a[data-ped-att-download]',
+    'button[aria-label*="Download" i]',
+    'a[aria-label*="Download" i]',
+  ].join(', ');
+
+  const addCard = (el: HTMLElement) => {
+    if (attachments.length >= MAX_ATTACHMENTS) return;
+    if (shouldSkip(el) || isOutlookBulkLabel(el)) return;
+    if (attachments.some((prev) => prev.element === el || prev.element.contains(el))) return;
+    attachments.push({ name: outlookItemName(el), element: el });
+  };
+
+  for (const card of scope.querySelectorAll<HTMLElement>(cardSel)) addCard(card);
+  for (const well of wells) {
+    for (const card of well.querySelectorAll<HTMLElement>('[role="button"], button, a')) addCard(card);
+  }
+
+  for (const btn of scope.querySelectorAll<HTMLElement>('[aria-label*="Download all" i], [aria-label*="Save all to OneDrive" i]')) {
+    if (shouldSkip(btn) || attachmentContainers.some((c) => c === btn || c.contains(btn))) continue;
+    attachmentContainers.push(btn);
+  }
+
+  for (const well of wells) {
+    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (!attachments.some((a) => well.contains(a.element) || a.element === well)) {
+      attachments.push({ name: '', element: well });
+    }
+  }
+
+  return { attachments, attachmentContainers };
+}
+
 export const outlook: WebmailAdapter = {
   name: 'outlook',
-  matches: (url) => HOSTS.has(url.hostname),
+  matches: (url) => HOSTS.has(url.hostname.toLowerCase().replace(/\.$/, '')),
   extractAll(doc) {
     return findBodies(doc).map(({ container, hostEl }) => {
       const { senderName, senderAddress } = findSender(doc, container, hostEl);
+      const subject = findSubject(doc, container);
+      const body = [subject, bodyText(container)].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
       const links = linksIn(container).map((l) => ({ text: l.text, href: unwrapSafeLink(l.href) }));
-      return { senderName, senderAddress, body: bodyText(container), links, container };
+      const { attachments, attachmentContainers } = extractOutlookAttachments(doc, container, hostEl);
+      return {
+        senderName,
+        senderAddress,
+        body,
+        links,
+        ...(attachments.length ? { attachments } : {}),
+        ...(attachmentContainers.length ? { attachmentContainers } : {}),
+        container,
+      };
     });
   },
   extract(doc) {

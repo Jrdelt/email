@@ -153,15 +153,11 @@ function ensureToast(doc: Document): ToastController {
   return ctrl;
 }
 
-/** Shows a non-intrusive toast explaining why a paused link click was blocked. */
-export function showPausedLinkToast(doc: Document, host: string, trigger: HTMLElement | null = null): void {
+function presentToast(doc: Document, message: string, trigger: HTMLElement | null): void {
   if (!doc.documentElement && !doc.body) return;
   const ctrl = ensureToast(doc);
   ctrl.trigger = trigger;
 
-  const message = host
-    ? `Link paused for safety — goes to ${host}. Use the warning banner above to review or unlock.`
-    : 'Action paused for safety. Use the warning banner above to review or unlock.';
   ctrl.msgEl.textContent = message;
 
   ctrl.toast.classList.add('open');
@@ -179,6 +175,22 @@ export function showPausedLinkToast(doc: Document, host: string, trigger: HTMLEl
   }
 
   armTimer(ctrl);
+}
+
+/** Shows a non-intrusive toast explaining why a paused link click was blocked. */
+export function showPausedLinkToast(doc: Document, host: string, trigger: HTMLElement | null = null): void {
+  const message = host
+    ? `Link paused for safety — goes to ${host}. Use the warning banner above to review or unlock.`
+    : 'Action paused for safety. Use the warning banner above to review or unlock.';
+  presentToast(doc, message, trigger);
+}
+
+/** Shows a non-intrusive toast explaining why an untrusted attachment click was blocked. */
+export function showPausedAttachmentToast(doc: Document, filename: string, trigger: HTMLElement | null = null): void {
+  const message = filename
+    ? `Attachment blocked (${filename}) — untrusted emails cannot open attachments. Trust this email or sender in the banner above.`
+    : 'Attachment blocked — untrusted emails cannot open attachments. Trust this email or sender in the banner above.';
+  presentToast(doc, message, trigger);
 }
 
 export function removePausedLinkToast(doc: Document = document): void {

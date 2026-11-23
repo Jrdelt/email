@@ -56,11 +56,15 @@ export async function hashEmail(
   senderAddress: string,
   body: string,
   links: readonly { href: string }[],
+  attachmentNames?: readonly string[],
 ): Promise<string> {
   const normSender = senderAddress.trim().toLowerCase();
   const normBody = body.replace(/\s+/g, ' ').trim();
   const normLinks = links.map((l) => l.href.trim()).join('\n');
-  const bytes = new TextEncoder().encode(`v1\0${normSender}\0${normBody}\0${normLinks}`);
+  const normAtts = attachmentNames?.length
+    ? `\0att:${attachmentNames.map((n) => n.trim().toLowerCase()).filter(Boolean).sort().join('\n')}`
+    : '';
+  const bytes = new TextEncoder().encode(`v1\0${normSender}\0${normBody}\0${normLinks}${normAtts}`);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

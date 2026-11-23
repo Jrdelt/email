@@ -1,5 +1,7 @@
 name: ci
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   extension:
     runs-on: ubuntu-latest
@@ -7,16 +9,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: npm install
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build:all
+      - run: npm run zip:all
+      - name: Verify <500 KB unpacked bundle budget
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            import path from 'node:path';
+            const sizeOf = (p) => fs.readdirSync(p, { withFileTypes: true }).reduce((n, d) =>
+              n + (d.isDirectory() ? sizeOf(path.join(p, d.name)) : fs.statSync(path.join(p, d.name)).size), 0);
+            for (const dir of ['.output/chrome-mv3', '.output/edge-mv3', '.output/firefox-mv3']) {
+              const bytes = sizeOf(dir);
+              console.log(dir + ': ' + bytes + ' bytes');
+              if (bytes >= 500 * 1024) throw new Error(dir + ' exceeds 500 KB budget: ' + bytes);
+            }
+          "
   ml:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: ml } }
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --locked
       - run: uv run pytest

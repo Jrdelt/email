@@ -105,6 +105,52 @@ describe('lookupDomain', () => {
     await lookupDomain('example.com', f, NOW);
     for (const [url] of (f as any).mock.calls) expect(String(url)).not.toMatch(/@/);
   });
+  it('treats DNS SERVFAIL (Status: 2) as error instead of warning that MX is missing', async () => {
+    const servfailFetch: FetchFn = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.hostname === 'data.iana.org') return json({ services: [] });
+      if (u.hostname === 'rdap.org') {
+        return json({ events: [{ eventAction: 'registration', eventDate: '2015-01-01T00:00:00Z' }] });
+      }
+      if (u.searchParams.get('name')?.endsWith('.multi.uribl.com')) return json({ Status: 3 });
+      return json({ Status: 2 }); // SERVFAIL
+    }) as FetchFn;
+    const i = await lookupDomain('example.org', servfailFetch, NOW);
+    expect(i.dns.status).toBe('error');
+    expect(intelWarnings(i, NOW)).toEqual([]);
+  });
+  it('falls back to rdap.org when an authoritative TLD RDAP server fails CORS/network, and rejects unsafe bootstrap URLs', async () => {
+    const fallbackFetch: FetchFn = vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.hostname === 'data.iana.org') {
+        return json({
+          services: [
+            [['com'], ['https://rdap.broken-cors.example/v1/']],
+            [['org'], ['http://insecure.example/rdap/', 'https://127.0.0.1/rdap/']],
+          ],
+        });
+      }
+      if (u.hostname === 'rdap.broken-cors.example') throw new TypeError('Failed to fetch');
+      if (u.hostname === 'rdap.org') {
+        return json({ events: [{ eventAction: 'registration', eventDate: '2012-05-01T00:00:00Z' }] });
+      }
+      if (u.searchParams.get('name')?.endsWith('.multi.uribl.com')) return json({ Status: 3 });
+      return json({ Status: 0, Answer: [{ type: 15, data: '10 mx.example.com.' }] });
+    }) as FetchFn;
+
+    const comIntel = await lookupDomain('example.com', fallbackFetch, NOW);
+    expect(comIntel.rdap).toMatchObject({ status: 'ok', registered: '2012-05-01T00:00:00Z' });
+
+    const orgIntel = await lookupDomain('example.org', fallbackFetch, NOW);
+    expect(orgIntel.rdap).toMatchObject({ status: 'ok', registered: '2012-05-01T00:00:00Z' });
+    const calledUrls = (fallbackFetch as any).mock.calls.map((c: any[]) => String(c[0]));
+    expect(calledUrls.some((u: string) => u.startsWith('http://') || u.includes('127.0.0.1'))).toBe(false);
+  });
+  it('ignores non-127.0.0.x captive-portal IPs returned for URIBL queries', async () => {
+    const i = await lookupDomain('example.com', fakeFetch({ urible: '198.51.100.42' }), NOW);
+    expect(i.reputation).toEqual({ status: 'error', source: 'URIBL', listed: [] });
+    expect(intelWarnings(i, NOW)).toEqual([]);
+  });
 });
 
 describe('getIntel cache', () => {
@@ -123,5 +169,12 @@ describe('getIntel cache', () => {
     const kv = memoryKV();
     await getIntel(kv, 'example.com', (async () => { throw new Error('x'); }) as FetchFn, NOW);
     expect((await kv.get('domainIntelCache')).domainIntelCache).toBeUndefined();
+  });
+  it('preserves both entries when two getIntel lookups resolve concurrently', async () => {
+    const kv = memoryKV();
+    const f = fakeFetch();
+    await Promise.all([getIntel(kv, 'alpha.com', f, NOW), getIntel(kv, 'beta.com', f, NOW)]);
+    const cached = (await kv.get('domainIntelCache')).domainIntelCache as Record<string, unknown>;
+    expect(Object.keys(cached).sort()).toEqual(['alpha.com', 'beta.com']);
   });
 });

@@ -2,6 +2,16 @@
   "name": "phishing-email-detection-extension",
   "private": true,
   "version": "0.1.0",
+  "description": "Privacy-first browser extension for local phishing detection in webmail",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jrdelt/email.git",
+    "directory": "extension"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -16,6 +26,7 @@
     "zip:all": "wxt zip -b chrome && wxt zip -b edge && wxt zip -b firefox --mv3",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
