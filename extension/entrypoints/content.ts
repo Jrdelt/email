@@ -8,7 +8,7 @@ import {
   icloudFrameRole,
 } from '../src/adapters/icloud';
 import type { ExtractedEmail, WebmailAdapter } from '../src/adapters/types';
-import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender } from '../src/allowlist';
+import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender, untrustEmails } from '../src/allowlist';
 import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
@@ -276,6 +276,17 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
             })
             .catch(() => {});
           await trustEmails(kv, evaluated.map((e) => e.item.hash));
+        },
+        onUndoUnlock: async () => {
+          trustedThisSession.delete(trustKey);
+          const hashes = evaluated.map((e) => e.item.hash);
+          for (const { item } of evaluated) {
+            trustedThisSession.delete(item.hash);
+            item.trusted = false;
+            item.verdict = scoreEmail(item.sender.address, item.email.body, item.email.links);
+          }
+          await untrustEmails(kv, hashes);
+          render();
         },
         onTrustSender: async () => {
           const addr = primaryEntry.item.sender.address;

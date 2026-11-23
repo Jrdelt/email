@@ -1,3 +1,6 @@
+import { hostOf } from '../domain';
+import { removePausedLinkToast, showPausedLinkToast } from './linkToast';
+
 // Disables links (including SVG xlink:href, ping beacons, and keyboard activation),
 // embedded image links, image maps, forms, and [formaction] overrides inside a flagged email
 // until unlocked, automatically re-locking dynamically added nodes inside the container.
@@ -26,6 +29,28 @@ function matchesLockedTarget(el: Element): boolean {
   return Boolean(a && (a.getAttributeNS(XLINK_NS, 'href') !== null || a.hasAttribute('xlink:href')));
 }
 
+function targetHostOf(el: Element): string {
+  const node = el.closest(`a, area, [formaction], [${FORMACTION_ATTR}], form`);
+  if (!node) return '';
+  const raw =
+    node.getAttribute(HREF_ATTR) ??
+    node.getAttribute('href') ??
+    node.getAttribute(XLINK_ATTR) ??
+    node.getAttributeNS(XLINK_NS, 'href') ??
+    node.getAttribute('xlink:href') ??
+    node.getAttribute(FORMACTION_ATTR) ??
+    node.getAttribute('formaction') ??
+    node.getAttribute(ACTION_ATTR) ??
+    node.getAttribute('action') ??
+    '';
+  if (!raw) return '';
+  try {
+    return hostOf(new URL(raw, el.ownerDocument.baseURI || 'https://invalid.local').href);
+  } catch {
+    return hostOf(raw);
+  }
+}
+
 function block(e: Event) {
   const node = e.target as Node | null;
   const el = node && node.nodeType === 1 ? (node as Element) : (node?.parentElement ?? null);
@@ -34,6 +59,7 @@ function block(e: Event) {
     if (el.closest('form')) {
       e.preventDefault();
       e.stopImmediatePropagation();
+      showPausedLinkToast(el.ownerDocument, targetHostOf(el), el instanceof HTMLElement ? el : null);
     }
     return;
   }
@@ -44,6 +70,13 @@ function block(e: Event) {
   if (matchesLockedTarget(el)) {
     e.preventDefault();
     e.stopImmediatePropagation();
+    const shouldToast =
+      e.type === 'click' ||
+      e.type === 'keydown' ||
+      (e.type === 'auxclick' && (e as MouseEvent).button === 1);
+    if (shouldToast) {
+      showPausedLinkToast(el.ownerDocument, targetHostOf(el), el instanceof HTMLElement ? el : null);
+    }
   }
 }
 
@@ -116,6 +149,7 @@ export function unlockLinks(container: HTMLElement): void {
   watchers.get(container)?.disconnect();
   watchers.delete(container);
   container.removeAttribute(LOCK_ATTR);
+  removePausedLinkToast(container.ownerDocument);
   for (const el of container.querySelectorAll<Element>(`[${HREF_ATTR}]`)) {
     el.setAttribute('href', el.getAttribute(HREF_ATTR)!);
     el.removeAttribute(HREF_ATTR);

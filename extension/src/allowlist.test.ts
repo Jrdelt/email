@@ -9,6 +9,7 @@ import {
   normalizeSender,
   trustEmails,
   trustSender,
+  untrustEmails,
   untrustSender,
 } from './allowlist';
 import { clearReports, listReports, recordFalsePositive } from './feedback';
@@ -98,6 +99,11 @@ describe('trustedEmails', () => {
 
     await trustEmails(kv, [h2, h1]);
     expect(await listTrustedEmails(kv)).toEqual([h2, h1]);
+
+    await untrustEmails(kv, [h1]);
+    expect(await listTrustedEmails(kv)).toEqual([h2]);
+    expect(await isEmailTrusted(kv, h1)).toBe(false);
+    expect(await isEmailTrusted(kv, h2)).toBe(true);
 
     const many = Array.from({ length: 505 }, (_, i) => i.toString(16).padStart(64, '0'));
     await trustEmails(kv, many);

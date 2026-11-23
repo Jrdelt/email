@@ -92,3 +92,10 @@ export async function trustEmails(kv: KV, hashes: readonly string[]): Promise<vo
 export async function clearTrustedEmails(kv: KV): Promise<void> {
   await kv.set({ [EMAIL_KEY]: [] });
 }
+
+export async function untrustEmails(kv: KV, hashes: readonly string[]): Promise<void> {
+  const drop = new Set(hashes.filter((h) => HASH_RE.test(h)));
+  if (drop.size === 0) return;
+  const remaining = (await listTrustedEmails(kv)).filter((h) => !drop.has(h));
+  await kv.set({ [EMAIL_KEY]: remaining });
+}

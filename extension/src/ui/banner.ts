@@ -17,6 +17,7 @@ export interface BannerModel {
 
 export interface BannerActions {
   onUnlock(): void | Promise<void>; // "I trust this email" — unlock links for this email
+  onUndoUnlock?(): void | Promise<void>; // revert persistent email trust and re-lock links
   onTrustSender(): Promise<boolean>; // false if the address is not a valid exact address
   onReport(): Promise<void>; // local false-positive report
   onDismiss(): void;
@@ -107,6 +108,7 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
       font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;padding:3px 12px;
     }
     .reason{font-weight:700;font-size:14px;color:#111111;overflow-wrap:anywhere}
+    .compare{margin-top:4px;font-size:12.5px;font-weight:600;color:#333333;overflow-wrap:anywhere}
     .sub{font-size:13.5px;color:#444444;margin-top:2px}
     .sticker-side{
       align-self:center;flex-shrink:0;display:inline-flex;align-items:center;gap:5px;
@@ -124,10 +126,29 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
       transition:translate .1s,box-shadow .1s,background-color .1s;
     }
     button.btn-mint{background:#26d08c}
+    button.btn-danger{background:#ff563f}
     button.btn:hover:not(:disabled){translate:-1px -1px;box-shadow:4px 4px 0 #111111}
     button.btn:active:not(:disabled){translate:2px 2px;box-shadow:1px 1px 0 #111111}
     button.btn:disabled{opacity:.55;cursor:default}
     button:focus-visible,summary:focus-visible{outline:2px solid #111111;outline-offset:2px}
+    .confirm-bar{
+      margin-top:12px;margin-left:58px;padding:10px 12px;border-radius:12px;
+      background:#fdf9f0;border:2px solid #111111;display:grid;gap:8px;
+    }
+    .confirm-bar[hidden]{display:none}
+    .confirm-msg{font-size:13px;font-weight:700;color:#111111}
+    .confirm-actions{display:flex;flex-wrap:wrap;gap:8px}
+    .card.trusted-pill{
+      width:auto;max-width:460px;padding:10px 14px;border-radius:999px;
+      display:flex;align-items:center;gap:10px;background:#ffffff;
+    }
+    .pill-text{font-weight:800;font-size:13.5px;color:#111111}
+    button.pill-btn{padding:4px 10px;font-size:12px;border-radius:999px;background:#26d08c}
+    .pill-x{
+      width:24px;height:24px;padding:0;border-radius:50%;background:#ffffff;color:#111111;
+      border:2px solid #111111;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+    }
+    .pill-x:hover{background:#fdf9f0}
     .drawer{
       margin-top:14px;margin-left:58px;background:#fdf9f0;border:2px solid #111111;
       border-radius:12px;padding:12px 14px;max-height:45vh;overflow:auto;font-size:13px;
@@ -170,11 +191,11 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
     }
     @media (max-width: 600px){
       .sticker-side{display:none}
-      .actions,.drawer{margin-left:0}
+      .actions,.drawer,.confirm-bar{margin-left:0}
       .title{font-size:20px}
     }
     @media (forced-colors: active){
-      .card,.sticker-top,.sticker-side,.icon-box,.drawer,.x,button.btn,.copy-it{box-shadow:none;border:2px solid CanvasText;background:Canvas;color:CanvasText}
+      .card,.sticker-top,.sticker-side,.icon-box,.drawer,.confirm-bar,.x,.pill-x,button.btn,.copy-it{box-shadow:none;border:2px solid CanvasText;background:Canvas;color:CanvasText}
       .tag{border:1px solid CanvasText}
       button:focus-visible,summary:focus-visible{outline:2px solid Highlight;outline-offset:2px}
     }`;
@@ -229,7 +250,20 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
     ? 'Links are paused. Verify the sender before trusting links or attachments.'
     : 'Verify the sender before trusting links or attachments.';
 
-  copy.append(title, tag, reason, sub);
+  copy.append(title, tag, reason);
+  if (model.sender && (model.sender.rawAddress || model.sender.linkDomains.length > 0)) {
+    const parts: string[] = [];
+    if (model.sender.rawAddress) parts.push(`From: ${model.sender.rawAddress}`);
+    if (model.sender.linkDomains.length > 0) {
+      const doms = model.sender.linkDomains;
+      parts.push(`Links go to: ${doms.slice(0, 2).join(', ')}${doms.length > 2 ? ` (+${doms.length - 2})` : ''}`);
+    }
+    const compare = doc.createElement('div');
+    compare.className = 'compare';
+    compare.textContent = parts.join('  •  ');
+    copy.append(compare);
+  }
+  copy.append(sub);
 
   const sideSticker = doc.createElement('div');
   sideSticker.className = 'sticker-side';
@@ -313,19 +347,92 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
 
   actionsBar.append(seeWhy, report, trust);
 
+  const renderTrustedPill = () => {
+    card.textContent = '';
+    card.className = 'card trusted-pill';
+    card.setAttribute('role', 'status');
+    const label = doc.createElement('span');
+    label.className = 'pill-text';
+    label.textContent = 'Email trusted — links enabled';
+    card.append(createStatusIcon(doc, 'safe', 18), label);
+    if (actions.onUndoUnlock) {
+      card.append(
+        button(
+          'Undo',
+          async (u) => {
+            u.disabled = true;
+            await actions.onUndoUnlock?.();
+          },
+          'pill-btn',
+        ),
+      );
+    }
+    const dismiss = doc.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'pill-x';
+    dismiss.setAttribute('aria-label', 'Dismiss');
+    dismiss.append(createCloseIcon(doc, 12));
+    dismiss.addEventListener('click', () => removeBanner(doc));
+    card.append(dismiss);
+  };
+
+  let confirmBar: HTMLDivElement | undefined;
   if (model.linksLocked) {
-    actionsBar.append(
-      button('I trust this email', async (b) => {
-        b.disabled = true;
-        await actions.onUnlock();
-        b.textContent = 'Trusted — links enabled';
-        sub.textContent = 'This email is trusted and its links are enabled.';
-        sideSticker.textContent = 'TRUSTED';
-      }),
-    );
+    if (model.level === 'warning') {
+      actionsBar.append(
+        button('I trust this email', async (b) => {
+          b.disabled = true;
+          await actions.onUnlock();
+          renderTrustedPill();
+        }),
+      );
+    } else {
+      confirmBar = doc.createElement('div');
+      confirmBar.className = 'confirm-bar';
+      confirmBar.hidden = true;
+
+      const confirmMsg = doc.createElement('div');
+      confirmMsg.className = 'confirm-msg';
+      confirmMsg.textContent = 'Links in this email look dangerous. Only unlock if you verified the sender.';
+
+      const confirmActions = doc.createElement('div');
+      confirmActions.className = 'confirm-actions';
+
+      let triggerBtn!: HTMLButtonElement;
+      const keepSafe = button(
+        'Keep links paused',
+        () => {
+          confirmBar!.hidden = true;
+          triggerBtn.setAttribute('aria-expanded', 'false');
+          triggerBtn.focus();
+        },
+        'btn-mint',
+      );
+      const confirmUnlock = button(
+        'Yes, unlock links anyway',
+        async (b) => {
+          b.disabled = true;
+          keepSafe.disabled = true;
+          await actions.onUnlock();
+          renderTrustedPill();
+        },
+        'btn-danger',
+      );
+      confirmActions.append(keepSafe, confirmUnlock);
+      confirmBar.append(confirmMsg, confirmActions);
+
+      triggerBtn = button('I trust this email', (b) => {
+        const nextOpen = confirmBar!.hidden;
+        confirmBar!.hidden = !nextOpen;
+        b.setAttribute('aria-expanded', String(nextOpen));
+      });
+      triggerBtn.setAttribute('aria-expanded', 'false');
+      actionsBar.append(triggerBtn);
+    }
   }
 
-  card.append(topSticker, close, mainRow, actionsBar, drawer);
+  if (confirmBar) card.append(topSticker, close, mainRow, actionsBar, confirmBar, drawer);
+  else card.append(topSticker, close, mainRow, actionsBar, drawer);
   wrap.append(card);
   root.append(style, wrap);
   (doc.documentElement ?? doc.body).appendChild(host);

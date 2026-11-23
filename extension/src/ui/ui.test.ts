@@ -8,7 +8,13 @@ import { formatAge, formatITReport, renderITDetails, renderSimpleDetails } from 
 import { createCloseIcon, createLockIcon, createLogoSvg, createStatusIcon } from './icons';
 import { isLocked, lockLinks, unlockLinks } from './linkLock';
 
-const actions = () => ({ onUnlock: vi.fn(), onTrustSender: vi.fn(async () => true), onReport: vi.fn(async () => {}), onDismiss: vi.fn() });
+const actions = () => ({
+  onUnlock: vi.fn(),
+  onUndoUnlock: vi.fn(async () => {}),
+  onTrustSender: vi.fn(async () => true),
+  onReport: vi.fn(async () => {}),
+  onDismiss: vi.fn(),
+});
 
 describe('linkLock', () => {
   it('stashes and restores href, blocks links only while locked, and leaves outside links alone', () => {
@@ -26,11 +32,13 @@ describe('linkLock', () => {
     expect(l.getAttribute('data-ped-href')).toBe('https://evil.example/a?x=1');
     expect(l.getAttribute('aria-disabled')).toBe('true');
     expect(click(l)).toBe(true);
+    expect(document.getElementById('ped-toast-host')).not.toBeNull();
     expect(click(l.firstChild!)).toBe(true); // Text node inside locked link
     expect(click(document.getElementById('o')!)).toBe(false);
     expect(linksIn(m)).toEqual([{ text: 'x', href: 'https://evil.example/a?x=1' }]);
 
     unlockLinks(m);
+    expect(document.getElementById('ped-toast-host')).toBeNull();
     expect(isLocked(m)).toBe(false);
     expect(l.getAttribute('href')).toBe('https://evil.example/a?x=1');
     expect(l.hasAttribute('data-ped-href')).toBe(false);
@@ -161,20 +169,23 @@ describe('banner', () => {
     expect(document.getElementById('ped-banner-host')).toBeNull();
   });
 
-  it('calls onTrustSender without calling onUnlock, and calls onUnlock on "I trust this email"', async () => {
+  it('calls onTrustSender without calling onUnlock, collapses warning unlock to Undo pill, and requires 2-step confirmation for danger', async () => {
     document.body.innerHTML = '';
-    const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
-    let capturedRoot: ShadowRoot | undefined;
+    const sender = analyzeSender('PayPal Support', 'help@gmail.com', [{ text: 'Verify', href: 'https://evil.example/login' }]);
+    const roots: ShadowRoot[] = [];
     const origAttach = HTMLElement.prototype.attachShadow;
     const spy = vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
-      capturedRoot = origAttach.call(this, init);
-      return capturedRoot;
+      const r = origAttach.call(this, init);
+      roots.push(r);
+      return r;
     });
     try {
       const act1 = actions();
       showBanner({ level: 'warning', title: 'Check this sender.', tag: 'SENDER WARNING', reasons: sender.warnings, linksLocked: true, sender }, act1);
-      const btns1 = [...capturedRoot!.querySelectorAll('button')];
-      const trustSenderBtn = btns1.find((b) => b.textContent === 'Always trust sender')!;
+      const root1 = roots[roots.length - 1]!;
+      expect(root1.querySelector('.compare')?.textContent).toContain('From: help@gmail.com');
+      expect(root1.querySelector('.compare')?.textContent).toContain('Links go to: evil.example');
+      const trustSenderBtn = [...root1.querySelectorAll('button')].find((b) => b.textContent === 'Always trust sender')!;
       trustSenderBtn.click();
       await vi.waitFor(() => expect(act1.onTrustSender).toHaveBeenCalledTimes(1));
       expect(act1.onUnlock).not.toHaveBeenCalled();
@@ -182,11 +193,34 @@ describe('banner', () => {
 
       const act2 = actions();
       showBanner({ level: 'warning', title: 'Check this sender.', tag: 'SENDER WARNING', reasons: sender.warnings, linksLocked: true, sender }, act2);
-      const btns2 = [...capturedRoot!.querySelectorAll('button')];
-      const trustEmailBtn = btns2.find((b) => b.textContent === 'I trust this email')!;
+      const root2 = roots[roots.length - 1]!;
+      const trustEmailBtn = [...root2.querySelectorAll('button')].find((b) => b.textContent === 'I trust this email')!;
       trustEmailBtn.click();
-      await vi.waitFor(() => expect(trustEmailBtn.textContent).toBe('Trusted — links enabled'));
+      await vi.waitFor(() => expect(root2.textContent).toContain('Email trusted — links enabled'));
       expect(act2.onUnlock).toHaveBeenCalledTimes(1);
+      const undoBtn = [...root2.querySelectorAll('button')].find((b) => b.textContent === 'Undo')!;
+      undoBtn.click();
+      await vi.waitFor(() => expect(act2.onUndoUnlock).toHaveBeenCalledTimes(1));
+
+      const act3 = actions();
+      showBanner({ level: 'danger', title: 'Possible phishing.', tag: 'PHISHING WARNING', reasons: ['A link says paypal.com'], linksLocked: true, sender }, act3);
+      const root3 = roots[roots.length - 1]!;
+      const dangerTrigger = [...root3.querySelectorAll('button')].find((b) => b.textContent === 'I trust this email')!;
+      dangerTrigger.click();
+      expect(act3.onUnlock).not.toHaveBeenCalled();
+      const confirmBar = root3.querySelector('.confirm-bar') as HTMLElement;
+      expect(confirmBar.hidden).toBe(false);
+
+      const keepSafeBtn = [...root3.querySelectorAll('button')].find((b) => b.textContent === 'Keep links paused')!;
+      keepSafeBtn.click();
+      expect(confirmBar.hidden).toBe(true);
+      expect(act3.onUnlock).not.toHaveBeenCalled();
+
+      dangerTrigger.click();
+      const confirmUnlockBtn = [...root3.querySelectorAll('button')].find((b) => b.textContent === 'Yes, unlock links anyway')!;
+      confirmUnlockBtn.click();
+      await vi.waitFor(() => expect(act3.onUnlock).toHaveBeenCalledTimes(1));
+      expect(root3.textContent).toContain('Email trusted — links enabled');
     } finally {
       spy.mockRestore();
       removeBanner();
