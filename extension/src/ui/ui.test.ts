@@ -4,6 +4,7 @@ import { gmail } from '../adapters/gmail';
 import { analyzeSender } from '../sender';
 import { decideBanner, removeBanner, showBanner } from './banner';
 import { formatAge, formatITReport, renderITDetails, renderSimpleDetails } from './details';
+import { createCloseIcon, createLockIcon, createLogoSvg, createStatusIcon } from './icons';
 import { isLocked, lockLinks, unlockLinks } from './linkLock';
 
 const actions = () => ({ onUnlock: vi.fn(), onTrustSender: vi.fn(async () => true), onReport: vi.fn(async () => {}), onDismiss: vi.fn() });
@@ -151,5 +152,25 @@ describe('gmail adapter', () => {
   it('returns null with no open email', () => {
     document.body.innerHTML = '<div>inbox</div>';
     expect(gmail.extract(document)).toBeNull();
+  });
+});
+
+describe('icons', () => {
+  it('renders logo and semantic status SVGs cleanly via createElementNS', () => {
+    const logo = createLogoSvg(document, 28);
+    expect(logo.tagName.toLowerCase()).toBe('svg');
+    expect(logo.getAttribute('aria-hidden')).toBe('true');
+    expect(logo.getAttribute('width')).toBe('28');
+    expect(logo.querySelectorAll('path, rect, circle').length).toBeGreaterThanOrEqual(4);
+
+    for (const kind of ['safe', 'warning', 'danger'] as const) {
+      const icon = createStatusIcon(document, kind, 20);
+      expect(icon.tagName.toLowerCase()).toBe('svg');
+      expect(icon.getAttribute('aria-hidden')).toBe('true');
+      expect(icon.children.length).toBeGreaterThanOrEqual(2);
+    }
+
+    expect(createLockIcon(document).getAttribute('aria-hidden')).toBe('true');
+    expect(createCloseIcon(document).getAttribute('aria-hidden')).toBe('true');
   });
 });

@@ -4,11 +4,14 @@ import type { Verdict } from '../../src/features';
 import { clearReports, listReports } from '../../src/feedback';
 import type { SenderInfo } from '../../src/sender';
 import { type IntelState, renderITDetailsContent, renderSimpleDetails } from '../../src/ui/details';
+import { createLogoSvg, createStatusIcon } from '../../src/ui/icons';
 
 const kv = browser.storage.local;
 const $ = (id: string) => document.getElementById(id)!;
 
 interface TabState { verdict: Verdict; sender?: SenderInfo; intel?: IntelState }
+
+$('logo').append(createLogoSvg(document, 28));
 
 async function renderVerdict() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
@@ -28,22 +31,29 @@ async function renderVerdict() {
 
   const out = $('out');
   out.textContent = '';
-  out.className = '';
+  out.className = 'card';
 
   const badge = document.createElement('div');
+  let kind: 'safe' | 'warning' | 'danger' = 'safe';
+  let label = 'Looks safe';
   if (st.verdict.level === 'likely-phishing') {
+    kind = 'danger';
+    label = 'Possible phishing email';
     badge.className = 'status status-danger';
-    badge.textContent = 'Possible phishing email';
   } else if (st.verdict.level === 'suspicious') {
+    kind = 'danger';
+    label = 'This email looks suspicious';
     badge.className = 'status status-danger';
-    badge.textContent = 'This email looks suspicious';
   } else if (senderWarnings.length > 0) {
+    kind = 'warning';
+    label = 'Double-check this sender';
     badge.className = 'status status-warn';
-    badge.textContent = 'Double-check this sender';
   } else {
     badge.className = 'status status-safe';
-    badge.textContent = 'Looks safe';
   }
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = label;
+  badge.append(createStatusIcon(document, kind, 16), labelSpan);
   out.append(badge);
 
   if ((danger || senderWarnings.length > 0) && allReasons.length > 0) {
@@ -60,7 +70,7 @@ async function renderVerdict() {
     out.append(renderSimpleDetails(document, st.sender, st.intel));
     const itDetails = $('it-details');
     itDetails.textContent = '';
-    itDetails.className = '';
+    itDetails.className = 'card';
     itDetails.append(renderITDetailsContent(document, st.sender, st.intel, st.verdict, allReasons));
   }
 }
@@ -69,15 +79,23 @@ async function renderTrusted() {
   const ul = $('trusted');
   ul.textContent = '';
   const list = await listTrusted(kv);
-  if (!list.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'None'; ul.append(li); }
+  if (!list.length) {
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.textContent = 'None';
+    ul.append(li);
+    return;
+  }
   for (const s of list) {
     const li = document.createElement('li');
-    li.textContent = s;
+    li.className = 'trusted-pill';
+    const addr = document.createElement('span');
+    addr.textContent = s;
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = 'Remove';
     b.addEventListener('click', async () => { await untrustSender(kv, s); await renderTrusted(); });
-    li.append(b);
+    li.append(addr, b);
     ul.append(li);
   }
 }
