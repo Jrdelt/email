@@ -14,6 +14,8 @@ common and is shown as such, never as "clean".
 
 **Out of scope (v1):** attachments, native mail clients, server-side filtering.
 
+**Host permissions:** limited strictly to webmail origins in `extension/src/hosts.ts` (Gmail, Outlook Web including `outlook.cloud.microsoft`, Yahoo, Proton, iCloud). No `<all_urls>` permission is requested.
+
 **Link locking limits:** flagged emails have their links disabled through one capturing click/auxclick/dragstart
 listener. It cannot block the browser's native right-click "Open link in new tab" or copying the link address.
 The banner says links are disabled; it does not claim they are impossible to open.

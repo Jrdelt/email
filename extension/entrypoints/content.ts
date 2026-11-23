@@ -33,7 +33,7 @@ export default defineContentScript({
 
     const scan = async () => {
       if (document.hidden) return; // never work in background tabs
-      const email = adapter?.extract(document) ?? fallbackExtract(document);
+      const email = adapter ? adapter.extract(document) : fallbackExtract(document);
       if (!email) {
         if (current) { unlockLinks(current); current = undefined; }
         lastKey = '';

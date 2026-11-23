@@ -8,6 +8,7 @@ describe('adapters', () => {
     ['https://outlook.live.com/mail/0/', 'outlook'],
     ['https://outlook.office.com/mail/', 'outlook'],
     ['https://outlook.office365.com/mail/', 'outlook'],
+    ['https://outlook.cloud.microsoft/mail/0/', 'outlook'],
     ['https://mail.yahoo.com/d/folders/1', 'yahoo'],
     ['https://mail.proton.me/u/0/inbox', 'proton'],
     ['https://www.icloud.com/mail/', 'icloud'],
