@@ -1,5 +1,6 @@
 node_modules/
 .output/
+chrome-mv3/
 .wxt/
 dist/
 __pycache__/
