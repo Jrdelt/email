@@ -1,4 +1,4 @@
-# csbc_phishingEmailDetection
+# email
 
 Privacy-first phishing **email** detection that runs entirely in your browser.
 One codebase ships to **Chrome, Edge and Firefox** (Manifest V3, built with [WXT](https://wxt.dev)).
