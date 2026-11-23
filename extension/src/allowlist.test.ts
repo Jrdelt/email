@@ -63,14 +63,18 @@ describe('allowlist', () => {
 });
 
 describe('false-positive reports', () => {
-  it('stores locally, redacts addresses, caps and clears', async () => {
+  it('stores locally, redacts addresses, URLs, IPs, and domains, caps and clears', async () => {
     const kv = memoryKV();
     for (let i = 0; i < 60; i++) {
-      await recordFalsePositive(kv, { score: 0.5, level: 'suspicious', reasons: ['from bob@x.com via evil.example'] });
+      await recordFalsePositive(kv, {
+        score: 0.5,
+        level: 'suspicious',
+        reasons: ['from bob@x.com via evil.example linking https://evil.example/p?id=1 (192.0.2.10)'],
+      });
     }
     const r = await listReports(kv);
     expect(r).toHaveLength(50);
-    expect(r[0].reasons[0]).toBe('from [address] via evil.example');
+    expect(r[0].reasons[0]).toBe('from [address] via [domain] linking [url] ([ip])');
     await clearReports(kv);
     expect(await listReports(kv)).toHaveLength(0);
   });

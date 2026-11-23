@@ -25,23 +25,26 @@ Native webmail attachment shelves/cards (Gmail, Outlook Web, iCloud Mail) and in
 - *Residual limit:* Browser-native context-menu `"Save link as…"` or malicious payloads inside benignly named files (`.pdf`) after the user explicitly chooses to trust the email.
 
 ### 3. Click-Time Destination Inspector & Race-to-Click Gate
-Clicking a link or submitting a form before the 400 ms debounced scan finishes triggers an immediate scan flush (`isPending` gate). Clicking an external `http(s)` link unwraps multi-hop redirectors (Outlook Safe Links, Google, Facebook, YouTube), checks local URL risk signals (`@` authority disguise, IPv4/IPv6 literal, punycode, raw cloud HTML, dangerous file extensions, URL shorteners, unencrypted `http://`), and queries destination domain intelligence (700 ms timeout), routing risky clicks to `warning.html` via a 1-hour ephemeral `browser.storage.session` UUID token.
+Clicking a link or submitting a form before the 400 ms debounced scan finishes triggers an immediate scan flush (`isPending` gate). Clicking an external `http(s)` link unwraps multi-hop redirectors (Outlook Safe Links, Google, Facebook, YouTube), checks local URL risk signals (`@` authority disguise, IPv4/IPv6 literal, punycode, raw cloud HTML, dangerous file extensions, IP-loggers/Grabify traps like `urlto.me`, URL shorteners, unencrypted `http://`), and queries destination domain intelligence (700 ms timeout; disabled in Strict Local Mode), routing risky clicks to `warning.html` via a 1-hour ephemeral `browser.storage.session` UUID token containing zero sender email addresses.
 - *Residual limit:* Server-side multi-hop redirects that occur *after* navigating to an aged, reputable domain (without opt-in `webNavigation` permissions).
 
 ### 4. Spoof-Resistant Allowlist
 Sender trust (`trustedSenders`) matches exact validated email addresses only (never domains, wildcards, or display names). Whenever webmail exposes an unauthenticated badge or a conflicting non-ESP `via` relay, `canTrustByAllowlist` refuses auto-trust, disables `"Always trust sender"` in the banner, and surfaces a spoofing warning.
 - *Residual limit:* Webmail views where authentication metadata is hidden until headers are expanded.
 
-## Third-Party Domain Lookups
+## Third-Party Domain Lookups & HIPAA Strict Local Mode
 
-Lookup services learn only the **registrable domain** of opened emails' senders and clicked external link destinations (plus the user's IP address). Mitigations:
+By default, lookup services learn only the **registrable domain** of opened emails' senders and clicked external link destinations (plus the user's IP address). Mitigations:
+- **Strict Local Mode & Enterprise Policy (`src/settings.ts`, `public/managed_schema.json`):** Users can toggle **Strict Local Mode** directly in the popup, or HIPAA/enterprise IT administrators can enforce `strictLocalMode: true` via `browser.storage.managed`, disabling all `domainIntel` `fetch()` calls (0 bytes off-device) across content, click-guard, warning, and background scripts.
 - Strict `isValidDomain` validation before constructing any request URL; `https:`-only registry RDAP bootstrap validation (`Object.create(null)` map + hostname verification).
 - `credentials: 'omit'` and `referrerPolicy: 'no-referrer'` on every `fetch`.
 - 24-hour local cache (`domainIntelCache`), DNS `NOERROR`/`NXDOMAIN` RCODE verification (ignoring transient `SERVFAIL` errors), and `127.0.0.x` URIBL response validation.
+- Hardened local report redaction (`feedback.ts` strips emails, full URLs, IP literals, and domain names to `[address]`/`[url]`/`[ip]`/`[domain]`) and zero sender addresses stored inside `warn:*` session warnings (minimum-necessary principle).
 
 ## Permissions, Messaging & UI Isolation
 
-- **Minimal install permissions:** Only `storage` and the explicit active webmail match patterns in `extension/src/hosts.ts` (Gmail, Outlook Web, and iCloud Mail; Yahoo and Proton match patterns are withheld until their adapters ship in `T7c`/`T7d` so store builds never request unused host access). No `<all_urls>`, no `tabs` host access, zero `web_accessible_resources`, and zero runtime npm dependencies.
+- **Minimal install permissions:** Only `storage` and the explicit active webmail match patterns in `extension/src/hosts.ts` (Gmail, Outlook Web including `outlook.cloud.microsoft`, Yahoo Mail, Proton Mail, and scoped iCloud Mail frames `www.icloud.com/mail/*`, `www.icloud.com/applications/mail2/*`, and `*.icloud-sandbox.com/applications/mail2-message/*`). No `<all_urls>`, no `tabs` host access, zero `web_accessible_resources`, and zero runtime npm dependencies.
+- **Native attachment blocking on all 5 supported providers:** Works across Gmail shelves, Outlook Aria attachment wells/cards, iCloud mail2 attachment bars, Yahoo attachment tiles, Proton attachment lists, and inline download/data/blob anchors.
 - **Sender-verified messaging:** `background.ts` verifies `sender.id` and `isSupportedWebmailUrl(sender.url)` (plus top-frame / iCloud `app`-frame checks on `verdict` and `sandbox`-frame checks on `icloudBody`), never using `window.postMessage`.
 - **Closed Shadow DOM & strict CSP:** `#ped-banner-host` and `#ped-toast-host` use `attachShadow({ mode: 'closed' })` with `:host { all: initial !important }` mounted on `document.documentElement`, constructed strictly via `textContent` / `createElementNS`. Extension pages enforce `script-src 'self'; object-src 'none'; base-uri 'none';`.
 

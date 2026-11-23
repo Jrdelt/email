@@ -20,6 +20,13 @@ export default defineConfig({
     },
     permissions: ['storage'],
     host_permissions: WEBMAIL_MATCHES,
+    ...(browser !== 'firefox'
+      ? {
+          storage: {
+            managed_schema: 'managed_schema.json',
+          },
+        }
+      : {}),
     content_security_policy: {
       extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none';",
     },
@@ -30,7 +37,7 @@ export default defineConfig({
               id: 'phishing-email-detector@jrdelt.github.io',
               strict_min_version: '142.0',
               data_collection_permissions: {
-                required: ['none'],
+                required: ['websiteContent'],
               },
             },
           },

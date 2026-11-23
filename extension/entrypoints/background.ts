@@ -2,6 +2,7 @@ import { isValidDomain } from '../src/domain';
 import { getIntel, type DomainIntel } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { isSafeHttpUrl } from '../src/linkGuard';
+import { getSettings } from '../src/settings';
 
 const WARN_TTL_MS = 3600_000;
 const MAX_BODY_CHARS = 20_000;
@@ -91,12 +92,16 @@ export default defineBackground(() => {
       }
       if (m?.type === 'domainIntel' && typeof m.domain === 'string' && isValidDomain(m.domain)) {
         const domain = m.domain;
-        let p = inflight.get(domain);
-        if (!p) {
-          p = getIntel(browser.storage.local, domain, (u, i) => fetch(u, i)).finally(() => inflight.delete(domain));
-          inflight.set(domain, p);
-        }
-        return p;
+        return (async () => {
+          const settings = await getSettings(browser.storage.local, browser.storage.managed);
+          if (settings.strictLocalMode) return null;
+          let p = inflight.get(domain);
+          if (!p) {
+            p = getIntel(browser.storage.local, domain, (u, i) => fetch(u, i)).finally(() => inflight.delete(domain));
+            inflight.set(domain, p);
+          }
+          return p;
+        })();
       }
       if (
         m?.type === 'openWarning' &&
@@ -117,7 +122,6 @@ export default defineBackground(() => {
           registrable: typeof m.registrable === 'string' ? m.registrable : '',
           level: m.level === 'warning' ? 'warning' : 'danger',
           reasons,
-          senderAddress: typeof m.senderAddress === 'string' ? m.senderAddress : '',
           intel: m.intel && typeof m.intel === 'object' ? m.intel : undefined,
           createdAt: now,
         };

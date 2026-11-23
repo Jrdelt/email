@@ -1,5 +1,6 @@
 import { ageDays, type DomainIntel } from '../../src/domainIntel';
 import { destinationIntelWarnings, isSafeHttpUrl } from '../../src/linkGuard';
+import { getSettings } from '../../src/settings';
 import { formatAge } from '../../src/ui/details';
 import { createLogoSvg, createStatusIcon } from '../../src/ui/icons';
 
@@ -9,7 +10,6 @@ interface StoredWarning {
   registrable: string;
   level: 'warning' | 'danger';
   reasons: string[];
-  senderAddress?: string;
   intel?: DomainIntel;
   createdAt?: number;
 }
@@ -146,24 +146,31 @@ async function init() {
   if (stored.intel) {
     $('dest-meta').textContent = describeDestIntel(stored.intel);
   } else if (stored.registrable) {
-    $('dest-meta').textContent = `Checking ${stored.registrable}…`;
-    try {
-      const intel = (await browser.runtime.sendMessage({
-        type: 'domainIntel',
-        domain: stored.registrable,
-      })) as DomainIntel | undefined;
-      if (intel && typeof intel === 'object') {
-        $('dest-meta').textContent = describeDestIntel(intel) || 'Domain details checked.';
-        const extra = destinationIntelWarnings(intel);
-        if (extra.length) {
-          renderReasons([...new Set([...reasons, ...extra])]);
-          applyAlertSeverity('danger');
+    const settings = await getSettings(browser.storage.local, browser.storage.managed);
+    if (settings.strictLocalMode) {
+      $('dest-meta').textContent = 'Domain lookup skipped (Strict Local Mode).';
+    } else {
+      $('dest-meta').textContent = `Checking ${stored.registrable}…`;
+      try {
+        const intel = (await browser.runtime.sendMessage({
+          type: 'domainIntel',
+          domain: stored.registrable,
+        })) as DomainIntel | null | undefined;
+        if (intel && typeof intel === 'object') {
+          $('dest-meta').textContent = describeDestIntel(intel) || 'Domain details checked.';
+          const extra = destinationIntelWarnings(intel);
+          if (extra.length) {
+            renderReasons([...new Set([...reasons, ...extra])]);
+            applyAlertSeverity('danger');
+          }
+        } else if (intel === null) {
+          $('dest-meta').textContent = 'Domain lookup skipped (Strict Local Mode).';
+        } else {
+          $('dest-meta').textContent = '';
         }
-      } else {
+      } catch {
         $('dest-meta').textContent = '';
       }
-    } catch {
-      $('dest-meta').textContent = '';
     }
   }
 

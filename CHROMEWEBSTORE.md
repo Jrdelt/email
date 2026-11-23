@@ -2,7 +2,7 @@
 
 > Last Updated: 2026-11-23
 
-Use this file to copy-paste every required field in the **Chrome Web Store Developer Dashboard** and **Microsoft Partner Center (Edge Add-ons)**.
+> **Important Version Note:** Chrome Web Store version `0.1.0` (ID `bdpnkkpanopdfhnclfcpllnlccphlejp`) was submitted prior to adding **Strict Local Mode (`managed_schema.json`)** and the **Yahoo Mail** & **Proton Mail** adapters (`mail.yahoo.com`, `mail.proton.me`). Leave `0.1.0` in review as-is, and bump `extension/package.json` `"version"` to `0.2.0` before submitting the next update to Chrome Web Store (fresh submissions to Edge Add-ons and Firefox AMO can use the latest `store-upload/` archives immediately). See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md) and [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md) for all browser stores and HIPAA guidance.
 
 ---
 
@@ -39,7 +39,7 @@ HOW TO USE
 3. Click "See why" on any banner (or open the extension icon in your toolbar) to inspect sender details, manage your trusted senders list, or open the recovery guide.
 
 PRIVACY
-Your email text, attachments, sender email addresses, and full link addresses never leave your browser. No account is required, and there is no analytics or tracking. To check website age and spam listings, only the bare website domain name is looked up via public domain registration (RDAP) and DNS services and cached locally on your device for 24 hours.
+Your email text, attachments, sender email addresses, and full link addresses never leave your browser. No account is required, and there is no analytics or tracking. To check website age and spam listings, only the bare website domain name is looked up via public domain registration (RDAP) and DNS services and cached locally on your device for 24 hours — or enable Strict Local Mode directly in the popup for zero network lookups.
 
 PERMISSIONS
 • Webmail site access — used only on supported webmail services so the extension can scan opened emails locally, show warning banners, and pause risky links and untrusted attachments.
@@ -80,9 +80,11 @@ Copy-paste these plain-English explanations into the **Chrome Web Store Privacy 
 
 | Permission / Host Pattern | Type | Justification |
 |---------------------------|------|---------------|
-| `storage` | `permissions` | Stores the user's local trusted-sender allowlist, one-way SHA-256 digests of trusted emails, redacted local false-positive notes, temporary 1-hour link-warning session tokens (`storage.session`), and a 24-hour local cache of domain lookup results (`storage.local`) on the user's device. |
+| `storage` | `permissions` | Stores the user's local trusted-sender allowlist, one-way SHA-256 digests of trusted emails, redacted local false-positive notes, Strict Local Mode preference (plus read-only `storage.managed` enterprise policy schema), temporary 1-hour link-warning session tokens (`storage.session`), and a 24-hour local cache of domain lookup results (`storage.local`) on the user's device. |
 | `https://mail.google.com/*` | `host_permissions` | Reads the currently opened email's sender header, text, links, and attachment shelf in Gmail locally in the browser to detect phishing indicators, display an in-page warning banner, and pause risky links and untrusted attachments until unlocked by the user. |
 | `https://outlook.live.com/*`, `https://outlook.office.com/*`, `https://outlook.office365.com/*`, `https://outlook.cloud.microsoft/*` | `host_permissions` | Reads the currently opened email in consumer Outlook.com and Microsoft 365 Outlook on the web locally in the browser to detect phishing indicators, display an in-page warning banner, and pause risky links and untrusted attachments. |
+| `https://mail.yahoo.com/*` | `host_permissions` | Reads the currently opened email in Yahoo Mail locally in the browser (excluding compose drafts) to detect phishing indicators, display warning banners, and pause risky links and untrusted attachments. *(Included starting in `0.2.0` / fresh Edge & Firefox builds.)* |
+| `https://mail.proton.me/*` | `host_permissions` | Reads the already-decrypted visible email view in Proton Mail locally in the browser (without accessing encryption keys or Proton APIs) to detect phishing indicators, display warning banners, and pause risky links and untrusted attachments. *(Included starting in `0.2.0` / fresh Edge & Firefox builds.)* |
 | `https://www.icloud.com/mail/*`, `https://www.icloud.com/applications/mail2/*`, `https://*.icloud-sandbox.com/applications/mail2-message/*` | `host_permissions` | iCloud Mail renders message headers in `www.icloud.com/applications/mail2/*` and message bodies inside a cross-origin `*.icloud-sandbox.com/applications/mail2-message/*` iframe under `www.icloud.com/mail/*`. Scoped access to only these mail paths (not other iCloud apps) lets the extension analyze opened emails and pause risky links and attachments in iCloud Mail. |
 
 ---
@@ -156,4 +158,4 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
   > 1. Sign in to Gmail (`https://mail.google.com`), Outlook on the web (`https://outlook.live.com`), or iCloud Mail (`https://www.icloud.com/mail`). *(No special account is required for the extension itself — it works locally with zero sign-in.)*
   > 2. Open any email from an untrusted sender containing an attachment or suspicious link/sender mismatch: a warning banner appears at the top of the page and attachments/flagged links are paused until you click "I trust this email".
   > 3. Click the extension toolbar icon to view the local check summary, domain details, trusted senders list, and the "Clicked a suspicious link?" recovery guide.
-- **Withheld Yahoo & Proton host permissions:** `yahoo.ts` and `proton.ts` are roadmap stubs (`T7c`/`T7d`), so `mail.yahoo.com` and `mail.proton.me` are intentionally omitted from `manifest.json` `host_permissions` until implemented to comply with Chrome Web Store & Edge Add-ons minimum-permission rules.
+- **In-UI privacy control (`0.2.0` / fresh Edge & Firefox builds):** The toolbar popup includes a **Strict Local Mode (0 network lookups)** checkbox (and enterprise `managed_schema.json` policy override) plus a **Clear all local data** control for HIPAA/enterprise zero-egress deployments.

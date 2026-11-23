@@ -10,10 +10,11 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 
 ## Rules
 - **Privacy:** no email content, URLs, paths/queries/fragments, or sender addresses leave the browser. No telemetry.
-  The ONLY network traffic is domain lookups in `src/domainIntel.ts`, run from the background script: the sender's
-  or clicked external destination's registrable domain (validated by `isValidDomain`) sent to IANA/registry RDAP
-  (rdap.org fallback), cloudflare-dns.com and dns.google (URIBL fallback). Cached 24 h. Do not add endpoints or send
-  anything else without updating `docs/privacy.md`.
+  When Strict Local Mode (`src/settings.ts` + `public/managed_schema.json`) is enabled, **zero** network traffic leaves the
+  browser. Otherwise, the ONLY network traffic is domain lookups in `src/domainIntel.ts`, run from the background script:
+  the sender's or clicked external destination's registrable domain (validated by `isValidDomain`) sent to IANA/registry
+  RDAP (`rdap.org` fallback), `cloudflare-dns.com` and `dns.google` (URIBL fallback), cached 24 h. Do not add endpoints
+  or send anything else without updating `docs/privacy.md` and `docs/hipaa-and-compliance.md`.
 - **Lock links and attachments:** any warning (content phishing flag, sender warning, or domain/spam warning) pauses all links (`a`, `area`, SVG `xlink:href`), `<a ping>`, embedded image links, image maps, forms, and `[formaction]` controls (including `keydown` `Enter`/`Space` and dynamically mutated DOM additions) until the user unlocks the email or trusts the sender. Any attachment (native webmail attachment shelf/cards or inline `download`/`data:`/`blob:` anchors) from an **untrusted** email is always blocked (`src/ui/attachmentLock.ts` + `src/attachments.ts`) even when the body scores safe or the banner is dismissed; never block reading the email itself.
 - **Parity contract:** `ml/src/phishml/features.py` and `extension/src/features.ts` must produce identical features.
   Any feature change updates both plus `ml/tests/fixtures/parity.json`, which both test suites read.
@@ -33,7 +34,7 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 - Any task that adds a dependency must report package size before and after.
 
 ## Layout
-- `extension/src/features.ts` scorer & `extractFeatures`; `model.ts` JSON-model scorer (stub); `hosts.ts` supported webmail URLs & sender URL verification; `dom.ts` DOM-clobbering-safe `Element.prototype` attribute helpers; `domain.ts` registrable-domain & IPv4/IPv6 parsing; `sender.ts` local sender checks (brand claim, compact/camelCase spoofs, lookalike, display-name address, `via`/auth allowlist guard); `domainIntel.ts` online domain lookups (`RDAP`, `MX`/`SPF`/`DMARC`/`NXDOMAIN`/`URIBL`); `brands.ts` impersonated brands & known ESP domains; `linkGuard.ts` click-time destination inspection & multi-hop redirect unwrapping; `attachments.ts` local filename/double-extension risk classification; `adapters/` per-webmail DOM extraction (`extract.ts`, `gmail.ts`, `outlook.ts`, `icloud.ts` implemented; `yahoo.ts`, `proton.ts` stubs)
+- `extension/src/features.ts` scorer & `extractFeatures`; `model.ts` JSON-model scorer (stub); `hosts.ts` supported webmail URLs & sender URL verification; `settings.ts` & `public/managed_schema.json` Strict Local Mode / HIPAA enterprise policy settings; `dom.ts` DOM-clobbering-safe `Element.prototype` attribute helpers; `domain.ts` registrable-domain & IPv4/IPv6 parsing; `sender.ts` local sender checks (brand claim, compact/camelCase spoofs, lookalike, display-name address, `via`/auth allowlist guard); `domainIntel.ts` online domain lookups (`RDAP`, `MX`/`SPF`/`DMARC`/`NXDOMAIN`/`URIBL`); `brands.ts` impersonated brands & known ESP domains; `linkGuard.ts` click-time destination inspection & multi-hop redirect unwrapping; `attachments.ts` local filename/double-extension risk classification; `adapters/` per-webmail DOM extraction (`extract.ts`, `gmail.ts`, `outlook.ts`, `icloud.ts`, `yahoo.ts`, `proton.ts`)
 - `extension/src/allowlist.ts`, `feedback.ts` local trusted senders, SHA-256 `trustedEmails`, and false-positive reports (through the `KV` interface in `storage.ts`, so they test without a browser); `src/ui/` neo-brutalist banner (closed shadow DOM on `document.documentElement`), domain details panel, `icons.ts`, hardened `linkLock.ts`, `attachmentLock.ts`, and `linkToast.ts`
 - `extension/entrypoints/` `content.ts` (multi-message scanner, 400 ms race-to-click gate, click-time guard, iCloud dual-frame orchestration), `background.ts` (intel cache, `warn:*` session store, `openWarning`/`openSafeLink`, stateless iCloud frame relay), `popup/` (verdict status, recovery link, trust & report management), `warning/` (`warning.html` interstitial & recovery checklist)
 - `ml/src/phishml/` `features.py`, `data.py`, `train.py`, `evaluate.py`, `export_model.py` (stubs except features)

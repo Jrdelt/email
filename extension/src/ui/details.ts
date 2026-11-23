@@ -2,7 +2,7 @@ import { ageDays, type DomainIntel } from '../domainIntel';
 import type { Verdict } from '../features';
 import type { SenderInfo } from '../sender';
 
-export type IntelState = DomainIntel | 'loading' | 'unavailable' | undefined;
+export type IntelState = DomainIntel | 'loading' | 'unavailable' | 'offline' | undefined;
 
 const fmtDate = (iso?: string) => (iso ? iso.slice(0, 10) : 'unknown');
 
@@ -36,6 +36,7 @@ export function renderSimpleDetails(doc: Document, s: SenderInfo, intel: IntelSt
   if (s.registrable) {
     website = s.registrable + (s.freemail ? ' (free email account)' : '');
     if (intel === 'loading') website += ' — checking…';
+    else if (intel === 'offline') website += ' — offline (Strict Local Mode)';
     else if (typeof intel === 'object') {
       if (intel.rdap.status === 'ok') {
         const age = formatAge(ageDays(intel.rdap.registered));
@@ -52,13 +53,15 @@ export function renderSimpleDetails(doc: Document, s: SenderInfo, intel: IntelSt
   const spamText =
     intel === 'loading'
       ? 'Checking…'
-      : intel === 'unavailable' || !intel
-        ? 'Not available right now'
-        : intel.reputation.status === 'ok'
-          ? intel.reputation.listed.length
-            ? 'Reported for spam online'
-            : 'No spam reports found'
-          : 'Could not check right now';
+      : intel === 'offline'
+        ? 'Skipped (Strict Local Mode — 0 network lookups)'
+        : intel === 'unavailable' || !intel
+          ? 'Not available right now'
+          : intel.reputation.status === 'ok'
+            ? intel.reputation.listed.length
+              ? 'Reported for spam online'
+              : 'No spam reports found'
+            : 'Could not check right now';
   appendRow(doc, dl, 'Spam check', spamText);
 
   const linksText = s.linkDomains.length
@@ -79,6 +82,7 @@ function itRows(s: SenderInfo, intel: IntelState, verdict?: Verdict): [string, s
   if (s.viaDomain) rows.push(['Relay (via)', s.viaDomain]);
   if (s.unauthenticated) rows.push(['Authentication', 'unverified by webmail']);
   if (intel === 'loading') rows.push(['Domain lookup', 'checking…']);
+  else if (intel === 'offline') rows.push(['Domain lookup', 'disabled (Strict Local Mode — zero network lookups)']);
   else if (intel === 'unavailable') rows.push(['Domain lookup', 'unavailable']);
   else if (intel) {
     const r = intel.rdap;

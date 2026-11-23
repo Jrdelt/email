@@ -3,6 +3,7 @@ import type { AttachmentAnalysis } from '../../src/attachments';
 import type { Verdict } from '../../src/features';
 import { clearReports, listReports } from '../../src/feedback';
 import type { SenderInfo } from '../../src/sender';
+import { clearAllLocalData, getSettings, setStrictLocalMode } from '../../src/settings';
 import { deriveStatusSummary } from '../../src/ui/banner';
 import { type IntelState, renderITDetailsContent, renderSimpleDetails } from '../../src/ui/details';
 import { createLogoSvg, createStatusIcon } from '../../src/ui/icons';
@@ -116,9 +117,34 @@ async function renderReports() {
   $('reports').textContent = String((await listReports(kv)).length);
 }
 
+async function renderPrivacySettings() {
+  const s = await getSettings(kv, browser.storage.managed);
+  const checkbox = $('strict-local') as HTMLInputElement;
+  checkbox.checked = s.strictLocalMode;
+  checkbox.disabled = s.managedLocked;
+  $('privacy-note').textContent = s.managedLocked
+    ? s.strictLocalMode
+      ? 'Enforced by IT policy: 0 network lookups (HIPAA/enterprise local-only mode).'
+      : 'Managed by IT policy. Email content and full URLs never leave your browser.'
+    : s.strictLocalMode
+      ? 'Strict Local Mode active: 0 network lookups leave your browser.'
+      : 'Email bodies, attachments, addresses, and full URLs stay local; only bare website domains are checked online.';
+}
+
+($('strict-local') as HTMLInputElement).addEventListener('change', async (e) => {
+  await setStrictLocalMode(kv, (e.currentTarget as HTMLInputElement).checked, browser.storage.managed);
+  await renderPrivacySettings();
+});
+$('clear-all-data').addEventListener('click', async () => {
+  await clearAllLocalData(kv);
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id !== undefined) await browser.storage.session?.remove?.(`tab:${tab.id}`).catch(() => {});
+  $('clear-all-status').textContent = 'All local data cleared.';
+  await Promise.all([renderTrusted(), renderTrustedEmails(), renderReports()]);
+});
 $('clear-emails').addEventListener('click', async () => { await clearTrustedEmails(kv); await renderTrustedEmails(); });
 $('clear').addEventListener('click', async () => { await clearReports(kv); await renderReports(); });
 $('help-clicked').addEventListener('click', () => {
   void browser.tabs.create({ url: browser.runtime.getURL('/warning.html?mode=help'), active: true });
 });
-void Promise.all([renderVerdict(), renderTrusted(), renderTrustedEmails(), renderReports()]);
+void Promise.all([renderPrivacySettings(), renderVerdict(), renderTrusted(), renderTrustedEmails(), renderReports()]);

@@ -2,31 +2,33 @@
 
 **Last updated:** November 23, 2026
 
-Phishing Email Detector checks emails you open in supported webmail services (Gmail, Outlook on the web, and iCloud Mail) directly inside your browser to warn about phishing, deceptive links, and unsafe attachments.
+Phishing Email Detector checks emails you open in supported webmail services (**Gmail / Google Workspace**, **Outlook on the web / Microsoft 365**, **Apple iCloud Mail**, **Yahoo Mail**, and **Proton Mail**) directly inside your browser to warn about phishing, deceptive links, and unsafe attachments.
 
 ## 1. What Data We Process (and What Never Leaves Your Device)
 
-- **Processed locally in your browser only (never transmitted):** Email subject lines and message text, sender display names and full email addresses, attachment filenames, and full link URLs (including paths, query parameters, and `#fragments`) are analyzed strictly in memory on your device. Attachment files are never downloaded or read by the extension.
-- **Queried off-device (registrable domain names only):** When you open an untrusted email or click an external link inside an email, the extension sends **only the bare registrable domain name** (for example `paypal.com`—never `you@paypal.com`, never the message content, and never the full URL path or query string) to public domain-registration and DNS services to check domain age, mail configuration (`MX`/`SPF`/`DMARC`), and public spam listings.
-- **No analytics, tracking, or accounts:** The extension does not use cookies, analytics SDKs, crash telemetry, advertising identifiers, or developer-operated backend servers.
+- **Processed locally in your browser only (never transmitted):** Email subject lines and message text, sender display names and full email addresses, attachment filenames and file contents (attachments are never downloaded or read), and full link URLs (including paths, query parameters, and `#fragments`) are analyzed strictly in memory on your device.
+- **Optional Strict Local Mode (0 network lookups — HIPAA / enterprise ready):** Users can enable **Strict Local Mode** directly in the extension toolbar popup (and enterprise IT administrators can enforce it via `managed_schema.json` / `browser.storage.managed`). When Strict Local Mode is active, **zero network requests** leave your browser.
+- **Standard Mode domain lookups (bare registrable domain names only):** When Strict Local Mode is off and you open an untrusted email or click an external link inside an email, the extension queries **only the bare registrable domain name** (for example `example.com` — never `you@example.com`, never the message content, and never the full URL path or query string) against public domain-registration and DNS services to check domain age, mail configuration (`MX`/`SPF`/`DMARC`), and public spam listings.
+- **No analytics, tracking, accounts, or `storage.sync`:** The extension does not use cookies, analytics SDKs, crash telemetry, advertising identifiers, cloud profile syncing (`storage.sync`), or developer-operated backend servers.
 
 ## 2. How Data Is Stored
 
-All extension state is stored **exclusively on your device** using browser local/session storage (`storage.local` and `storage.session`—never `storage.sync`):
+All extension state is stored **exclusively on your device** using browser local/session storage (`storage.local` and `storage.session`):
 
+- **Privacy preferences (`privacySettings` in `storage.local`, optional enterprise override via `storage.managed`):** Stores your `Strict Local Mode` preference.
 - **Trusted senders (`trustedSenders` in `storage.local`):** Exact email addresses you explicitly choose to trust via *"Always trust sender"*.
 - **Trusted emails (`trustedEmails` in `storage.local`, up to 500 entries):** One-way SHA-256 cryptographic hashes only (no email text, links, attachment names, or sender addresses are stored) so emails you unlock with *"I trust this email"* stay unlocked across page refreshes.
-- **False-positive notes (`falsePositiveReports` in `storage.local`, up to 50 entries):** Verdict level, numeric score, and redacted warning reason text saved locally when you click *"Not phishing"*. Never transmitted anywhere.
+- **False-positive notes (`falsePositiveReports` in `storage.local`, up to 50 entries):** Verdict level, numeric score, and redacted warning reason text saved locally when you click *"Not phishing"* (email addresses, full URLs, IP addresses, and domain names are stripped to `[address]`, `[url]`, `[ip]`, and `[domain]`). Never transmitted anywhere.
 - **Domain lookup caches (`domainIntelCache` for 24 hours, `rdapBootstrap` for 7 days in `storage.local`):** Public domain registration and DNS results keyed by registrable domain name to avoid repeated network lookups.
-- **Temporary tab & link-warning state (`tab:*` and `warn:*` in `storage.session`):** Held in memory only for the active tab and warning page, expiring within 1 hour or automatically when the tab or browser closes.
+- **Temporary tab & link-warning state (`tab:*` and `warn:*` in `storage.session`):** Held in memory only for the active tab and warning page (containing no sender email addresses), expiring within 1 hour or automatically when the tab or browser closes.
 
 ## 3. How Data Is Used
 
-Every piece of data processed by the extension is used solely for its single purpose—detecting phishing emails, pausing risky links and untrusted attachments in webmail, and displaying clear security warnings to you. Data is never used for advertising, profiling, creditworthiness, lending, or any unrelated purpose.
+Every piece of data processed by the extension is used solely for its single purpose — detecting phishing emails, pausing risky links and untrusted attachments in webmail, and displaying clear security warnings to you. Data is never used for advertising, profiling, creditworthiness, lending, or any unrelated purpose.
 
-## 4. Third-Party Services Used for Domain Lookups
+## 4. Third-Party Services Used for Domain Lookups (Disabled in Strict Local Mode)
 
-When checking a sender's registrable domain or a clicked external link's registrable domain, those public lookup services receive the **domain name** and your **IP address** (requests are sent without cookies or referrers):
+When **Strict Local Mode** is off and the extension checks a sender's registrable domain or a clicked external link's registrable domain, those public lookup services receive only the **bare domain name** and your **IP address** (all requests use `credentials: 'omit'` and `referrerPolicy: 'no-referrer'`):
 
 - **IANA RDAP Bootstrap (`data.iana.org`) & Domain Registry RDAP Servers (with `rdap.org` fallback):** Used to look up domain registration date and registrar ([ICANN/IANA Privacy Policy](https://www.icann.org/privacy/policy), [rdap.org Info](https://about.rdap.org/)).
 - **Cloudflare Public DNS (`cloudflare-dns.com`):** Used for DNS-over-HTTPS `MX`, `SPF`, `DMARC`, `NXDOMAIN`, and URIBL queries ([Cloudflare 1.1.1.1 Privacy Policy](https://developers.cloudflare.com/1.1.1.1/privacy/public-dns-resolver/)).
@@ -35,18 +37,18 @@ When checking a sender's registrable domain or a clicked external link's registr
 
 ## 5. Data Sharing and Sale
 
-We do **not** sell, rent, license, or share user data with third parties. Aside from the public registrable-domain lookups listed in Section 4, zero data leaves your browser.
+We do **not** sell, rent, license, or share user data with third parties. Aside from the bare registrable-domain lookups in Section 4 (which are disabled completely when Strict Local Mode is on), zero data leaves your browser.
 
 ## 6. Data Retention and User Controls
 
-- Temporary session state (`storage.session`) is deleted when you close the tab, after 1 hour, or when you close your browser.
+- Temporary session state (`storage.session`) is deleted when you close the tab (`tabs.onRemoved`), after 1 hour, proceed through a warning, or close your browser.
 - Cached domain lookups expire after 24 hours.
-- You can view and remove **Trusted senders**, clear **Trusted emails** (or click **Undo** immediately after trusting), and clear local **False-positive reports** at any time from the extension toolbar popup.
+- You can toggle **Strict Local Mode**, view and remove **Trusted senders**, clear **Trusted emails** (or click **Undo** immediately after trusting), clear **False-positive reports**, or wipe everything with **"Clear all local data"** directly from the toolbar popup.
 - Uninstalling the extension permanently deletes all local storage associated with the extension from your browser.
 
 ## 7. Changes to This Policy
 
-If the extension's data practices or lookup endpoints ever change, we will update this policy and the "Last updated" date above prior to releasing the change.
+If the extension's data practices or lookup endpoints ever change, we will update this policy, provide an in-extension/release notice, and update the "Last updated" date above prior to releasing the change.
 
 ## 8. Contact
 

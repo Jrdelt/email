@@ -22,7 +22,11 @@ export async function clearReports(kv: KV): Promise<void> {
   await kv.set({ [KEY]: [] });
 }
 
-/** Keep hostnames (useful for tuning) but drop anything that looks like an email address. */
+/** Strip emails, full URLs, IP literals, and domain names so local false-alarm notes retain zero PII/PHI. */
 function redact(reason: string): string {
-  return reason.replace(/[^\s@<>()]+@[^\s@<>()]+/g, '[address]');
+  return reason
+    .replace(/https?:\/\/[^\s)<>"]+/gi, '[url]')
+    .replace(/[^\s@<>()]+@[^\s@<>()]+/g, '[address]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
+    .replace(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b/gi, '[domain]');
 }

@@ -145,13 +145,18 @@
       }
       #it-details { margin-top: 10px; background: #fdf9f0; box-shadow: none; }
       .help-btn { width: 100%; margin-top: 10px; background: #fdf9f0; }
+      .privacy-card { margin-top: 12px; padding: 10px 12px; }
+      .toggle-row { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 13px; cursor: pointer; min-height: 24px; }
+      .toggle-row input { width: 18px; height: 18px; margin: 0; accent-color: #111111; cursor: pointer; flex-shrink: 0; }
+      .privacy-note { margin: 4px 0 0; font-size: 12px; color: #444444; }
+      .clear-all-row { margin-top: 10px; padding-top: 10px; border-top: 1.5px solid #111111; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
       @media (forced-colors: active) {
         body { background-image: none; }
         .card, .icon-box, .trusted-pill, .mini-sticker, details, button { box-shadow: none; border: 2px solid CanvasText; background: Canvas; color: CanvasText; }
         button:disabled { color: GrayText; border-color: GrayText; opacity: 1; }
         .tag { border: 1px solid CanvasText; }
-        button:focus-visible, summary:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+        button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
       }
     </style>
   </head>
@@ -166,6 +171,13 @@
     </header>
     <main>
       <div id="out" class="card muted">Open an email to check it.</div>
+      <section class="card privacy-card" aria-label="Privacy settings">
+        <label class="toggle-row" for="strict-local">
+          <input id="strict-local" type="checkbox" />
+          <span>Strict Local Mode (0 network lookups)</span>
+        </label>
+        <p id="privacy-note" class="privacy-note">Email content, attachments, sender addresses, and full URLs never leave your browser.</p>
+      </section>
       <h2>Trusted senders</h2>
       <ul id="trusted" class="trusted-list"></ul>
       <div id="trusted-emails-row" class="trusted-emails-row" hidden>
@@ -177,7 +189,11 @@
         <div id="it-details" class="card muted">Open an email to view technical details.</div>
         <h2>False-positive reports <span class="muted">(on this device only)</span></h2>
         <div><span id="reports">0</span> saved <button id="clear" type="button" aria-label="Clear saved false-positive reports">Clear</button></div>
-        <p class="muted">Only sender and clicked link domains are checked online (RDAP, Cloudflare/Google DNS, URIBL). Email content, attachments, and full URLs never leave your browser.</p>
+        <p class="muted">When Strict Local Mode is off, only bare sender and clicked external link domains are checked online (RDAP, Cloudflare/Google DNS, URIBL). Email content, attachments, and full URLs never leave your browser.</p>
+        <div class="clear-all-row">
+          <span id="clear-all-status" class="muted">Local cache &amp; trust data</span>
+          <button id="clear-all-data" type="button">Clear all local data</button>
+        </div>
       </details>
       <button id="help-clicked" type="button" class="help-btn">Clicked a suspicious link?</button>
     </main>

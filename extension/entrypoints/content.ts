@@ -16,6 +16,7 @@ import { recordFalsePositive } from '../src/feedback';
 import { icloudFrameRole, WEBMAIL_MATCHES } from '../src/hosts';
 import { analyzeLinkDestination, isSafeHttpUrl, mergeLinkIntel } from '../src/linkGuard';
 import { analyzeSender, canTrustByAllowlist } from '../src/sender';
+import { getSettings } from '../src/settings';
 import {
   isAttachmentLocked,
   lockAttachments,
@@ -163,6 +164,7 @@ function installClickGuard(opts: {
   isPending: () => boolean;
   flushScan: () => Promise<void>;
 }) {
+  const attachedDocs = new WeakSet<Document>();
   const onEvent = (e: Event) => {
     const el = eventElement(e);
     if (!el) return;
@@ -246,37 +248,38 @@ function installClickGuard(opts: {
             registrable: risk.registrable,
             level: risk.level,
             reasons: risk.reasons,
-            senderAddress: latest.senderAddress,
           })
           .catch(() => {});
         return;
       }
 
       if (risk.needsDomainCheck) {
-        let timerId: ReturnType<typeof setTimeout> | undefined;
-        const intel = await Promise.race([
-          (browser.runtime.sendMessage({ type: 'domainIntel', domain: risk.registrable }) as Promise<
-            DomainIntel | undefined
-          >).catch(() => undefined),
-          new Promise<undefined>((resolve) => {
-            timerId = setTimeout(() => resolve(undefined), CLICK_INTEL_TIMEOUT_MS);
-          }),
-        ]).finally(() => clearTimeout(timerId));
-        const finalRisk = mergeLinkIntel(risk, intel);
-        if (finalRisk.level !== 'safe') {
-          void browser.runtime
-            .sendMessage({
-              type: 'openWarning',
-              href: finalRisk.href,
-              host: finalRisk.host,
-              registrable: finalRisk.registrable,
-              level: finalRisk.level,
-              reasons: finalRisk.reasons,
-              senderAddress: latest.senderAddress,
-              intel,
-            })
-            .catch(() => {});
-          return;
+        const settings = await getSettings(browser.storage.local, browser.storage.managed);
+        if (!settings.strictLocalMode) {
+          let timerId: ReturnType<typeof setTimeout> | undefined;
+          const intel = await Promise.race([
+            (browser.runtime.sendMessage({ type: 'domainIntel', domain: risk.registrable }) as Promise<
+              DomainIntel | undefined
+            >).catch(() => undefined),
+            new Promise<undefined>((resolve) => {
+              timerId = setTimeout(() => resolve(undefined), CLICK_INTEL_TIMEOUT_MS);
+            }),
+          ]).finally(() => clearTimeout(timerId));
+          const finalRisk = mergeLinkIntel(risk, intel);
+          if (finalRisk.level !== 'safe') {
+            void browser.runtime
+              .sendMessage({
+                type: 'openWarning',
+                href: finalRisk.href,
+                host: finalRisk.host,
+                registrable: finalRisk.registrable,
+                level: finalRisk.level,
+                reasons: finalRisk.reasons,
+                intel,
+              })
+              .catch(() => {});
+            return;
+          }
         }
       }
 
@@ -294,9 +297,16 @@ function installClickGuard(opts: {
     })();
   };
 
-  for (const type of ['click', 'auxclick', 'mousedown', 'pointerdown', 'keydown', 'submit']) {
-    document.addEventListener(type, onEvent, true);
-  }
+  const attachDoc = (doc: Document) => {
+    if (attachedDocs.has(doc)) return;
+    attachedDocs.add(doc);
+    for (const type of ['click', 'auxclick', 'mousedown', 'pointerdown', 'keydown', 'submit']) {
+      doc.addEventListener(type, onEvent, true);
+    }
+  };
+
+  attachDoc(document);
+  return attachDoc;
 }
 
 async function evaluateAndRender<T extends ScannableMsg>(opts: {
@@ -311,7 +321,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   unlockMatching: (emails: T[]) => void;
 }) {
   const { kv, messages, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
-  const [trustedSendersList, trustedEmailsList, prelim] = await Promise.all([
+  const [settings, trustedSendersList, trustedEmailsList, prelim] = await Promise.all([
+    getSettings(kv, browser.storage.managed),
     listTrusted(kv),
     listTrustedEmails(kv),
     Promise.all(
@@ -353,7 +364,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   const intelByDomain = new Map<string, IntelState>();
   for (const item of items) {
     if (!item.trusted && item.sender.registrable && !intelByDomain.has(item.sender.registrable)) {
-      intelByDomain.set(item.sender.registrable, 'loading');
+      intelByDomain.set(item.sender.registrable, settings.strictLocalMode ? 'offline' : 'loading');
     }
   }
 
@@ -494,7 +505,10 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           }
           return ok;
         },
-        onReport: () => recordFalsePositive(kv, { ...primaryEntry.item.verdict, reasons: primaryBanner.reasons }),
+        onReport: async () => {
+          if (settings.disableLocalReports) return;
+          await recordFalsePositive(kv, { ...primaryEntry.item.verdict, reasons: primaryBanner.reasons });
+        },
         onDismiss: () => {
           showingUndoPill = false;
           addBounded(dismissed, threadHashKey);
@@ -504,12 +518,15 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   };
   render();
 
-  if (intelByDomain.size > 0) {
+  if (!settings.strictLocalMode && intelByDomain.size > 0) {
     void Promise.all(
       [...intelByDomain.keys()].map(async (domain) => {
         try {
-          const res = (await browser.runtime.sendMessage({ type: 'domainIntel', domain })) as DomainIntel | undefined;
-          intelByDomain.set(domain, res ?? 'unavailable');
+          const res = (await browser.runtime.sendMessage({ type: 'domainIntel', domain })) as
+            | DomainIntel
+            | null
+            | undefined;
+          intelByDomain.set(domain, res === null ? 'offline' : (res ?? 'unavailable'));
         } catch {
           intelByDomain.set(domain, 'unavailable');
         }
@@ -549,6 +566,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     }
 
     const messages = emails.slice(-MAX_THREAD_MESSAGES);
+    for (const m of messages) guardDoc(m.container.ownerDocument);
     const threadKey = messages.map(msgKey).join('\n---\n');
     const nextContainers = messages.map((m) => m.container);
     const nextAttachmentEls = [...new Set(messages.flatMap(attachmentElementsOf))];
@@ -613,7 +631,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
 
   const scheduler = createScheduler(scan);
 
-  installClickGuard({
+  const guardDoc = installClickGuard({
     findTarget: (a) => {
       for (const c of activeContainers) {
         if (c.contains(a)) {
@@ -641,6 +659,12 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   if (rootTarget) new MutationObserver(scheduler.schedule).observe(rootTarget, { childList: true, subtree: true });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) scheduler.schedule();
+  });
+  browser.storage?.onChanged?.addListener((changes, areaName) => {
+    if ((areaName === 'local' && 'privacySettings' in changes) || areaName === 'managed') {
+      lastKey = '';
+      scheduler.schedule();
+    }
   });
   scheduler.schedule();
 }
@@ -889,6 +913,12 @@ function runICloudApp(kv: typeof browser.storage.local) {
   if (document.body) new MutationObserver(scheduler.schedule).observe(document.body, { childList: true, subtree: true });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) scheduler.schedule();
+  });
+  browser.storage?.onChanged?.addListener((changes, areaName) => {
+    if ((areaName === 'local' && 'privacySettings' in changes) || areaName === 'managed') {
+      lastKey = '';
+      scheduler.schedule();
+    }
   });
   void browser.runtime.sendMessage({ type: 'icloudPing' }).catch(() => {});
   scheduler.schedule();

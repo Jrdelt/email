@@ -11,6 +11,8 @@ export const WEBMAIL_MATCHES = [
   'https://outlook.office.com/*', // Microsoft 365
   'https://outlook.office365.com/*', // Microsoft 365 (alt)
   'https://outlook.cloud.microsoft/*', // Microsoft 365 (current Outlook Web)
+  'https://mail.yahoo.com/*', // Yahoo Mail
+  'https://mail.proton.me/*', // Proton Mail
   'https://www.icloud.com/mail/*', // iCloud Mail
   ...ICLOUD_APP_MATCHES,
   ...ICLOUD_SANDBOX_MATCHES,
@@ -22,6 +24,8 @@ const STANDARD_WEBMAIL_HOSTS = new Set([
   'outlook.office.com',
   'outlook.office365.com',
   'outlook.cloud.microsoft',
+  'mail.yahoo.com',
+  'mail.proton.me',
 ]);
 
 /** Identify which iCloud Mail frame a URL belongs to, or null if not iCloud Mail. */
