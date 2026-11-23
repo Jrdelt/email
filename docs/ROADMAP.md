@@ -3,6 +3,7 @@
 Each task lists acceptance criteria. Check the box when all are met and CI passes.
 
 - [x] **T0 Scaffold**: extension builds for Chrome, Edge, Firefox; ml tests pass.
+- [x] **T0b Detection actions**: banner (shadow DOM) with "I trust this email" (unlocks links, this session only), "Always trust sender" (local allowlist, manageable in popup), "Not phishing" (local false-positive report, no email content stored). Links in flagged emails are disabled until unlocked. "Always trust sender" stays disabled until T7 provides the sender.
 - [ ] **T1 Parity fixtures**: create `ml/tests/fixtures/parity.json` (>=20 cases: sender, body, links, expected features). Python and TS tests both load it and assert equal features.
 - [ ] **T2 Data**: implement `phishml/data.py` `load_dataset()` returning a DataFrame with columns `sender, body, links, label, date, source`. Document sources in `ml/data/SOURCES.md`. Include a tiny synthetic sample under `ml/tests/fixtures/` so tests run offline.
 - [ ] **T3 Baseline model**: `train.py` trains logistic regression on `FEATURE_NAMES`; `evaluate.py` does a time-based split and prints precision@0.1% FPR, PR-AUC, confusion matrix. Results table into `docs/results.md`.

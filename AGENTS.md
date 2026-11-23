@@ -28,4 +28,5 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
 
 ## Layout
 - `extension/src/features.ts` scorer; `model.ts` JSON-model scorer (stub); `hosts.ts` supported webmail URLs; `adapters/` per-webmail DOM extraction (Gmail, Outlook, Yahoo, Proton, iCloud; stubs)
+- `extension/src/allowlist.ts`, `feedback.ts` local trusted senders and false-positive reports (through the `KV` interface in `storage.ts`, so they test without a browser); `src/ui/` banner (closed shadow DOM) and link locking
 - `ml/src/phishml/` `features.py`, `data.py`, `train.py`, `evaluate.py`, `export_model.py` (stubs except features)
