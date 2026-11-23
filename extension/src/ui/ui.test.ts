@@ -89,6 +89,38 @@ describe('banner', () => {
     removeBanner();
     expect(document.getElementById('ped-banner-host')).toBeNull();
   });
+
+  it('calls onTrustSender without calling onUnlock, and calls onUnlock on "I trust this email"', async () => {
+    document.body.innerHTML = '';
+    const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
+    let capturedRoot: ShadowRoot | undefined;
+    const origAttach = HTMLElement.prototype.attachShadow;
+    const spy = vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      capturedRoot = origAttach.call(this, init);
+      return capturedRoot;
+    });
+    try {
+      const act1 = actions();
+      showBanner({ level: 'warning', title: 'Check this sender.', tag: 'SENDER WARNING', reasons: sender.warnings, linksLocked: true, sender }, act1);
+      const btns1 = [...capturedRoot!.querySelectorAll('button')];
+      const trustSenderBtn = btns1.find((b) => b.textContent === 'Always trust sender')!;
+      trustSenderBtn.click();
+      await vi.waitFor(() => expect(act1.onTrustSender).toHaveBeenCalledTimes(1));
+      expect(act1.onUnlock).not.toHaveBeenCalled();
+      expect(document.getElementById('ped-banner-host')).toBeNull();
+
+      const act2 = actions();
+      showBanner({ level: 'warning', title: 'Check this sender.', tag: 'SENDER WARNING', reasons: sender.warnings, linksLocked: true, sender }, act2);
+      const btns2 = [...capturedRoot!.querySelectorAll('button')];
+      const trustEmailBtn = btns2.find((b) => b.textContent === 'I trust this email')!;
+      trustEmailBtn.click();
+      await vi.waitFor(() => expect(trustEmailBtn.textContent).toBe('Trusted — links enabled'));
+      expect(act2.onUnlock).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+      removeBanner();
+    }
+  });
 });
 
 describe('decideBanner', () => {

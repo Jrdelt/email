@@ -16,7 +16,7 @@ export interface BannerModel {
 }
 
 export interface BannerActions {
-  onUnlock(): void; // "I trust this email" — unlock links for this email only
+  onUnlock(): void | Promise<void>; // "I trust this email" — unlock links for this email
   onTrustSender(): Promise<boolean>; // false if the address is not a valid exact address
   onReport(): Promise<void>; // local false-positive report
   onDismiss(): void;
@@ -303,7 +303,6 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   const trust = button('Always trust sender', async (b) => {
     b.disabled = true;
     if (await actions.onTrustSender()) {
-      actions.onUnlock();
       removeBanner(doc);
     }
   });
@@ -316,12 +315,12 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
 
   if (model.linksLocked) {
     actionsBar.append(
-      button('I trust this email', (b) => {
-        actions.onUnlock();
+      button('I trust this email', async (b) => {
         b.disabled = true;
-        b.textContent = 'Links enabled';
-        sub.textContent = 'Links enabled for this email. Verify the sender before trusting links or attachments.';
-        sideSticker.textContent = 'LINKS ENABLED';
+        await actions.onUnlock();
+        b.textContent = 'Trusted — links enabled';
+        sub.textContent = 'This email is trusted and its links are enabled.';
+        sideSticker.textContent = 'TRUSTED';
       }),
     );
   }

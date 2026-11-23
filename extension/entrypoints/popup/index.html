@@ -82,6 +82,8 @@
         border-radius: 999px; padding: 3px 8px 3px 10px; font-size: 12px; font-weight: 600;
       }
       .trusted-pill button { padding: 1px 7px; font-size: 11px; border-radius: 999px; box-shadow: none; border-width: 1.5px; }
+      .trusted-emails-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+      .trusted-emails-row[hidden] { display: none; }
 
       .muted { color: #444444; font-size: 13px; }
 
@@ -156,6 +158,10 @@
     <div id="out" class="card muted">Open an email to check it.</div>
     <h4>Trusted senders</h4>
     <ul id="trusted" class="trusted-list"></ul>
+    <div id="trusted-emails-row" class="trusted-emails-row" hidden>
+      <span id="trusted-emails-label" class="muted"></span>
+      <button id="clear-emails" type="button">Clear</button>
+    </div>
     <details id="it-section">
       <summary>More options for IT</summary>
       <div id="it-details" class="card muted">Open an email to view technical details.</div>

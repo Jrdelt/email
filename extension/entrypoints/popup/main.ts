@@ -1,4 +1,4 @@
-import { listTrusted, untrustSender } from '../../src/allowlist';
+import { clearTrustedEmails, listTrusted, listTrustedEmails, untrustSender } from '../../src/allowlist';
 import { intelWarnings } from '../../src/domainIntel';
 import type { Verdict } from '../../src/features';
 import { clearReports, listReports } from '../../src/feedback';
@@ -111,9 +111,16 @@ async function renderTrusted() {
   }
 }
 
+async function renderTrustedEmails() {
+  const count = (await listTrustedEmails(kv)).length;
+  $('trusted-emails-row').hidden = count === 0;
+  $('trusted-emails-label').textContent = count === 1 ? '1 trusted email saved' : `${count} trusted emails saved`;
+}
+
 async function renderReports() {
   $('reports').textContent = String((await listReports(kv)).length);
 }
 
+$('clear-emails').addEventListener('click', async () => { await clearTrustedEmails(kv); await renderTrustedEmails(); });
 $('clear').addEventListener('click', async () => { await clearReports(kv); await renderReports(); });
-void Promise.all([renderVerdict(), renderTrusted(), renderReports()]);
+void Promise.all([renderVerdict(), renderTrusted(), renderTrustedEmails(), renderReports()]);

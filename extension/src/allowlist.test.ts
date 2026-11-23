@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { isTrusted, listTrusted, normalizeSender, trustSender, untrustSender } from './allowlist';
+import {
+  clearTrustedEmails,
+  hashEmail,
+  isEmailTrusted,
+  isTrusted,
+  listTrusted,
+  listTrustedEmails,
+  normalizeSender,
+  trustEmails,
+  trustSender,
+  untrustSender,
+} from './allowlist';
 import { clearReports, listReports, recordFalsePositive } from './feedback';
 import { memoryKV } from './storage';
 
@@ -61,5 +72,49 @@ describe('false-positive reports', () => {
     expect(r[0].reasons[0]).toBe('from [address] via evil.example');
     await clearReports(kv);
     expect(await listReports(kv)).toHaveLength(0);
+  });
+});
+
+describe('trustedEmails', () => {
+  it('computes normalized 64-char SHA-256 digests and distinguishes sender/body/links', async () => {
+    const h1 = await hashEmail('  Alerts@Evil.Example ', 'Hello   world\n\nverify  now ', [{ href: ' https://evil.example/a ' }]);
+    const h2 = await hashEmail('alerts@evil.example', 'Hello world verify now', [{ href: 'https://evil.example/a' }]);
+    expect(h1).toMatch(/^[a-f0-9]{64}$/);
+    expect(h1).toBe(h2);
+
+    expect(await hashEmail('other@evil.example', 'Hello world verify now', [{ href: 'https://evil.example/a' }])).not.toBe(h1);
+    expect(await hashEmail('alerts@evil.example', 'Different body', [{ href: 'https://evil.example/a' }])).not.toBe(h1);
+    expect(await hashEmail('alerts@evil.example', 'Hello world verify now', [{ href: 'https://evil.example/b' }])).not.toBe(h1);
+  });
+
+  it('persists across reads, dedupes with recency, caps at 500, and clears', async () => {
+    const kv = memoryKV();
+    const h1 = await hashEmail('a@evil.example', 'msg 1', []);
+    const h2 = await hashEmail('b@evil.example', 'msg 2', []);
+
+    await trustEmails(kv, [h1]);
+    expect(await isEmailTrusted(kv, h1)).toBe(true);
+    expect(await isEmailTrusted(kv, h2)).toBe(false);
+
+    await trustEmails(kv, [h2, h1]);
+    expect(await listTrustedEmails(kv)).toEqual([h2, h1]);
+
+    const many = Array.from({ length: 505 }, (_, i) => i.toString(16).padStart(64, '0'));
+    await trustEmails(kv, many);
+    const stored = await listTrustedEmails(kv);
+    expect(stored).toHaveLength(500);
+    expect(stored[0]).toBe(many[0]);
+
+    await clearTrustedEmails(kv);
+    expect(await listTrustedEmails(kv)).toEqual([]);
+    expect(await isEmailTrusted(kv, h1)).toBe(false);
+  });
+
+  it('ignores malformed entries already in storage', async () => {
+    const kv = memoryKV();
+    const valid = 'a'.repeat(64);
+    await kv.set({ trustedEmails: [valid, 'not-a-hash', 'A'.repeat(64), 'bad@evil.com', 123] });
+    expect(await listTrustedEmails(kv)).toEqual([valid]);
+    expect(await isEmailTrusted(kv, 'not-a-hash')).toBe(false);
   });
 });

@@ -2,6 +2,9 @@ import type { KV } from './storage';
 
 const KEY = 'trustedSenders';
 const MAX = 1000;
+const EMAIL_KEY = 'trustedEmails';
+const MAX_EMAILS = 500;
+const HASH_RE = /^[a-f0-9]{64}$/;
 
 // Strict, ASCII-only address check. Trust is per exact address: never per domain, never per display name.
 // Local part: letters, digits and . _ % + -, starts and ends with a letter or digit, no "..".
@@ -46,4 +49,46 @@ export async function trustSender(kv: KV, sender: string): Promise<boolean> {
 export async function untrustSender(kv: KV, sender: string): Promise<void> {
   const addr = normalizeSender(sender);
   await kv.set({ [KEY]: (await listTrusted(kv)).filter((s) => s !== addr) });
+}
+
+/** One-way SHA-256 fingerprint of an email (never stores body, URLs, or sender address). */
+export async function hashEmail(
+  senderAddress: string,
+  body: string,
+  links: readonly { href: string }[],
+): Promise<string> {
+  const normSender = senderAddress.trim().toLowerCase();
+  const normBody = body.replace(/\s+/g, ' ').trim();
+  const normLinks = links.map((l) => l.href.trim()).join('\n');
+  const bytes = new TextEncoder().encode(`v1\0${normSender}\0${normBody}\0${normLinks}`);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function listTrustedEmails(kv: KV): Promise<string[]> {
+  const v = (await kv.get(EMAIL_KEY))[EMAIL_KEY];
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && HASH_RE.test(x)) : [];
+}
+
+export async function isEmailTrusted(kv: KV, hash: string): Promise<boolean> {
+  return HASH_RE.test(hash) && (await listTrustedEmails(kv)).includes(hash);
+}
+
+export async function trustEmails(kv: KV, hashes: readonly string[]): Promise<void> {
+  const valid = hashes.filter((h) => HASH_RE.test(h));
+  if (valid.length === 0) return;
+  const existing = await listTrustedEmails(kv);
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const h of [...valid, ...existing]) {
+    if (seen.has(h)) continue;
+    seen.add(h);
+    next.push(h);
+    if (next.length >= MAX_EMAILS) break;
+  }
+  await kv.set({ [EMAIL_KEY]: next });
+}
+
+export async function clearTrustedEmails(kv: KV): Promise<void> {
+  await kv.set({ [EMAIL_KEY]: [] });
 }

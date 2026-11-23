@@ -8,7 +8,7 @@ import {
   icloudFrameRole,
 } from '../src/adapters/icloud';
 import type { ExtractedEmail, WebmailAdapter } from '../src/adapters/types';
-import { isTrusted, trustSender } from '../src/allowlist';
+import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender } from '../src/allowlist';
 import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
@@ -66,16 +66,23 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
 }) {
   const { kv, messages, trustKey, trustedThisSession, dismissed, isStale, applyLocks, unlockAll, unlockMatching } = opts;
   const threadUnlocked = trustedThisSession.has(trustKey);
+  const [trustedSendersList, trustedEmailsList] = await Promise.all([listTrusted(kv), listTrustedEmails(kv)]);
+  const trustedSenders = new Set(trustedSendersList);
+  const trustedEmails = new Set(trustedEmailsList);
   const items = await Promise.all(
     messages.map(async (email) => {
       const k = msgKey(email);
+      const hash = await hashEmail(email.senderAddress, email.body, email.links);
       const sender = analyzeSender(email.senderName, email.senderAddress, email.links);
       const trusted =
-        threadUnlocked || trustedThisSession.has(k) || (sender.valid && (await isTrusted(kv, sender.address)));
+        threadUnlocked ||
+        trustedThisSession.has(hash) ||
+        trustedEmails.has(hash) ||
+        (sender.valid && trustedSenders.has(sender.address));
       const verdict: Verdict = trusted
         ? { score: 0, level: 'safe', reasons: [] }
         : scoreEmail(sender.address, email.body, email.links);
-      return { email, key: k, sender, trusted, verdict };
+      return { email, key: k, hash, sender, trusted, verdict };
     }),
   );
   if (isStale()) return;
@@ -133,9 +140,25 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     showBanner(
       { ...primaryBanner, linksLocked: anyLinksLocked },
       {
-        onUnlock: () => {
+        onUnlock: async () => {
           trustedThisSession.add(trustKey);
+          for (const { item } of evaluated) {
+            trustedThisSession.add(item.hash);
+            item.trusted = true;
+            item.verdict = { score: 0, level: 'safe', reasons: [] };
+          }
           unlockAll(evaluated.map((e) => e.item.email));
+          browser.runtime
+            .sendMessage({
+              type: 'verdict',
+              payload: {
+                verdict: { score: 0, level: 'safe', reasons: [] },
+                sender: primaryEntry.item.sender,
+                intel: primaryEntry.intel,
+              },
+            })
+            .catch(() => {});
+          await trustEmails(kv, evaluated.map((e) => e.item.hash));
         },
         onTrustSender: async () => {
           const addr = primaryEntry.item.sender.address;
@@ -149,13 +172,22 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
                 matched.push(item.email);
               }
             }
-            unlockMatching(matched);
-            browser.runtime
-              .sendMessage({
-                type: 'verdict',
-                payload: { verdict: { score: 0, level: 'safe', reasons: [] }, sender: primaryEntry.item.sender, intel: undefined },
-              })
-              .catch(() => {});
+            const anyRemainingBanner = evaluated.some(({ item }) => {
+              if (item.trusted) return false;
+              const intel = item.sender.registrable ? intelByDomain.get(item.sender.registrable) : undefined;
+              return decideBanner(item.verdict, item.sender, intel, false) !== null;
+            });
+            if (!anyRemainingBanner) {
+              unlockAll(evaluated.map((e) => e.item.email));
+              browser.runtime
+                .sendMessage({
+                  type: 'verdict',
+                  payload: { verdict: { score: 0, level: 'safe', reasons: [] }, sender: primaryEntry.item.sender, intel: undefined },
+                })
+                .catch(() => {});
+            } else {
+              unlockMatching(matched);
+            }
           }
           return ok;
         },
