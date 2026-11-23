@@ -2,12 +2,12 @@ import { adapterFor } from '../src/adapters';
 import { bodyText, linksIn } from '../src/adapters/extract';
 import type { ExtractedEmail } from '../src/adapters/types';
 import { isTrusted, trustSender } from '../src/allowlist';
-import { intelWarnings, type DomainIntel } from '../src/domainIntel';
+import type { DomainIntel } from '../src/domainIntel';
 import { scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
 import { WEBMAIL_MATCHES } from '../src/hosts';
 import { analyzeSender } from '../src/sender';
-import { removeBanner, showBanner } from '../src/ui/banner';
+import { decideBanner, removeBanner, showBanner } from '../src/ui/banner';
 import type { IntelState } from '../src/ui/details';
 import { lockLinks, unlockLinks } from '../src/ui/linkLock';
 
@@ -34,7 +34,14 @@ export default defineContentScript({
     const scan = async () => {
       if (document.hidden) return; // never work in background tabs
       const email = adapter?.extract(document) ?? fallbackExtract(document);
-      if (!email) return;
+      if (!email) {
+        if (current) { unlockLinks(current); current = undefined; }
+        lastKey = '';
+        ++token;
+        removeBanner();
+        browser.runtime.sendMessage({ type: 'verdict', payload: null }).catch(() => {});
+        return;
+      }
       const key = `${email.senderAddress}\n${email.body}`;
       if (key === lastKey && email.container === current) return; // unchanged email => no work
       lastKey = key;
@@ -53,20 +60,13 @@ export default defineContentScript({
       let intel: IntelState = sender.registrable ? 'loading' : undefined;
 
       const render = () => {
-        const reasons = [...verdict.reasons, ...sender.warnings, ...(typeof intel === 'object' ? intelWarnings(intel) : [])];
         browser.runtime.sendMessage({ type: 'verdict', payload: { verdict, sender, intel } }).catch(() => {});
-        if ((!danger && reasons.length === 0) || dismissed.has(key)) { removeBanner(); return; }
-        showBanner({
-          level: danger ? 'danger' : 'warning',
-          title: danger ? (verdict.level === 'likely-phishing' ? 'Likely phishing' : 'Suspicious email') : 'Check the sender',
-          reasons,
-          linksLocked: danger && !trustedThisSession.has(key),
-          sender,
-          intel,
-        }, {
+        const banner = decideBanner(verdict, sender, intel, trustedThisSession.has(key));
+        if (!banner || dismissed.has(key)) { removeBanner(); return; }
+        showBanner(banner, {
           onUnlock: () => { trustedThisSession.add(key); unlockLinks(email.container); },
           onTrustSender: () => trustSender(kv, sender.address),
-          onReport: () => recordFalsePositive(kv, { ...verdict, reasons }),
+          onReport: () => recordFalsePositive(kv, { ...verdict, reasons: banner.reasons }),
           onDismiss: () => dismissed.add(key),
         });
       };

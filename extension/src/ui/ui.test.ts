@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { gmail } from '../adapters/gmail';
 import { analyzeSender } from '../sender';
-import { removeBanner, showBanner } from './banner';
+import { removeBanner, showBanner, decideBanner } from './banner';
 import { renderDetails } from './details';
 import { isLocked, lockLinks, unlockLinks } from './linkLock';
 
@@ -36,6 +36,42 @@ describe('banner', () => {
     expect(document.querySelector('img')).toBeNull();
     removeBanner();
     expect(document.getElementById('ped-banner-host')).toBeNull();
+  });
+});
+
+describe('decideBanner', () => {
+  const cleanIntel = {
+    domain: 'mongodb.com', checkedAt: '2026-11-22T00:00:00Z',
+    rdap: { status: 'ok' as const, registered: '2008-07-08T00:00:00Z' },
+    dns: { status: 'ok' as const, mx: ['aspmx.l.google.com'] },
+    reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: [] },
+  };
+
+  it('returns null for safe email with urgency wording and clean sender/intel', () => {
+    const sender = analyzeSender('MongoDB Cloud', 'cloud-manager-support@mongodb.com', []);
+    const banner = decideBanner({ score: 0.2, level: 'safe', reasons: ['Urgent or credential-related wording'] }, sender, cleanIntel, false);
+    expect(banner).toBeNull();
+  });
+
+  it('shows warning banner with sender warning first when safe verdict has sender warning', () => {
+    const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
+    const banner = decideBanner({ score: 0.2, level: 'safe', reasons: ['Urgent or credential-related wording'] }, sender, undefined, false)!;
+    expect(banner.level).toBe('warning');
+    expect(banner.title).toBe('Check the sender');
+    expect(banner.linksLocked).toBe(false);
+    expect(banner.reasons[0]).toMatch(/Name says "PayPal"/);
+    expect(banner.reasons[1]).toBe('Urgent or credential-related wording');
+  });
+
+  it('shows danger banner and unlocks only when unlockedThisSession is true', () => {
+    const sender = analyzeSender('Someone', 'a@evil.example', []);
+    const verdict = { score: 0.6, level: 'likely-phishing' as const, reasons: ['Link text shows paypal.com but goes to evil.example'] };
+    const locked = decideBanner(verdict, sender, undefined, false)!;
+    expect(locked.level).toBe('danger');
+    expect(locked.linksLocked).toBe(true);
+    const unlocked = decideBanner(verdict, sender, undefined, true)!;
+    expect(unlocked.level).toBe('danger');
+    expect(unlocked.linksLocked).toBe(false);
   });
 });
 

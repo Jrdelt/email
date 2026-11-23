@@ -1,3 +1,5 @@
+import { intelWarnings } from '../domainIntel';
+import type { Verdict } from '../features';
 import type { SenderInfo } from '../sender';
 import { type IntelState, renderDetails } from './details';
 
@@ -21,6 +23,27 @@ const HOST_ID = 'ped-banner-host';
 
 export function removeBanner(doc: Document = document): void {
   doc.getElementById(HOST_ID)?.remove();
+}
+
+/** Decide whether to show a banner and build its display model; returns null for safe emails with no sender/domain warnings. */
+export function decideBanner(
+  verdict: Verdict,
+  sender: SenderInfo,
+  intel: IntelState,
+  unlockedThisSession: boolean,
+): BannerModel | null {
+  const danger = verdict.level !== 'safe';
+  const senderWarnings = [...sender.warnings, ...(typeof intel === 'object' ? intelWarnings(intel) : [])];
+  if (!danger && senderWarnings.length === 0) return null;
+  const reasons = danger ? [...verdict.reasons, ...senderWarnings] : [...senderWarnings, ...verdict.reasons];
+  return {
+    level: danger ? 'danger' : 'warning',
+    title: danger ? (verdict.level === 'likely-phishing' ? 'Likely phishing' : 'Suspicious email') : 'Check the sender',
+    reasons,
+    linksLocked: danger && !unlockedThisSession,
+    sender,
+    intel,
+  };
 }
 
 /** Renders (or re-renders) the banner in a closed shadow root so webmail CSS can't restyle or hide it. textContent only. */
