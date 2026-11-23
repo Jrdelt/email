@@ -220,6 +220,25 @@ describe('gmail adapter', () => {
     expect(e.body).toContain('account is locked');
     expect(e.links).toEqual([{ text: 'www.paypal.com', href: 'https://evil.example/login' }]);
   });
+  it('extracts all expanded messages in a multi-message thread top to bottom', () => {
+    document.body.innerHTML = `
+      <div class="adn">
+        <span class="gD" email="top@evil.example" name="Top Sender">Top Sender</span>
+        <div class="a3s" id="top">Top message <a href="https://evil.example/1">Link 1</a></div>
+      </div>
+      <div class="adn">
+        <span class="gD" email="bottom@bank.com" name="Bottom Sender">Bottom Sender</span>
+        <div class="a3s" id="bottom">Bottom message <a href="https://bank.com/2">Link 2</a></div>
+      </div>`;
+    const all = gmail.extractAll!(document);
+    expect(all).toHaveLength(2);
+    expect(all[0].senderAddress).toBe('top@evil.example');
+    expect(all[0].container.id).toBe('top');
+    expect(all[0].links).toEqual([{ text: 'Link 1', href: 'https://evil.example/1' }]);
+    expect(all[1].senderAddress).toBe('bottom@bank.com');
+    expect(all[1].container.id).toBe('bottom');
+    expect(all[1].links).toEqual([{ text: 'Link 2', href: 'https://bank.com/2' }]);
+  });
   it('returns null with no open email', () => {
     document.body.innerHTML = '<div>inbox</div>';
     expect(gmail.extract(document)).toBeNull();

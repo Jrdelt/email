@@ -14,4 +14,6 @@ export interface WebmailAdapter {
   matches(url: URL): boolean;
   /** Return the currently open email, or null if none is open. */
   extract(doc: Document): ExtractedEmail | null;
+  /** Return all currently expanded/visible emails in DOM order (top to bottom). */
+  extractAll?(doc: Document): ExtractedEmail[];
 }

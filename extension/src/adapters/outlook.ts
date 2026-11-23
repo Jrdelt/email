@@ -34,24 +34,25 @@ export function unwrapSafeLink(href: string): string {
   return href;
 }
 
-function findBody(doc: Document): { container: HTMLElement; hostEl: HTMLElement } | null {
+function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElement }[] {
   for (const sel of BODY_SELECTORS) {
-    const matches = doc.querySelectorAll<HTMLElement>(sel);
-    for (let i = matches.length - 1; i >= 0; i--) {
-      const el = matches[i];
-      if (!isEditable(el) && !isHidden(el) && hasContent(el)) return { container: el, hostEl: el };
+    const valid: HTMLElement[] = [];
+    for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
+      if (isEditable(el) || isHidden(el) || !hasContent(el)) continue;
+      if (valid.some((prev) => prev.contains(el))) continue;
+      valid.push(el);
     }
+    if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
   }
-  const iframes = doc.querySelectorAll<HTMLIFrameElement>('[aria-label*="Reading Pane" i] iframe, iframe[title*="Message" i]');
-  for (let i = iframes.length - 1; i >= 0; i--) {
-    const iframe = iframes[i];
+  const results: { container: HTMLElement; hostEl: HTMLElement }[] = [];
+  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>('[aria-label*="Reading Pane" i] iframe, iframe[title*="Message" i]')) {
     if (isHidden(iframe)) continue;
     try {
       const body = iframe.contentDocument?.body;
-      if (body && !isEditable(body) && hasContent(body)) return { container: body, hostEl: iframe };
+      if (body && !isEditable(body) && hasContent(body)) results.push({ container: body, hostEl: iframe });
     } catch { /* cross-origin iframe */ }
   }
-  return null;
+  return results;
 }
 
 function parseSender(raw: string, fallbackName = ''): { senderName: string; senderAddress: string } | null {
@@ -149,12 +150,15 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
 export const outlook: WebmailAdapter = {
   name: 'outlook',
   matches: (url) => HOSTS.has(url.hostname),
+  extractAll(doc) {
+    return findBodies(doc).map(({ container, hostEl }) => {
+      const { senderName, senderAddress } = findSender(doc, container, hostEl);
+      const links = linksIn(container).map((l) => ({ text: l.text, href: unwrapSafeLink(l.href) }));
+      return { senderName, senderAddress, body: bodyText(container), links, container };
+    });
+  },
   extract(doc) {
-    const found = findBody(doc);
-    if (!found) return null;
-    const { container, hostEl } = found;
-    const { senderName, senderAddress } = findSender(doc, container, hostEl);
-    const links = linksIn(container).map((l) => ({ text: l.text, href: unwrapSafeLink(l.href) }));
-    return { senderName, senderAddress, body: bodyText(container), links, container };
+    const all = outlook.extractAll!(doc);
+    return all[all.length - 1] ?? null;
   },
 };

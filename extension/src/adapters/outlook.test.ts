@@ -55,6 +55,28 @@ describe('outlook adapter', () => {
     expect(e.senderAddress).toBe('alerts@bank.com');
   });
 
+  it('extracts all expanded messages in a multi-message thread top to bottom', () => {
+    document.body.innerHTML = `
+      <div data-app-section="ConversationContainer">
+        <div aria-label="Email message">
+          <span class="OZZZK">Top Sender&lt;top@evil.example&gt;</span>
+          <div aria-label="Message body" id="top">Top body <a href="https://evil.example/1">Top link</a></div>
+        </div>
+        <div aria-label="Email message">
+          <span class="OZZZK">Bottom Sender&lt;bottom@bank.com&gt;</span>
+          <div aria-label="Message body" id="bottom">Bottom body <a href="https://bank.com/2">Bottom link</a></div>
+        </div>
+      </div>`;
+    const all = outlook.extractAll!(document);
+    expect(all).toHaveLength(2);
+    expect(all[0].senderAddress).toBe('top@evil.example');
+    expect(all[0].container.id).toBe('top');
+    expect(all[0].links).toEqual([{ text: 'Top link', href: 'https://evil.example/1' }]);
+    expect(all[1].senderAddress).toBe('bottom@bank.com');
+    expect(all[1].container.id).toBe('bottom');
+    expect(all[1].links).toEqual([{ text: 'Bottom link', href: 'https://bank.com/2' }]);
+  });
+
   it('ignores compose boxes and returns null in inbox view', () => {
     document.body.innerHTML = `
       <div aria-label="Compose">
