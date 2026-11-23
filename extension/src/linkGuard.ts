@@ -1,6 +1,6 @@
 import { isIpHost, isValidDomain, registrableDomain } from './domain';
 import { destinationIntelWarnings, type DomainIntel } from './domainIntel';
-import { isCloudHtmlLink, safePercentDecode } from './features';
+import { IP_LOGGER_HOSTS, isCloudHtmlLink, safePercentDecode, SHORTENER_HOSTS } from './features';
 
 export { destinationIntelWarnings };
 
@@ -14,11 +14,6 @@ export interface LinkRisk {
 }
 
 const MAX_UNWRAP_DEPTH = 4;
-
-const SHORTENER_HOSTS = new Set([
-  'bit.ly', 'tinyurl.com', 't.co', 'rebrand.ly', 'rb.gy', 'cutt.ly', 'shorturl.at', 'is.gd',
-  'ow.ly', 'goo.gl', 'buff.ly', 'tiny.cc', 'bl.ink', 's.id', 'v.gd', 'clck.ru',
-]);
 
 const DANGEROUS_EXT_RE =
   /\.(exe|msi|dmg|pkg|apk|iso|img|lnk|scr|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|hta|jar|mht|mhtml|docm|xlsm|pptm|svg)$/i;
@@ -105,7 +100,12 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
     reasons.push(`This link leads directly to a risky file type (.${extMatch[1].toLowerCase()}) that can carry malware or hidden scripts`);
   }
 
-  if (SHORTENER_HOSTS.has(host) || SHORTENER_HOSTS.has(registrable)) {
+  if (IP_LOGGER_HOSTS.has(host) || IP_LOGGER_HOSTS.has(registrable)) {
+    hasDanger = true;
+    reasons.push(
+      `This link uses a tracking/IP-logger service (${host}) that captures your IP address and hides the real destination`,
+    );
+  } else if (SHORTENER_HOSTS.has(host) || SHORTENER_HOSTS.has(registrable)) {
     hasWarning = true;
     reasons.push(`This link uses a URL shortener (${host}) that hides where it really goes`);
   }

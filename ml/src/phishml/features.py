@@ -9,8 +9,20 @@ from urllib.parse import unquote, urlsplit
 URGENCY = (
     "urgent", "immediately", "verify", "suspended", "locked", "password", "confirm", "act now", "expires",
     "expiration", "expired", "will be deleted", "billing details", "payment method", "unauthorized",
-    "unusual activity", "action required",
+    "unusual activity", "action required", "temporarily limited", "limited access", "within 24 hours",
+    "within 48 hours", "avoid interruption", "avoid suspension", "restore access", "unrecognized device",
+    "sign-in attempt",
 )
+IP_LOGGER_HOSTS = frozenset({
+    "urlto.me", "grabify.link", "grabify.icu", "stopify.co", "hd.gd", "onbit.pro", "snifferip.com", "unl.one",
+    "iplogger.org", "iplogger.com", "2no.co", "yip.su", "ezstat.ru", "leancoding.co", "quickmessage.us",
+    "spoofer.us", "ps3cfw.com", "bmwforum.co", "blasze.com",
+})
+SHORTENER_HOSTS = frozenset({
+    "bit.ly", "tinyurl.com", "t.co", "rebrand.ly", "rb.gy", "cutt.ly", "shorturl.at", "is.gd",
+    "ow.ly", "goo.gl", "buff.ly", "tiny.cc", "bl.ink", "s.id", "v.gd", "clck.ru", "t.ly", "surl.li",
+    "lnkd.in", "mcaf.ee", "su.pr", "adf.ly", "bc.vc", "ouo.io", "shrinke.me",
+})
 IP_V4_RE = re.compile(r"^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\Z", re.ASCII)
 IPV6_CHARS_RE = re.compile(r"^[0-9a-f:.]+\Z", re.IGNORECASE | re.ASCII)
 BRACKETED_IPV6_RE = re.compile(r"^\[([0-9a-f:.]+)\](?::\d{1,5})?\Z", re.IGNORECASE | re.ASCII)
@@ -193,34 +205,40 @@ def _sender_domain(sender: str) -> str:
 
 def extract_features(sender: str, body: str, links: list[Link]) -> dict[str, float]:
     lower = body.lower()
+    sender_reg = _registrable(_sender_domain(sender))
     mismatch = 0
     ip_links = 0
     punycode = 0
     cloud_html = 0
+    shortener_links = 0
+    ip_logger_links = 0
+    external = 0
     for link in links:
         h = _host(link.href)
+        reg = _registrable(h)
         if is_ip_host(h):
             ip_links += 1
         if "xn--" in h:
             punycode += 1
         if is_cloud_html_link(link.href):
             cloud_html += 1
+        if h in IP_LOGGER_HOSTS or reg in IP_LOGGER_HOSTS:
+            ip_logger_links += 1
+        elif h in SHORTENER_HOSTS or reg in SHORTENER_HOSTS:
+            shortener_links += 1
         shown = shown_host(link.text)
-        if shown and h and _registrable(shown) != _registrable(h):
+        if shown and h and _registrable(shown) != reg:
             mismatch += 1
-    sender_reg = _registrable(_sender_domain(sender))
-    external = 0
-    if sender_reg:
-        for l in links:
-            link_reg = _registrable(_host(l.href))
-            if link_reg and link_reg != sender_reg:
-                external += 1
+        if sender_reg and reg and reg != sender_reg:
+            external += 1
     return {
         "n_links": float(len(links)),
         "n_text_href_mismatch": float(mismatch),
         "n_ip_links": float(ip_links),
         "n_punycode_links": float(punycode),
         "n_cloud_html_links": float(cloud_html),
+        "n_shortener_links": float(shortener_links),
+        "n_iplogger_links": float(ip_logger_links),
         "n_external_links": float(external),
         "urgency_hits": float(sum(lower.count(w) for w in URGENCY)),
         "body_len": float(len(body)),

@@ -103,4 +103,28 @@ describe('scoreEmail', () => {
     expect(phish.level).toBe('likely-phishing');
     expect(phish.reasons).toContain('A link points to a web page hosted on raw cloud storage');
   });
+
+  it('flags Grabify / IP-logger phishing links (urlto.me) and urgent unknown short-code links', () => {
+    const grabify = scoreEmail(
+      '',
+      'We detected unusual activity on your account and temporarily limited access.\nPlease verify your details within 24 hours to avoid interruption.',
+      [{ text: 'Verify Now', href: 'https://urlto.me/2r7Nf' }],
+    );
+    expect(grabify.level).toBe('likely-phishing');
+    expect(grabify.score).toBeGreaterThanOrEqual(0.6);
+    expect(grabify.reasons.join(' ')).toContain('urlto.me');
+
+    const rotatingTracker = scoreEmail(
+      'security@other-vendor.example',
+      'We detected unusual activity on your account and temporarily limited access. Please verify your details within 24 hours to avoid interruption.',
+      [{ text: 'Verify Now', href: 'https://fresh-rotator.example/2r7Nf' }],
+    );
+    expect(rotatingTracker.level).toBe('suspicious');
+    expect(rotatingTracker.reasons.join(' ')).toContain('high-pressure');
+
+    const marketingShortLink = scoreEmail('news@company.example', 'Check out our product release notes.', [
+      { text: 'Read notes', href: 'https://bit.ly/3xyz' },
+    ]);
+    expect(marketingShortLink.level).toBe('safe');
+  });
 });

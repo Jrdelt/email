@@ -67,6 +67,13 @@ describe('analyzeLinkDestination', () => {
     expect(wrapped.href).toBe('https://evil.example/payload.svg');
   });
 
+  it('flags danger for IP-logger/Grabify links like urlto.me before opening', () => {
+    const r = analyzeLinkDestination('https://urlto.me/2r7Nf');
+    expect(r.level).toBe('danger');
+    expect(r.needsDomainCheck).toBe(false);
+    expect(r.reasons[0]).toContain('urlto.me');
+  });
+
   it('flags warning for URL shorteners (including trailing-dot FQDNs) and unencrypted http links', () => {
     for (const u of ['https://bit.ly/3xyz', 'https://bit.ly./3xyz', 'https://rebrand.ly/abc']) {
       const r = analyzeLinkDestination(u);
