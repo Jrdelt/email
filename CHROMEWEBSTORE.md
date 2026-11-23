@@ -122,9 +122,8 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 
 ## Privacy Policy
 
-**Privacy Policy URL** [REQUIRED]
+**Privacy Policy URL** [REQUIRED — verified HTTP 200 public]
 `https://github.com/Jrdelt/email/blob/main/docs/privacy.md`
-*(Note: Ensure the `Jrdelt/email` GitHub repository is switched from Private to **Public**—or publish `docs/privacy.md` via GitHub Pages at `https://jrdelt.github.io/email/privacy`—before submitting, as both Google and Microsoft verify that this URL loads publicly without login.)*
 
 ---
 

@@ -8,6 +8,12 @@ Privacy-first phishing email protection that runs locally in your browser. One T
 
 > **Project status:** Active development. Heuristic content scoring, sender/authentication checks, live domain intelligence, zero-permission link & attachment locking, and click-time destination protection are shipped (**T0–T1**). Calibrated time-split ML model training and in-extension JSON inference are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) (**T2–T10**).
 
+## Preview
+
+| In-Page Phishing Alert & Locked Links | Click-Time Link Warning & Recovery Guide | Always-On Attachment Lock & Popup |
+|---|---|---|
+| ![Phishing warning banner in webmail pausing links and attachments](docs/assets/screenshot-1-phishing-banner-1280x800.png) | ![Click-time dangerous link interstitial and recovery steps](docs/assets/screenshot-2-link-stopped-1280x800.png) | ![Untrusted attachment lock toast and toolbar popup](docs/assets/screenshot-3-attachment-lock-popup-1280x800.png) |
+
 ## Key Protections
 
 - **Local content & sender analysis:** Detects brand impersonation (including compact/camelCase forms like `PayPalSupport`), lookalike/punycode domains, link-text vs. destination mismatches, raw cloud-storage HTML lures, urgency pretexts, unauthenticated senders, and suspicious `via` relays—all inside the browser.
