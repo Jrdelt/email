@@ -42,16 +42,16 @@ export function analyzeSender(name: string, rawAddress: string, links: Link[]): 
   const info: SenderInfo = { name: displayName, rawAddress: raw, address, valid: address !== '', domain, registrable, freemail: FREEMAIL.has(registrable), linkDomains, warnings };
   if (!raw) return info;
 
-  if (!info.valid) warnings.push(`Sender address "${raw}" is not a valid email address`);
-  if (domain && isInternational(domain)) warnings.push(`Sender domain ${domain} uses international characters (possible lookalike)`);
+  if (!info.valid) warnings.push("The sender's email address looks invalid or forged");
+  if (domain && isInternational(domain)) warnings.push(`The sender's website (${domain}) uses lookalike characters`);
 
   const shownAddr = displayName.match(/[^\s<>"'()]+@[^\s<>"'()]+\.[a-z]{2,}/i)?.[0]?.toLowerCase();
-  if (shownAddr && shownAddr !== address) warnings.push(`Name shows ${shownAddr} but the real sender is ${raw}`);
+  if (shownAddr && shownAddr !== address) warnings.push(`The display name shows ${shownAddr}, but it was really sent from ${raw}`);
 
   for (const brand of BRANDS) {
     const claims = brand.pattern.test(displayName) && (SERVICE_WORDS.test(displayName) || displayName.toLowerCase() === brand.name.toLowerCase());
     if (claims && registrable && !brand.domains.includes(registrable)) {
-      warnings.push(`Name says "${brand.name}" but the email is from ${registrable}`);
+      warnings.push(`Claims to be ${brand.name}, but was sent from ${registrable}`);
       break;
     }
   }
@@ -63,7 +63,7 @@ export function analyzeSender(name: string, rawAddress: string, links: Link[]): 
       const dl = d.split('.')[0];
       const lookalike = (label !== dl && skeleton(label) === skeleton(dl)) || (dl.length >= 5 && levenshtein(label, dl) === 1) || label === dl;
       if (label && lookalike) {
-        warnings.push(`Domain ${registrable} looks like ${d}`);
+        warnings.push(`The sender's website (${registrable}) looks like a copy of ${d}`);
         break outer;
       }
     }

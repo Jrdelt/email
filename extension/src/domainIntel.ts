@@ -140,9 +140,9 @@ export const ageDays = (iso: string | undefined, now = Date.now()) => (iso ? Mat
 export function intelWarnings(i: DomainIntel, now = Date.now()): string[] {
   const w: string[] = [];
   const age = ageDays(i.rdap.registered, now);
-  if (age !== undefined && age < 30) w.push(`Sender domain ${i.domain} was registered ${age} day${age === 1 ? '' : 's'} ago`);
-  if (i.rdap.status === 'notfound') w.push(`Sender domain ${i.domain} is not registered`);
-  if (i.reputation.listed.some((l) => l === 'black' || l === 'red')) w.push(`Sender domain ${i.domain} has been reported in spam (URIBL ${i.reputation.listed.join(', ')})`);
-  if (i.dns.status === 'ok' && i.dns.mx.length === 0) w.push(`Sender domain ${i.domain} has no mail servers`);
+  if (age !== undefined && age < 30) w.push(`The sender's website (${i.domain}) is brand new (${age} day${age === 1 ? '' : 's'} old)`);
+  if (i.rdap.status === 'notfound') w.push(`The sender's website (${i.domain}) is not registered`);
+  if (i.reputation.listed.some((l) => l === 'black' || l === 'red')) w.push(`The sender's website (${i.domain}) has been reported for spam online`);
+  if (i.dns.status === 'ok' && i.dns.mx.length === 0) w.push(`The sender's website (${i.domain}) is not set up to send normal email`);
   return w;
 }

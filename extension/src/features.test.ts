@@ -45,7 +45,7 @@ describe('scoreEmail', () => {
       [{ text: 'please reset your password immediately.', href: 'https://account.mongodb.com/account/reset' }],
     );
     expect(v.level).toBe('safe');
-    expect(v.reasons.some((r) => r.includes('Link text shows'))).toBe(false);
+    expect(v.reasons.some((r) => r.includes('A link says'))).toBe(false);
   });
   it('handles multi-part suffixes accurately', () => {
     const mismatch = scoreEmail('a@barclays.co.uk', 'hi', [{ text: 'www.barclays.co.uk/login', href: 'https://evil.co.uk/login' }]);

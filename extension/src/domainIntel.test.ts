@@ -43,9 +43,9 @@ describe('lookupDomain', () => {
     const i = await lookupDomain('evil.example', fakeFetch({ registered: '2026-11-20T00:00:00Z', urible: '127.0.0.10', mx: false }), NOW);
     expect(i.reputation.listed).toEqual(['black', 'red']);
     const w = intelWarnings(i, NOW).join(' | ');
-    expect(w).toMatch(/registered 2 days ago/);
-    expect(w).toMatch(/reported in spam/);
-    expect(w).toMatch(/no mail servers/);
+    expect(w).toMatch(/brand new \(2 days old\)/);
+    expect(w).toMatch(/reported for spam online/);
+    expect(w).toMatch(/not set up to send normal email/);
   });
   it('uses the registry from IANA bootstrap for known TLDs, rdap.org otherwise', async () => {
     const f = fakeFetch();

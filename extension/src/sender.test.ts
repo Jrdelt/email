@@ -19,16 +19,16 @@ describe('analyzeSender', () => {
     const s = analyzeSender('X', 'bad..addr@example.com', []);
     expect(s.valid).toBe(false);
     expect(s.domain).toBe('example.com');
-    expect(s.warnings[0]).toMatch(/not a valid email address/);
+    expect(s.warnings[0]).toMatch(/invalid or forged/);
   });
-  it('brand name from the wrong domain', () => expect(w('PayPal Support', 'help@gmail.com')[0]).toMatch(/Name says "PayPal" but the email is from gmail.com/));
-  it('display name containing a different address', () => expect(w('service@paypal.com', 'x@evil.example')[0]).toMatch(/real sender is x@evil.example/));
+  it('brand name from the wrong domain', () => expect(w('PayPal Support', 'help@gmail.com')[0]).toMatch(/Claims to be PayPal, but was sent from gmail\.com/));
+  it('display name containing a different address', () => expect(w('service@paypal.com', 'x@evil.example')[0]).toMatch(/really sent from x@evil\.example/));
   it.each([['security@paypa1.com', 'paypal.com'], ['a@rnicrosoft.com', 'microsoft.com'], ['a@paypal-secure.com', null], ['a@paypal.co', 'paypal.com']])(
     'lookalike %s', (addr, like) => {
       const ws = w('Someone', addr).join(' ');
-      if (like) expect(ws).toContain(`looks like ${like}`); else expect(ws).not.toContain('looks like');
+      if (like) expect(ws).toContain(`looks like a copy of ${like}`); else expect(ws).not.toContain('looks like a copy of');
     });
-  it('international domain', () => expect(w('A', 'a@xn--pple-43d.com').join(' ')).toMatch(/international characters/));
+  it('international domain', () => expect(w('A', 'a@xn--pple-43d.com').join(' ')).toMatch(/lookalike characters/));
   it('collects other link domains', () => {
     expect(analyzeSender('A', 'a@shop.com', [{ text: 'x', href: 'https://track.other.net/a' }, { text: 'y', href: 'https://www.shop.com' }]).linkDomains).toEqual(['other.net']);
   });

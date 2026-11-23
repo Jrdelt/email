@@ -50,15 +50,15 @@ export function scoreEmail(_sender: string, body: string, links: Link[]): Verdic
   const lower = body.toLowerCase();
   for (const l of links) {
     const h = hostOf(l.href);
-    if (IP_HOST.test(h)) { score += 0.3; reasons.push(`Link points to a raw IP address (${h})`); }
-    if (h.includes('xn--')) { score += 0.3; reasons.push(`Link uses a punycode domain (${h})`); }
+    if (IP_HOST.test(h)) { score += 0.3; reasons.push('A link goes to a numeric web address instead of a real website'); }
+    if (h.includes('xn--')) { score += 0.3; reasons.push('A link uses lookalike characters in its web address'); }
     const shown = shownHost(l.text);
     if (shown && h && registrableDomain(shown) !== registrableDomain(h)) {
-      score += 0.4; reasons.push(`Link text shows ${shown} but goes to ${h}`);
+      score += 0.4; reasons.push(`A link says ${shown} but actually goes to ${h}`);
     }
   }
   const hits = URGENCY.reduce((n, w) => n + lower.split(w).length - 1, 0);
-  if (hits >= 2) { score += 0.2; reasons.push('Urgent or credential-related wording'); }
+  if (hits >= 2) { score += 0.2; reasons.push('Uses urgent wording about passwords or your account'); }
   score = Math.min(1, score);
   const level = score >= 0.6 ? 'likely-phishing' : score >= 0.3 ? 'suspicious' : 'safe';
   return { score, level, reasons: [...new Set(reasons)] };

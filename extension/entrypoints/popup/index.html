@@ -8,16 +8,27 @@
       h3{margin:0 0 8px} h4{margin:14px 0 4px} ul{padding-left:18px;margin:4px 0}
       li button{margin-left:6px;font-size:12px} .muted{color:#666}
       dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px;margin:6px 0} dt{color:#555} dd{margin:0;word-break:break-all}
+      .status{display:inline-block;padding:2px 8px;border-radius:4px;font-weight:600;margin-bottom:6px}
+      .status-safe{background:#e6f4ea;color:#137333}
+      .status-warn{background:#fef3e0;color:#8a4b00}
+      .status-danger{background:#fce8e6;color:#b00020}
+      details{margin-top:14px;border-top:1px solid #ddd;padding-top:8px}
+      summary{cursor:pointer;font-weight:600;color:#444}
+      .copy-it{margin-top:6px}
     </style>
   </head>
   <body>
     <h3>Phishing Email Detector</h3>
-    <div id="out" class="muted">Open an email to scan it.</div>
+    <div id="out" class="muted">Open an email to check it.</div>
     <h4>Trusted senders</h4>
     <ul id="trusted"></ul>
-    <h4>False-positive reports <span class="muted">(stored on this device only)</span></h4>
-    <div><span id="reports">0</span> saved <button id="clear" type="button">Clear</button></div>
-    <p class="muted">Only the sender's domain is looked up online (RDAP, Cloudflare DNS, URIBL). Email content never leaves your browser.</p>
+    <details id="it-section">
+      <summary>More options for IT</summary>
+      <div id="it-details" class="muted">Open an email to view technical details.</div>
+      <h4>False-positive reports <span class="muted">(on this device only)</span></h4>
+      <div><span id="reports">0</span> saved <button id="clear" type="button">Clear</button></div>
+      <p class="muted">Only the sender's website domain is checked online (RDAP, Cloudflare DNS, URIBL). Email content never leaves your browser.</p>
+    </details>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
