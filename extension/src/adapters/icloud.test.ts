@@ -331,3 +331,29 @@ describe('iCloud pairing safety', () => {
     ]);
   });
 });
+
+describe('iCloud sender from loose header fallbacks', () => {
+  const card = (extra: string) => `
+    <div class="pane thread-detail-pane"><div class="conversation-list">
+      <div id="message-iframe-Inbox/7"><div class="conversation-list-item">
+        <div><span class="contact-token" role="button"><span>Bank Alerts</span></span>${extra}</div>
+        <h2>Statement</h2><div><iframe src="about:blank"></iframe></div>
+        <div class="attachments"><div class="attachment" aria-label="Download alerts@bank.example"><button title="alerts@bank.example">alerts@bank.example</button></div></div>
+      </div></div></div></div>`;
+
+  it('never takes an attachment filename as the sender address', () => {
+    document.body.innerHTML = card('');
+    const [h] = extractICloudHeaders(document);
+    expect(h!.senderAddress).toBe('');
+    expect(h!.senderUncertain).toBeUndefined();
+  });
+
+  it('marks an address found only by the loose fallback so it is never allowlist-trusted', () => {
+    document.body.innerHTML = card('<span title="alerts@bank.example">Bank Alerts</span>');
+    const headers = extractICloudHeaders(document);
+    expect(headers[0]!.senderAddress).toBe('alerts@bank.example');
+    expect(headers[0]!.senderUncertain).toBe(true);
+    const [m] = combineICloudThread(headers, new Map([[1, { body: 'hi', links: [], attachmentNames: [] }]]));
+    expect(m!.pairingUncertain).toBe(true);
+  });
+});

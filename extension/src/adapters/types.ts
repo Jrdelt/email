@@ -14,6 +14,8 @@ export interface ExtractedEmail {
   links: Link[];
   /** More distinct links than can be checked: the email is treated as suspicious (fail closed). */
   linksTruncated?: boolean;
+  /** iCloud: the sender cannot be tied to this body for certain, so it is never auto-trusted from the allowlist. */
+  pairingUncertain?: boolean;
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
   container: HTMLElement; // element holding the message body (used for link locking)

@@ -17,7 +17,8 @@ const URGENCY = [
   'within 48 hours', 'avoid interruption', 'avoid suspension', 'restore access', 'unrecognized device',
   'sign-in attempt',
 ];
-const EXPLICIT_URL = /https?:\/\/[^\s<>"'()]+/i;
+/** An explicit http(s) URL inside link text (the first one is what shownHost reads). */
+export const EXPLICIT_URL = /https?:\/\/[^\s<>"'()]+/i;
 const SHORT_TOKEN_PATH_RE = /^\/[A-Za-z0-9_-]{3,12}$/;
 const SHORT_CTA_TEXT_RE = /\b(?:verify|confirm|reset|unlock|update|sign\s*in|log\s*in|login|review|secure|restore|reactivate|validate|click)\b/i;
 
@@ -117,7 +118,7 @@ function trimTrailingPunct(s: string): string {
 
 // Characters that render as nothing (soft hyphen, zero-width space/joiners, word joiner, BOM, bidi marks) and
 // look-alike dots. Link text "www.pay&shy;pal.com" or "paypal\uff0ecom" still shows a domain to the reader.
-export const INVISIBLE_RE = /[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g;
+const INVISIBLE_RE = /[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g;
 const DOT_LOOKALIKE_RE = /[\u3002\uff0e\uff61]/g;
 
 /** Normalise link text the way a reader sees it (mirror of features.py _normalize_shown_text). */

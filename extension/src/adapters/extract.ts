@@ -1,13 +1,14 @@
 import { cleanAttachmentName } from '../attachments';
 import { XLINK_NS, closestEl, getAttr, getAttrNS, hasAttr, isFormEl, rawLinkTarget, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
-import { INVISIBLE_RE, safePercentDecode, type Link } from '../features';
+import { EXPLICIT_URL, safePercentDecode, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
 export const MAX_BODY_CHARS = 20_000; // cap work per email
-export const MAX_LINKS = 200;
+// Distinct links scored per email (scoring 500 links takes ~2 ms); past this the email fails closed as unchecked.
+export const MAX_LINKS = 500;
 export const MAX_LINK_TEXT_CHARS = 2048; // link text only needs to show a URL or domain
-const MAX_LINK_SCAN = 10 * MAX_LINKS; // bound on links examined before de-duplication and sampling
+const MAX_LINK_SCAN = 2000; // bound on link nodes examined before de-duplication and sampling
 /**
  * Safety bound on attachment elements collected per source (inline anchors, or one adapter's chips).
  * This bounds DOM work only: names analysed for the banner are capped separately (attachments.ts), and
@@ -57,48 +58,58 @@ export function hasMessageContent(el: Element): boolean {
 
 export type BodyHit = { container: HTMLElement; hostEl: HTMLElement };
 
+export type BodyPick = { bodies: BodyHit[]; hasContent: boolean };
+
 /**
- * Message bodies for adapters: the first selector (in priority order) with visible, non-excluded matches, keeping
- * only the outermost candidates. With `requireContent`, empty candidates are skipped; adapters retry without it so
- * an email with only an attachment (empty body) is still found, scanned and attachment-locked.
+ * Message bodies for adapters: the first selector (in priority order) whose visible, non-excluded, outermost matches
+ * include one with content, returning ALL of that selector's matches, empty ones too: in a conversation, a message
+ * whose body is empty but which carries an attachment must still be scanned and attachment-locked. When no match
+ * has content, the first selector with any match is used (`hasContent` false).
  */
-export function pickBodies(
-  doc: Document,
-  selectors: readonly string[],
-  excluded: (el: HTMLElement) => boolean,
-  requireContent: boolean,
-): BodyHit[] {
+export function pickBodies(doc: Document, selectors: readonly string[], excluded: (el: HTMLElement) => boolean): BodyPick {
+  let fallback: BodyHit[] = [];
   for (const sel of selectors) {
     const valid: HTMLElement[] = [];
+    let hasContent = false;
     for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
-      if (excluded(el) || isHidden(el) || (requireContent && !hasMessageContent(el))) continue;
+      if (excluded(el) || isHidden(el)) continue;
       if (isNestedIn(el, selectors)) continue;
       if (valid.some((prev) => prev.contains(el))) continue;
       valid.push(el);
+      hasContent ||= hasMessageContent(el);
     }
-    if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
+    const bodies = valid.map((el) => ({ container: el, hostEl: el }));
+    if (hasContent) return { bodies, hasContent };
+    if (fallback.length === 0) fallback = bodies;
   }
-  return [];
+  return { bodies: fallback, hasContent: false };
 }
 
-/** Bodies of same-origin message iframes (cross-origin ones are skipped). */
-export function pickFrameBodies(
-  doc: Document,
-  selector: string,
-  excluded: (el: HTMLElement) => boolean,
-  requireContent: boolean,
-): BodyHit[] {
-  const out: BodyHit[] = [];
+/** Bodies of same-origin message iframes (cross-origin ones are skipped), empty ones included. */
+export function pickFrameBodies(doc: Document, selector: string, excluded: (el: HTMLElement) => boolean): BodyPick {
+  const bodies: BodyHit[] = [];
+  let hasContent = false;
   for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(selector)) {
     if (isHidden(iframe) || excluded(iframe)) continue;
     try {
       const body = iframe.contentDocument?.body;
-      if (body && !excluded(body) && (!requireContent || hasMessageContent(body))) out.push({ container: body, hostEl: iframe });
+      if (body && !excluded(body)) {
+        bodies.push({ container: body, hostEl: iframe });
+        hasContent ||= hasMessageContent(body);
+      }
     } catch {
       /* cross-origin iframe */
     }
   }
-  return out;
+  return { bodies, hasContent };
+}
+
+/**
+ * Choose between an adapter's direct and iframe bodies: the first source with content wins (with its empty
+ * siblings); otherwise the first source with any body, so attachment-only emails are still found.
+ */
+export function chooseBodies(...picks: BodyPick[]): BodyHit[] {
+  return (picks.find((p) => p.hasContent) ?? picks.find((p) => p.bodies.length > 0))?.bodies ?? [];
 }
 
 /** Same-origin documents of the iframes matching `selector` (cross-origin ones are skipped). */
@@ -115,70 +126,147 @@ export function sameOriginFrameDocs(doc: Document, selector: string): Document[]
   return out;
 }
 
-const NON_TEXT_TAGS = new Set(['style', 'script', 'noscript', 'template']);
 
 /** Keep the start and the end of an over-long list or text, so padding at the top cannot hide what follows. */
 function headAndTail<T>(items: T[], max: number): T[] {
   return items.length <= max ? items : [...items.slice(0, Math.ceil(max / 2)), ...items.slice(items.length - Math.floor(max / 2))];
 }
 
+// Code points that render as nothing (zero-width and format characters, variation selectors, tag characters,
+// Hangul fillers...): filler made of them costs an attacker nothing on screen.
+const IGNORABLE_RE = /\p{Default_Ignorable_Code_Point}/gu;
+
+/** Drop characters that render as nothing and collapse whitespace runs, the way a reader sees the text. */
+const visibleText = (text: string): string => text.replace(IGNORABLE_RE, '').replace(/\s+/g, ' ');
+
 /**
- * Bound attacker-controlled text (link text, header labels) without letting filler hide what matters: over `max`,
- * drop characters that render as nothing, collapse whitespace runs, then keep the first and last halves.
+ * Bound attacker-controlled text (header labels, link text) without letting filler hide what matters: over `max`,
+ * drop what renders as nothing, then keep the first and last halves (exactly `max` characters).
  */
 export function capText(text: string, max: number): string {
   if (text.length <= max) return text;
-  const visible = text.replace(INVISIBLE_RE, '').replace(/\s+/g, ' ');
+  const visible = visibleText(text);
   if (visible.length <= max) return visible;
   const half = Math.floor(max / 2);
-  return `${visible.slice(0, half)} ${visible.slice(visible.length - (max - half - 1))}`; // exactly max chars
+  return `${visible.slice(0, half)} ${visible.slice(visible.length - (max - half - 1))}`;
+}
+
+/**
+ * Link text bounded to MAX_LINK_TEXT_CHARS that still shows the URL the reader sees: filler on both sides of the
+ * displayed URL must not push it out, so past the cap the window starts at the first explicit URL (NFKC, as
+ * shownHost reads it). Text before that URL cannot contain an earlier URL, so shownHost finds the same one.
+ */
+export function capLinkText(text: string): string {
+  const max = MAX_LINK_TEXT_CHARS;
+  if (text.length <= max) return text;
+  const visible = visibleText(text.normalize('NFKC'));
+  if (visible.length <= max) return visible;
+  const at = EXPLICIT_URL.exec(visible)?.index ?? -1;
+  if (at < max / 2) return capText(visible, max);
+  const head = Math.floor(max / 4);
+  return `${visible.slice(0, head)} ${visible.slice(at, at + (max - head - 1))}`;
 }
 
 /** Prepend the subject (bounded) without cutting the end of the already-sampled body. */
 export const withSubject = (subject: string, body: string): string =>
   subject ? (body ? `${subject.slice(0, 300)}\n${body}` : subject.slice(0, 300)) : body;
 
-const textFilter: NodeFilter = {
-  acceptNode: (n) => (n.nodeType === 1 ? (NON_TEXT_TAGS.has(tagOf(n as Element)) ? 2 /* REJECT subtree */ : 3 /* SKIP */) : 1),
-};
+const NON_TEXT_SEL = 'style, script, noscript, template';
+const TEXT_CHUNK = 4096; // raw characters normalised at a time (per-node regexes are slow on many tiny nodes)
+const RAW_SCAN_LIMIT = 50 * MAX_BODY_CHARS; // safety bound on raw characters read in each direction
 
 /**
- * Message text for scoring: skips CSS/script text and, when longer than MAX_BODY_CHARS, keeps the first and last
- * halves so filler at the top cannot push the real message out of reach. Work stays bounded however long the body
- * is: the start is read forwards and the end backwards, and the middle is never visited.
+ * Message text for scoring, as a reader sees it: skips CSS/script text, drops characters that render as nothing
+ * and collapses whitespace runs (so invisible or blank filler does not use up the sample), and when longer than
+ * MAX_BODY_CHARS keeps the first and last halves. Work stays bounded however long the body is: the start is read
+ * forwards and the end backwards, and the middle is never visited.
  */
 export function bodyText(el: HTMLElement): string {
   const doc = ownerDocOf(el);
   const half = Math.floor(MAX_BODY_CHARS / 2);
+  // Text inside style/script/noscript/template is not message text (checked per parent, only if there are any).
+  const hasNonText = Element.prototype.querySelector.call(el, NON_TEXT_SEL) !== null;
+  let lastParent: Node | null = null;
+  let lastSkip = false;
+  const raw = (n: Node): string => {
+    if (hasNonText) {
+      const parent = n.parentNode;
+      if (parent !== lastParent) {
+        lastParent = parent;
+        lastSkip = parent !== null && parent.nodeType === 1 && closestEl(parent as Element, NON_TEXT_SEL) !== null;
+      }
+      if (lastSkip) return '';
+    }
+    return n.nodeValue ?? '';
+  };
+
+  // Forwards from the start until MAX_BODY_CHARS visible characters are collected.
   const head: string[] = [];
-  const headNodes = new Set<Node>();
   let headLen = 0;
-  const forward = doc.createTreeWalker(el, 0x1 | 0x4 /* SHOW_ELEMENT | SHOW_TEXT */, textFilter);
+  let headRaw = 0;
+  let chunk: string[] = [];
+  let chunkLen = 0;
+  const flushHead = () => {
+    const v = visibleText(chunk.join(''));
+    head.push(v);
+    headLen += v.length;
+    chunk = [];
+    chunkLen = 0;
+  };
+  const forward = doc.createTreeWalker(el, 0x4 /* SHOW_TEXT */);
+  let lastHead: Node | null = null;
   let n = forward.nextNode();
-  for (; n && headLen < MAX_BODY_CHARS; n = forward.nextNode()) {
-    const t = n.nodeValue ?? '';
-    head.push(t);
-    headNodes.add(n);
-    headLen += t.length;
+  for (; n; n = forward.nextNode()) {
+    const t = raw(n);
+    lastHead = n;
+    chunk.push(t);
+    chunkLen += t.length;
+    headRaw += t.length;
+    if (chunkLen >= TEXT_CHUNK) {
+      flushHead();
+      if (headLen >= MAX_BODY_CHARS || headRaw >= RAW_SCAN_LIMIT) {
+        n = forward.nextNode();
+        break;
+      }
+    }
   }
+  flushHead();
   let text = head.join('');
+
   if (n) {
     // More text follows: read the end backwards until half a body is collected or the head is reached.
     const tail: string[] = [];
     let tailLen = 0;
+    let tailRaw = 0;
     let joined = false;
-    const backward = doc.createTreeWalker(el, 0x1 | 0x4, textFilter);
-    for (let m = backward.lastChild(); m && tailLen < half; m = backward.previousNode()) {
-      if (headNodes.has(m)) {
+    let back: string[] = [];
+    let backLen = 0;
+    const flushTail = () => {
+      const v = visibleText(back.reverse().join(''));
+      tail.push(v);
+      tailLen += v.length;
+      back = [];
+      backLen = 0;
+    };
+    const backward = doc.createTreeWalker(el, 0x4);
+    for (let m = backward.lastChild(); m; m = backward.previousNode()) {
+      if (m === lastHead) {
         joined = true;
         break;
       }
-      const t = m.nodeValue ?? '';
-      tail.push(t);
-      tailLen += t.length;
+      const t = raw(m);
+      back.push(t);
+      backLen += t.length;
+      tailRaw += t.length;
+      if (backLen >= TEXT_CHUNK) {
+        flushTail();
+        if (tailLen >= half || tailRaw >= RAW_SCAN_LIMIT) break;
+      }
     }
+    flushTail();
     text = `${text}${joined ? '' : '\n'}${tail.reverse().join('')}`;
   }
+  text = text.replace(/ {2,}/g, ' ');
   if (text.length <= MAX_BODY_CHARS) return text;
   return `${text.slice(0, half)}\n${text.slice(text.length - half)}`;
 }
@@ -257,9 +345,14 @@ function animatesHref(anim: Element): boolean {
   return ANIMATED_HREF.has(target.trim().toLowerCase());
 }
 
-/** Every value a SMIL animation can set (de-duplicated). */
+/** Every value a SMIL animation can set (de-duplicated): to, from (held while an event-started animation waits), by, values. */
 const animValues = (anim: Element): Set<string> =>
-  new Set([getAttr(anim, 'to') ?? '', ...(getAttr(anim, 'values') ?? '').split(';')]);
+  new Set([
+    getAttr(anim, 'to') ?? '',
+    getAttr(anim, 'from') ?? '',
+    getAttr(anim, 'by') ?? '',
+    ...(getAttr(anim, 'values') ?? '').split(';'),
+  ]);
 
 /**
  * Links, form actions and SMIL link targets inside `el` (de-duplicated). `truncated` is set when there are more
@@ -291,7 +384,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
       // SVG SMIL retargeting an <a>: score every distinct value it can navigate to.
       if (!animatesHref(node)) continue;
       const anchor = closestEl(node, 'a');
-      const text = anchor ? capText(textOf(anchor), MAX_LINK_TEXT_CHARS) : '';
+      const text = anchor ? capLinkText(textOf(anchor)) : '';
       for (const raw of animValues(node)) {
         const href = resolveAgainstBase(raw, base);
         if (!href) continue;
@@ -304,7 +397,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
       // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
-      if (href) out.push({ text: capText(textOf(node), MAX_LINK_TEXT_CHARS), href: unwrapCached(href) });
+      if (href) out.push({ text: capLinkText(textOf(node)), href: unwrapCached(href) });
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? '';
       const href = resolveAgainstBase(raw, base);
@@ -316,14 +409,14 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
         getAttr(node, 'data-ped-att-formaction') ??
         '';
       const href = resolveAgainstBase(raw, base);
-      const text = capText(textOf(node) || getAttr(node, 'value') || '', MAX_LINK_TEXT_CHARS).trim();
+      const text = capLinkText(textOf(node) || getAttr(node, 'value') || '').trim();
       if (href) out.push({ text, href });
     }
   }
   // Identical links add nothing; past the cap keep the first and last ones for scoring and report the truncation.
   const seen = new Set<string>();
   const unique = out.filter((l) => {
-    const key = `${l.href}\t${l.text}`;
+    const key = `${l.href}\t${l.text.trim().replace(/\s+/g, ' ')}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

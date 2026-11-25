@@ -7,6 +7,7 @@ import {
   inlineAttachmentsIn,
   type BodyHit,
   isHidden,
+  chooseBodies,
   pickBodies,
   pickFrameBodies,
   sameOriginFrameDocs,
@@ -35,14 +36,11 @@ const isCompose = (el: HTMLElement): boolean =>
 function findBodies(doc: Document): BodyHit[] {
   // A direct body that merely wraps the content iframe is not itself the message.
   const excludedDirect = (el: HTMLElement) => isCompose(el) || el.querySelector('iframe[data-testid="content-iframe"]') !== null;
-  // Prefer bodies with content; then accept an empty one (attachment-only email) rather than skipping the message.
-  for (const requireContent of [true, false]) {
-    const framed = pickFrameBodies(doc, CONTENT_IFRAMES, isCompose, requireContent);
-    if (framed.length > 0) return framed;
-    const direct = pickBodies(doc, DIRECT_BODY_SELECTORS, excludedDirect, requireContent);
-    if (direct.length > 0) return direct;
-  }
-  return [];
+  // The first source with content wins, keeping its empty bodies (attachment-only messages in a conversation).
+  return chooseBodies(
+    pickFrameBodies(doc, CONTENT_IFRAMES, isCompose),
+    pickBodies(doc, DIRECT_BODY_SELECTORS, excludedDirect),
+  );
 }
 
 /** The message view around the body (never the body itself: message-view:body also matches ^="message-view"). */

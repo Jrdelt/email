@@ -9,7 +9,7 @@ import {
   inlineAttachmentsIn,
   isHidden,
   isUnsafeNode,
-  linksIn,
+  linkFields,
   scanLinks,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
@@ -26,6 +26,8 @@ export interface ICloudHeader {
   attachments: AttachmentRef[];
   attachmentContainers: HTMLElement[];
   container: HTMLElement;
+  /** The address came only from the loose header fallback (no contact token, From row or Details row). */
+  senderUncertain?: boolean;
 }
 
 export interface ICloudSandboxPayload {
@@ -48,7 +50,10 @@ export interface ICloudThreadMessage {
   attachmentNames?: string[];
   frameId?: number;
   sig?: string;
-  /** The body could not be tied to its card for certain: the card's sender must not be trusted for it. */
+  /**
+   * The body could not be tied to its card for certain, or the card's address came only from the loose header
+   * fallback: the sender must not be auto-trusted from the allowlist for it.
+   */
   pairingUncertain?: boolean;
 }
 
@@ -71,8 +76,21 @@ function isRecipientNode(el: Element): boolean {
   return false;
 }
 
-function extractHeaderSender(card: HTMLElement): { senderName: string; senderAddress: string } {
+// Attachment chips and download buttons: their labels carry attacker-chosen filenames, never the sender.
+const ATTACHMENT_ITEM_SEL =
+  '[class*="attachment" i], [aria-label*="attachment" i], [aria-label*="Download" i], [title*="Download" i], a[download], a[data-ped-att-download]';
+
+function extractHeaderSender(card: HTMLElement): { senderName: string; senderAddress: string; uncertain?: true } {
   const skip = (el: Element): boolean => isUnsafeNode(el) || el.closest('iframe, h2') !== null || isRecipientNode(el);
+  // Inside an attachment chip (not a wrapper that also holds the header, subject or body).
+  const inAttachment = (el: Element): boolean => {
+    for (let cur = el.closest(ATTACHMENT_ITEM_SEL); cur && cur !== card && card.contains(cur); ) {
+      if (cur.querySelector('iframe, h2, .allow-select, span.contact-token') === null) return true;
+      cur = cur.parentElement?.closest(ATTACHMENT_ITEM_SEL) ?? null;
+    }
+    return false;
+  };
+  const skipLoose = (el: Element): boolean => skip(el) || inAttachment(el);
 
   let fallbackName = '';
 
@@ -90,11 +108,11 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
 
   // Pass 2a: explicit From / sender nodes
   for (const el of card.querySelectorAll('[aria-label^="From" i], [data-testid*="sender" i], [data-testid*="from" i]')) {
-    if (skip(el)) continue;
+    if (skipLoose(el)) continue;
     const direct = extractSenderFromElement(el, fallbackName);
     if (direct) return { senderName: direct.senderName || fallbackName, senderAddress: direct.senderAddress };
     for (const d of el.querySelectorAll('a[href^="mailto:"], [title*="@"], [aria-label*="@"]')) {
-      if (skip(d)) continue;
+      if (skipLoose(d)) continue;
       const hit = extractSenderFromElement(d, fallbackName);
       if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress };
     }
@@ -116,7 +134,7 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
       }
       if (inRecipients && !isFromRow) continue;
       for (const node of row.querySelectorAll('a[href^="mailto:"], [title*="@"], [aria-label*="@"]')) {
-        if (skip(node)) continue;
+        if (skipLoose(node)) continue;
         const hit = extractSenderFromElement(node, fallbackName);
         if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress };
       }
@@ -125,11 +143,11 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
     }
   }
 
-  // Pass 2c: fallback header links/attributes outside h2 and iframe
+  // Pass 2c: fallback header links/attributes outside h2, iframes and attachments. Loose, so never allowlist-trusted.
   for (const el of card.querySelectorAll('a[href^="mailto:"], [title*="@"], [aria-label*="@"]')) {
-    if (skip(el)) continue;
+    if (skipLoose(el)) continue;
     const hit = extractSenderFromElement(el, fallbackName);
-    if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress };
+    if (hit) return { senderName: hit.senderName || fallbackName, senderAddress: hit.senderAddress, uncertain: true };
   }
 
   return { senderName: fallbackName, senderAddress: '' };
@@ -150,8 +168,7 @@ function extractICloudCardAttachments(card: HTMLElement): {
 } {
   const attachments: AttachmentRef[] = [];
   const attachmentContainers: HTMLElement[] = [];
-  const itemSel =
-    '[class*="attachment" i], [aria-label*="attachment" i], [aria-label*="Download" i], [title*="Download" i], a[download], a[data-ped-att-download]';
+  const itemSel = ATTACHMENT_ITEM_SEL;
   const childSel = '[aria-label*="Download" i], [title*="Download" i], a[download], a[data-ped-att-download], [role="button"], button, a';
 
   const skip = (el: HTMLElement): boolean => {
@@ -222,7 +239,7 @@ export function extractICloudHeaders(doc: Document): ICloudHeader[] {
     const card = wrapper.matches('.conversation-list-item')
       ? wrapper
       : wrapper.querySelector<HTMLElement>('.conversation-list-item') ?? wrapper;
-    const { senderName, senderAddress } = extractHeaderSender(card);
+    const { senderName, senderAddress, uncertain } = extractHeaderSender(card);
     const subject = (card.querySelector('h2')?.textContent ?? '').trim();
     const iframes = [...card.querySelectorAll<HTMLIFrameElement>('iframe')];
     const iframeCount = iframes.length;
@@ -237,6 +254,7 @@ export function extractICloudHeaders(doc: Document): ICloudHeader[] {
       attachments,
       attachmentContainers,
       container: card,
+      ...(uncertain ? { senderUncertain: true } : {}),
     };
   });
 }
@@ -283,6 +301,7 @@ function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: IC
     ...(attachmentNames.length ? { attachmentNames } : {}),
     frameId,
     ...(payload?.sig ? { sig: payload.sig } : {}),
+    ...(h.senderUncertain ? { pairingUncertain: true } : {}),
   };
 }
 
@@ -379,14 +398,15 @@ export const icloud: WebmailAdapter = {
         const bodyEl = sameOriginBody(h.container);
         const rawBody = bodyEl ? bodyText(bodyEl) : '';
         const body = withSubject(h.subject, rawBody);
-        const links = bodyEl ? linksIn(bodyEl) : [];
+        const linkInfo = bodyEl ? linkFields(bodyEl) : { links: [] };
         const inlineAtts = bodyEl ? inlineAttachmentsIn(bodyEl) : [];
         const attachments = [...h.attachments, ...inlineAtts];
         return {
           senderName: h.senderName,
           senderAddress: h.senderAddress,
           body,
-          links,
+          ...linkInfo,
+          ...(h.senderUncertain ? { pairingUncertain: true } : {}),
           ...(attachments.length ? { attachments } : {}),
           ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
           container: bodyEl ?? h.container,
@@ -401,6 +421,7 @@ export const icloud: WebmailAdapter = {
         senderAddress: '',
         body: sb.body,
         links: sb.links,
+        ...(sb.linksTruncated ? { linksTruncated: true } : {}),
         ...(sb.attachments.length ? { attachments: sb.attachments } : {}),
         container: sb.container,
       }];

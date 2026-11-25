@@ -7,6 +7,7 @@ import {
   MAX_LINK_TEXT_CHARS,
   MAX_LINKS,
   bodyText,
+  capLinkText,
   capText,
   inlineAttachmentsIn,
   parseSenderHeader,
@@ -216,5 +217,73 @@ describe('inline download pre-filter', () => {
     const html = spellings.map((s, i) => `<a id="d${i}" href="${s.replace(/\t/g, '&#9;').replace(/\n/g, '&#10;').replace(/\r/g, '&#13;').replace(/\u0001/g, '&#1;')}">f</a>`).join('');
     const found = inlineAttachmentsIn(body(`${html}<a href="https://x.example/data:y">n</a><a href="/blob:z">n</a><a href="mailto:a@b.c">m</a>`));
     expect(found.map((a) => a.element.id)).toEqual(spellings.map((_, i) => `d${i}`));
+  });
+});
+
+describe('attachment-only message inside a conversation', () => {
+  const shape = (all: { senderAddress: string; container: HTMLElement; attachments?: { element: HTMLElement }[] }[]) =>
+    all.map((e) => ({ s: e.senderAddress, c: e.container.id, att: e.attachments?.map((a) => a.element.id) ?? [] }));
+  const expected = [
+    { s: 'bob@corp.example', c: 'a', att: [] },
+    { s: 'x@evil.example', c: 'b', att: ['att'] },
+  ];
+
+  it('is still extracted (and so attachment-locked) on Outlook when another message has text', () => {
+    document.body.innerHTML = `<div data-app-section="ConversationContainer">
+      <div aria-label="Email message"><span class="OZZZK">Colleague &lt;bob@corp.example&gt;</span>
+        <div aria-label="Message body" id="a">See below.</div></div>
+      <div aria-label="Email message"><span class="OZZZK">X &lt;x@evil.example&gt;</span>
+        <div aria-label="Message body" id="b"></div>
+        <div role="listitem" aria-label="Attached file invoice.html" id="att"><button>invoice.html</button></div></div></div>`;
+    expect(shape(outlook.extractAll!(document))).toEqual(expected);
+  });
+
+  it('is still extracted on Yahoo', () => {
+    document.body.innerHTML = `<div data-test-id="message-group-view">
+      <div data-test-id="message-card"><span data-test-id="message-from" title="bob@corp.example">Bob</span>
+        <div data-test-id="message-view-body-content" id="a">See below.</div></div>
+      <div data-test-id="message-card"><span data-test-id="message-from" title="x@evil.example">X</span>
+        <div data-test-id="message-view-body-content" id="b"></div>
+        <div data-test-id="attachment-list"><div data-test-id="attachment-tile" id="att" title="invoice.html">invoice.html</div></div></div></div>`;
+    expect(shape(yahoo.extractAll!(document))).toEqual(expected);
+  });
+
+  it('is still extracted on Proton', () => {
+    document.body.innerHTML = `<div data-testid="conversation-view">
+      <article data-testid="message-view-0"><div data-testid="message-header:from" title="bob@corp.example">Bob</div>
+        <div data-testid="message-content:body" id="a">See below.</div></article>
+      <article data-testid="message-view-1"><div data-testid="message-header:from" title="x@evil.example">X</div>
+        <div data-testid="message-content:body" id="b"></div>
+        <div data-testid="attachment-list"><button data-testid="attachment-item-0" id="att"><span data-testid="attachment-item:name">invoice.html</span></button></div></article></div>`;
+    expect(shape(proton.extractAll!(document))).toEqual(expected);
+  });
+});
+
+describe('filler on both sides (sandwich)', () => {
+  it('keeps the URL a link shows when filler surrounds it on both sides', () => {
+    const pad = (n: number) => `${'\ufe0f'.repeat(n)}${'lorem ipsum '.repeat(n / 10)}`;
+    const { links } = scanLinks(body(`<a href="https://paypal-signin-verify.com/">${pad(3000)}https://www.paypal.com/signin ${pad(3000)}</a>`));
+    expect(links[0]!.text.length).toBeLessThanOrEqual(MAX_LINK_TEXT_CHARS);
+    expect(links[0]!.text).toContain('https://www.paypal.com/signin');
+    expect(capLinkText(`${'x '.repeat(3000)}\uff48\uff54\uff54\uff50\uff53://evil.example/ ${'y '.repeat(3000)}`)).toContain('https://evil.example/');
+  });
+
+  it('does not count blank or invisible filler toward the body sample', () => {
+    const filler = `${'\n'.repeat(15_000)}${'\ufe0f'.repeat(15_000)}`;
+    const t = bodyText(body(`<p>Hi</p>${filler}<p>URGENT verify your password</p>${filler}<p>Bye</p>`));
+    expect(t).toBe('Hi URGENT verify your password Bye');
+  });
+
+  it('reads SMIL from= values: an event-started animation holds them before it runs', () => {
+    const m = body(`<svg><a id="d" href="#x"><animate attributeName="href" from="data:text/html,x" to="#x" begin="mousedown" dur="indefinite"/><text>f</text></a>
+      <a><animate attributeName="href" from="https://evil.example/" to="#y" begin="click"/><text>g</text></a></svg>`);
+    expect(inlineAttachmentsIn(m).map((a) => a.element.id)).toEqual(['d']);
+    expect(scanLinks(m).links.map((l) => l.href)).toContain('https://evil.example/');
+  });
+
+  it('does not fail closed on a typical large newsletter (300 distinct tracked links)', () => {
+    const links = Array.from({ length: 300 }, (_, i) => `<a href="https://click.news.example.com/c/${i}">Item ${i}</a>`).join(' ');
+    expect(scanLinks(body(links)).truncated).toBe(false);
+    expect(MAX_LINKS).toBeGreaterThanOrEqual(300);
   });
 });

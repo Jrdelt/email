@@ -8,6 +8,7 @@ import {
   inlineAttachmentsIn,
   type BodyHit,
   isHidden,
+  chooseBodies,
   pickBodies,
   pickFrameBodies,
   sameOriginFrameDocs,
@@ -35,14 +36,8 @@ const isEditable = (el: HTMLElement): boolean =>
 
 
 function findBodies(doc: Document): BodyHit[] {
-  // Prefer bodies with content; then accept an empty one (attachment-only email) rather than skipping the message.
-  for (const requireContent of [true, false]) {
-    const direct = pickBodies(doc, BODY_SELECTORS, isEditable, requireContent);
-    if (direct.length > 0) return direct;
-    const framed = pickFrameBodies(doc, BODY_IFRAMES, isEditable, requireContent);
-    if (framed.length > 0) return framed;
-  }
-  return [];
+  // The first source with content wins, keeping its empty bodies (attachment-only messages in a conversation).
+  return chooseBodies(pickBodies(doc, BODY_SELECTORS, isEditable), pickFrameBodies(doc, BODY_IFRAMES, isEditable));
 }
 
 function findMessageScope(doc: Document, hostEl: HTMLElement): HTMLElement | null {

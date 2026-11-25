@@ -2,7 +2,7 @@ import { isLookupDomain } from '../src/domain';
 import { getIntel, type DomainIntel } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { MAX_ATTACHMENT_NAMES } from '../src/attachments';
-import { MAX_LINK_TEXT_CHARS, MAX_LINKS, capText } from '../src/adapters/extract';
+import { MAX_LINKS, capLinkText } from '../src/adapters/extract';
 import { WARN_TTL_MS, isSafeHttpUrl } from '../src/linkGuard';
 import { clearLookupCaches, getSettings } from '../src/settings';
 
@@ -180,7 +180,7 @@ export default defineBackground(() => {
                 typeof (l as { href?: unknown }).href === 'string',
             )
             .slice(0, MAX_LINKS)
-            .map((l) => ({ text: capText(l.text, MAX_LINK_TEXT_CHARS), href: l.href.slice(0, 2048) }))
+            .map((l) => ({ text: capLinkText(l.text), href: l.href.slice(0, 2048) }))
         : [];
       void browser.tabs
         .sendMessage(sender.tab.id, {
