@@ -61,8 +61,9 @@ export async function untrustSender(kv: KV, sender: string): Promise<void> {
 /**
  * One-way SHA-256 fingerprint of an email (never stores body, URLs, or sender address). Webmail's
  * authentication flags are part of it, so a spoofed copy of a trusted email that webmail marks as unverified
- * (or that arrives through a different relay) does not inherit the original's trust. Emails without those
- * flags hash exactly as before, so existing trusted fingerprints stay valid.
+ * (or that arrives through a different relay) does not inherit the original's trust. The flags are only added
+ * when present, but note that extraction changes (CSS text skipped, links de-duplicated and unwrapped) also change
+ * the fingerprint of many emails, so emails trusted with an earlier version may need to be trusted again.
  */
 export async function hashEmail(
   senderAddress: string,

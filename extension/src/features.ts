@@ -2,7 +2,13 @@
 import { hostOf, isIpHost, isValidDomain, registrableDomain } from './domain';
 
 export interface Link { text: string; href: string }
-export interface Verdict { score: number; level: 'safe' | 'suspicious' | 'likely-phishing'; reasons: string[] }
+export interface Verdict {
+  score: number;
+  level: 'safe' | 'suspicious' | 'likely-phishing';
+  reasons: string[];
+  /** Fail-closed verdict for content that could not be fully checked (not evidence of phishing). */
+  unchecked?: boolean;
+}
 
 const URGENCY = [
   'urgent', 'immediately', 'verify', 'suspended', 'locked', 'password', 'confirm', 'act now', 'expires',

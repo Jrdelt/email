@@ -201,7 +201,9 @@ export function deriveStatusSummary(
       hasAttachments: false,
     };
   }
-  const emailDanger = verdict.level !== 'safe';
+  // An "unchecked" verdict (too many messages/links to check) pauses links but is not evidence of phishing.
+  const unchecked = verdict.level !== 'safe' && verdict.unchecked === true;
+  const emailDanger = verdict.level !== 'safe' && !unchecked;
   const attDanger = attachments?.level === 'danger';
   const attWarning = attachments?.level === 'warning';
   const hasAttachments = (attachments?.count ?? 0) > 0;
@@ -209,7 +211,7 @@ export function deriveStatusSummary(
   const senderWarnings = [...(sender?.warnings ?? []), ...intelList];
   const danger = emailDanger || attDanger;
 
-  if (!danger && senderWarnings.length === 0 && !hasAttachments) {
+  if (!danger && !unchecked && senderWarnings.length === 0 && !hasAttachments) {
     return {
       kind: 'safe',
       title: 'Looks safe.',
@@ -225,9 +227,9 @@ export function deriveStatusSummary(
     ? [...verdict.reasons, ...attReasons, ...senderWarnings]
     : [...senderWarnings, ...attReasons, ...verdict.reasons];
   const title =
-    verdict.level === 'likely-phishing'
+    emailDanger && verdict.level === 'likely-phishing'
       ? 'Possible phishing.'
-      : verdict.level === 'suspicious'
+      : emailDanger
         ? 'Looks suspicious.'
         : attDanger
           ? 'Dangerous attachment.'
@@ -235,7 +237,9 @@ export function deriveStatusSummary(
             ? 'Check this sender.'
             : attWarning
               ? 'Check this attachment.'
-              : 'Attachments blocked.';
+              : unchecked
+                ? 'Not fully checked.'
+                : 'Attachments blocked.';
   const tag = emailDanger
     ? 'PHISHING WARNING'
     : attDanger || attWarning
@@ -244,14 +248,16 @@ export function deriveStatusSummary(
         ? 'DOMAIN WARNING'
         : senderWarnings.length > 0
           ? 'SENDER WARNING'
-          : 'ATTACHMENT LOCK';
+          : unchecked
+            ? 'CHECK LIMIT'
+            : 'ATTACHMENT LOCK';
 
   return {
     kind: danger ? 'danger' : 'warning',
     title,
     tag,
     reasons,
-    hasNonAttachmentWarning: emailDanger || senderWarnings.length > 0 || attDanger || attWarning,
+    hasNonAttachmentWarning: emailDanger || unchecked || senderWarnings.length > 0 || attDanger || attWarning,
     hasAttachments,
   };
 }

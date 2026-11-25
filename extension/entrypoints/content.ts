@@ -68,6 +68,24 @@ function sendRuntime<T = unknown>(message: unknown): Promise<T | undefined> {
   }
 }
 
+// The background drops a tab's stored verdict whenever the tab starts loading, which also happens on
+// same-document navigations (hash/pushState). Remember the last verdict to re-send it when only the URL changed.
+let lastVerdict: { payload: unknown; href: string } | null = null;
+const tabHref = (): string => {
+  try {
+    return window.top?.location.href ?? location.href;
+  } catch {
+    return location.href;
+  }
+};
+function sendVerdict(payload: unknown): void {
+  lastVerdict = { payload, href: tabHref() };
+  void sendRuntime({ type: 'verdict', payload });
+}
+function resendVerdictIfNavigated(): void {
+  if (lastVerdict && lastVerdict.href !== tabHref()) sendVerdict(lastVerdict.payload);
+}
+
 function managedStorage(): typeof browser.storage.managed | undefined {
   try {
     return browser.storage?.managed;
@@ -101,6 +119,7 @@ function overflowVerdict(overflowCount: number): Verdict {
   return {
     score: 0.3,
     level: 'suspicious',
+    unchecked: true,
     reasons: [
       `This conversation has too many open messages to check; links and attachments in the oldest ${overflowCount} are paused`,
     ],
@@ -110,11 +129,9 @@ function overflowVerdict(overflowCount: number): Verdict {
 /** Not every link could be checked (padding past MAX_LINKS): never let such an email score safe. */
 function withTooManyLinks(v: Verdict): Verdict {
   const reason = 'This email has too many links to check them all, so its links are paused';
-  return {
-    score: Math.max(v.score, 0.3),
-    level: v.level === 'safe' ? 'suspicious' : v.level,
-    reasons: [...v.reasons, reason],
-  };
+  // Keep a real finding as is; otherwise this is an "unchecked" notice, not a phishing verdict.
+  if (v.level !== 'safe') return { ...v, reasons: [...v.reasons, reason] };
+  return { score: 0.3, level: 'suspicious', unchecked: true, reasons: [...v.reasons, reason] };
 }
 
 const stringsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -136,7 +153,13 @@ function storageChangeAffectsVerdicts(
     const change = changes[key];
     if (!change) continue;
     const next = new Set(stringsOf(change.newValue));
-    if (stringsOf(change.oldValue).some((v) => !next.has(v))) affected = true;
+    const prev = new Set(stringsOf(change.oldValue));
+    // A revocation removes entries without adding any; adding at the list cap also evicts the oldest entries,
+    // which must not tear down this tab's just-shown Undo pill.
+    const removed = [...prev].some((v) => !next.has(v));
+    const added = [...next].some((v) => !prev.has(v));
+    if (!removed || added) continue;
+    affected = true;
     if (key === 'trustedEmails') {
       for (const entry of [...trustedThisSession]) {
         if (!entry.split(',').every((h) => next.has(h))) {
@@ -413,8 +436,15 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
 }) {
   const { kv, messages, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
   const overflowCount = Math.min(opts.overflowCount ?? 0, messages.length);
+  // Overflow messages with nothing to click (no links, attachments or message frame) need no lock at all.
+  const lockable = (email: T, attCount: number): boolean =>
+    email.links.length > 0 ||
+    attCount > 0 ||
+    Boolean(email.linksTruncated) ||
+    typeof (email as { frameId?: unknown }).frameId === 'number';
+  let lockedOverflow = 0;
   const untrustedVerdict = (overflow: boolean, sender: SenderInfo, email: T): Verdict => {
-    if (overflow) return overflowVerdict(overflowCount);
+    if (overflow) return overflowVerdict(lockedOverflow);
     const v = scoreEmail(sender.address, email.body, email.links);
     return email.linksTruncated ? withTooManyLinks(v) : v;
   };
@@ -441,8 +471,11 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   const threadHashKey = prelim.map((p) => p.hash).join(',');
   const threadUnlocked = trustedThisSession.has(threadHashKey);
 
+  lockedOverflow = prelim.slice(0, overflowCount).filter((p) => lockable(p.email, p.attCount)).length;
   const items = prelim.map(({ email, attNames, attCount, hash }, index) => {
-    const overflow = index < overflowCount;
+    const inOverflow = index < overflowCount;
+    const overflow = inOverflow && lockable(email, attCount);
+    const skipped = inOverflow && !overflow; // beyond the cap and nothing to lock: not scored
     const sender = analyzeSender(email.senderName, email.senderAddress, email.links, {
       viaDomain: email.viaDomain,
       unauthenticated: email.unauthenticated,
@@ -455,9 +488,9 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       );
     }
     const trusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash) || allowlistTrusted;
-    const verdict: Verdict = trusted ? SAFE_VERDICT : untrustedVerdict(overflow, sender, email);
+    const verdict: Verdict = trusted || skipped ? SAFE_VERDICT : untrustedVerdict(overflow, sender, email);
     const attAnalysis: AttachmentAnalysis | undefined = trusted ? undefined : analyzeAttachments(attNames, attCount);
-    return { email, attNames, attCount, hash, sender, allowlistTrusted, trusted, overflow, verdict, attAnalysis };
+    return { email, attNames, attCount, hash, sender, allowlistTrusted, trusted, overflow, skipped, verdict, attAnalysis };
   });
   if (isStale()) return;
   onEvaluated?.(items);
@@ -467,6 +500,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     if (
       !item.trusted &&
       !item.overflow &&
+      !item.skipped &&
       isLookupDomain(item.sender.registrable) &&
       !intelByDomain.has(item.sender.registrable)
     ) {
@@ -501,7 +535,9 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     for (const entry of evaluated) {
       if (!entry.banner) continue;
       const attBoost = entry.item.attAnalysis?.level === 'warning' ? 0.2 : entry.item.attAnalysis?.count ? 0.1 : 0;
-      const rank = (entry.banner.level === 'danger' ? 10 : 0) + entry.item.verdict.score + attBoost;
+      // Fail-closed "unchecked" items rank below every real finding so they never hide one.
+      const evidence = entry.item.verdict.unchecked ? -0.5 : entry.item.verdict.score;
+      const rank = (entry.banner.level === 'danger' ? 10 : 0) + evidence + attBoost;
       if (rank >= bestRank) {
         bestRank = rank;
         primaryEntry = entry;
@@ -516,15 +552,12 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     );
 
     const primaryBanner = primaryEntry.banner;
-    void sendRuntime({
-      type: 'verdict',
-      payload: {
-        verdict: primaryEntry.item.verdict,
-        sender: primaryEntry.item.sender,
-        intel: primaryEntry.intel,
-        attachments: primaryEntry.item.trusted ? undefined : primaryEntry.item.attAnalysis,
-        trusted: primaryEntry.item.trusted,
-      },
+    sendVerdict({
+      verdict: primaryEntry.item.verdict,
+      sender: primaryEntry.item.sender,
+      intel: primaryEntry.intel,
+      attachments: primaryEntry.item.trusted ? undefined : primaryEntry.item.attAnalysis,
+      trusted: primaryEntry.item.trusted,
     });
 
     if (!primaryBanner) {
@@ -562,14 +595,11 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           }
           setBlockedHandlers(null);
           unlockAll(evaluated.map((e) => e.item.email));
-          void sendRuntime({
-            type: 'verdict',
-            payload: {
-              verdict: SAFE_VERDICT,
-              sender: primaryEntry.item.sender,
-              intel: primaryEntry.intel,
-              trusted: true,
-            },
+          sendVerdict({
+            verdict: SAFE_VERDICT,
+            sender: primaryEntry.item.sender,
+            intel: primaryEntry.intel,
+            trusted: true,
           });
           await trustEmails(kv, evaluated.map((e) => e.item.hash));
         },
@@ -580,7 +610,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           for (const { item } of evaluated) {
             trustedThisSession.delete(item.hash);
             item.trusted = item.allowlistTrusted;
-            item.verdict = item.trusted ? SAFE_VERDICT : untrustedVerdict(item.overflow, item.sender, item.email);
+            item.verdict =
+              item.trusted || item.skipped ? SAFE_VERDICT : untrustedVerdict(item.overflow, item.sender, item.email);
             item.attAnalysis = item.trusted ? undefined : analyzeAttachments(item.attNames, item.attCount);
           }
           await untrustEmails(kv, hashes);
@@ -658,7 +689,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       lastKey = '';
       ++token;
       removeBanner();
-      void sendRuntime({ type: 'verdict', payload: null });
+      sendVerdict(null);
       return;
     }
 
@@ -673,6 +704,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       arraysEqual(nextContainers, activeContainers) &&
       arraysEqual(nextAttachmentEls, activeAttachmentEls)
     ) {
+      resendVerdictIfNavigated();
       return; // unchanged thread and attachment DOM => no work
     }
 
@@ -1013,7 +1045,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       lastKey = '';
       ++token;
       removeBanner();
-      void sendRuntime({ type: 'verdict', payload: null });
+      sendVerdict(null);
       return;
     }
 
@@ -1021,7 +1053,10 @@ function runICloudApp(kv: typeof browser.storage.local) {
     const trustKey = messages.map(msgKey).join('\n---\n');
     const frameKey = messages.map((m) => m.frameId ?? '').join(',');
     const fullKey = `${trustKey}\n@@\n${frameKey}`;
-    if (fullKey === lastKey && arraysEqual(nextAttEls, activeAttachmentEls)) return;
+    if (fullKey === lastKey && arraysEqual(nextAttEls, activeAttachmentEls)) {
+      resendVerdictIfNavigated();
+      return;
+    }
 
     const newAttSet = new Set(nextAttEls);
     const staleAtts = activeAttachmentEls.filter((el) => !newAttSet.has(el));

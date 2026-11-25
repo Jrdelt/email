@@ -712,3 +712,15 @@ describe('icons', () => {
     expect(createCloseIcon(document).getAttribute('aria-hidden')).toBe('true');
   });
 });
+
+describe('unchecked (fail-closed) verdicts', () => {
+  it('pause links with a neutral notice instead of a phishing alert', () => {
+    const sender = analyzeSender('Friend', 'friend@example.org', []);
+    const v = { score: 0.3, level: 'suspicious' as const, unchecked: true, reasons: ['too many links to check'] };
+    const s = deriveStatusSummary(v, sender, undefined, undefined, false);
+    expect(s.kind).toBe('warning');
+    expect(s.title).toBe('Not fully checked.');
+    expect(s.tag).toBe('CHECK LIMIT');
+    expect(decideBanner(v, sender, undefined, false)?.linksLocked).toBe(true);
+  });
+});
