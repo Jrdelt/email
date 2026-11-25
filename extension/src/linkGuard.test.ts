@@ -164,3 +164,22 @@ describe('private-use domains are never looked up online', () => {
     expect(analyzeLinkDestination('https://shop.example.com/x').needsDomainCheck).toBe(true);
   });
 });
+
+describe('redirect wrappers', () => {
+  it('follows the parameter the redirector uses and warns when targets conflict', () => {
+    const href = 'https://www.google.com/url?q=https%3A%2F%2Fshop.example%2F&q=http%3A%2F%2F192.168.4.20%2Finvoice.exe';
+    const r = analyzeLinkDestination(href, 'shop.example');
+    expect(r.host).toBe('192.168.4.20');
+    expect(r.level).toBe('danger');
+    expect(r.reasons.join(' ')).toMatch(/more than one destination/);
+  });
+
+  it('unwraps enterprise link-rewriting gateways locally', () => {
+    expect(unwrapRedirectUrl('https://urldefense.proofpoint.com/v2/url?u=https-3A__evil.example_login-3Fa-3D1&d=x&c=y')).toBe(
+      'https://evil.example/login?a=1',
+    );
+    expect(unwrapRedirectUrl('https://urldefense.com/v3/__https://evil.example/login__;!!ABC$')).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://linkprotect.cudasvc.com/url?a=https%3A%2F%2Fevil.example%2Fx&c=E')).toBe('https://evil.example/x');
+    expect(unwrapRedirectUrl('https://secure-web.cisco.com/1AbC/https%3A%2F%2Fevil.example%2Fy')).toBe('https://evil.example/y');
+  });
+});

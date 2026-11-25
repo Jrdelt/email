@@ -236,7 +236,7 @@ export const outlook: WebmailAdapter = {
       const { senderName, senderAddress } = findSender(doc, container, hostEl);
       const subject = findSubject(doc, container);
       const body = [subject, bodyText(container)].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
-      const links = linksIn(container).map((l) => ({ text: l.text, href: unwrapSafeLink(l.href) }));
+      const links = linksIn(container); // linksIn already unwraps Safe Links and other redirect wrappers
       const { attachments, attachmentContainers } = extractOutlookAttachments(doc, container, hostEl);
       return {
         senderName,

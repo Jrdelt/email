@@ -28,36 +28,91 @@ export function isSafeHttpUrl(raw: string): boolean {
   }
 }
 
-/** Unwrap common redirect/tracking wrappers locally (up to 4 nested hops) to inspect the real http(s) target. */
-export function unwrapRedirectUrl(href: string): string {
+/**
+ * The value a redirector actually follows: Google /url and Facebook l.php use the LAST duplicate parameter, so a
+ * benign first value must not be what gets inspected. Several distinct values mark the link as ambiguous.
+ */
+function redirectParam(u: URL, names: readonly string[]): { value: string | null; ambiguous: boolean } {
+  for (const name of names) {
+    const all = u.searchParams.getAll(name);
+    if (all.length) return { value: all[all.length - 1]!, ambiguous: new Set(all).size > 1 };
+  }
+  return { value: null, ambiguous: false };
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/** One unwrapping step for a known redirect or enterprise link-rewriting wrapper (all decoded locally). */
+function unwrapOnce(current: string): { next: string | null; ambiguous: boolean } {
+  const u = new URL(current);
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return { next: null, ambiguous: false };
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  const path = u.pathname;
+  if (host.endsWith('.safelinks.protection.outlook.com')) return toNext(redirectParam(u, ['url']));
+  if ((host === 'www.google.com' || host === 'google.com') && path === '/url') return toNext(redirectParam(u, ['q', 'url']));
+  if ((host === 'l.facebook.com' || host === 'lm.facebook.com') && path === '/l.php') return toNext(redirectParam(u, ['u']));
+  if ((host === 'www.youtube.com' || host === 'youtube.com') && path === '/redirect') return toNext(redirectParam(u, ['q']));
+  if (host === 'linkprotect.cudasvc.com' && path === '/url') return toNext(redirectParam(u, ['a'])); // Barracuda
+  if (host === 'urldefense.proofpoint.com' && path === '/v2/url') {
+    // Proofpoint v2: u=https-3A__www.example.com_path  ('-XX' = %XX, '_' = '/')
+    const p = redirectParam(u, ['u']);
+    const decoded = p.value === null ? null : safeDecode(p.value.replace(/_/g, '/').replace(/-([0-9a-f]{2})/gi, '%$1'));
+    return { next: decoded, ambiguous: p.ambiguous };
+  }
+  if (host === 'urldefense.com' && path.startsWith('/v3/__')) {
+    // Proofpoint v3: https://urldefense.com/v3/__<url>__;<token>$  ('*' marks characters moved into the token)
+    const inner = current.slice(current.indexOf('/v3/__') + 6);
+    const end = inner.indexOf('__;');
+    if (end <= 0) return { next: null, ambiguous: false };
+    const url = inner.slice(0, end);
+    return { next: url.includes('*') ? url.slice(0, url.indexOf('*')) : url, ambiguous: false };
+  }
+  if (host === 'secure-web.cisco.com') {
+    // Cisco Secure Email: the original URL is the percent-encoded last path segment.
+    const seg = path.slice(path.lastIndexOf('/') + 1);
+    return { next: seg ? safeDecode(seg) : null, ambiguous: false };
+  }
+  return { next: null, ambiguous: false };
+}
+
+function toNext(p: { value: string | null; ambiguous: boolean }): { next: string | null; ambiguous: boolean } {
+  return { next: p.value, ambiguous: p.ambiguous };
+}
+
+/**
+ * Unwrap redirect/tracking wrappers and enterprise link-rewriting gateways locally (up to 4 nested hops) to find
+ * the real http(s) target. `ambiguous` is set when a wrapper carries several different targets.
+ */
+export function unwrapRedirect(href: string): { href: string; ambiguous: boolean } {
   let current = href;
+  let ambiguous = false;
   for (let depth = 0; depth < MAX_UNWRAP_DEPTH; depth++) {
-    let next: string | null = null;
+    let step: { next: string | null; ambiguous: boolean };
     try {
-      const u = new URL(current);
-      if (u.protocol !== 'http:' && u.protocol !== 'https:') break;
-      const host = u.hostname.toLowerCase().replace(/\.$/, '');
-      if (host.endsWith('.safelinks.protection.outlook.com')) {
-        next = u.searchParams.get('url');
-      } else if ((host === 'www.google.com' || host === 'google.com') && u.pathname === '/url') {
-        next = u.searchParams.get('q') ?? u.searchParams.get('url');
-      } else if ((host === 'l.facebook.com' || host === 'lm.facebook.com') && u.pathname === '/l.php') {
-        next = u.searchParams.get('u');
-      } else if ((host === 'www.youtube.com' || host === 'youtube.com') && u.pathname === '/redirect') {
-        next = u.searchParams.get('q');
-      }
+      step = unwrapOnce(current);
     } catch {
       break;
     }
+    const next = step.next?.trim() ?? null;
     if (!next || next === current || !isSafeHttpUrl(next)) break;
+    ambiguous ||= step.ambiguous;
     current = next;
   }
-  return current;
+  return { href: current, ambiguous };
 }
+
+/** Unwrap redirect wrappers locally (see unwrapRedirect) and return the real http(s) target. */
+export const unwrapRedirectUrl = (href: string): string => unwrapRedirect(href).href;
 
 /** Analyze a clicked link destination locally and report whether online destination-domain intel is needed. */
 export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', pageOrigin = ''): LinkRisk {
-  const href = unwrapRedirectUrl(rawHref);
+  const { href, ambiguous } = unwrapRedirect(rawHref);
   let u: URL;
   try {
     u = new URL(href);
@@ -112,6 +167,10 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
   if (u.protocol === 'http:') {
     hasWarning = true;
     reasons.push('This link uses an unencrypted connection (http:// instead of https://)');
+  }
+  if (ambiguous) {
+    hasWarning = true;
+    reasons.push('This link passes through a redirect that lists more than one destination');
   }
 
   const level = hasDanger ? 'danger' : hasWarning ? 'warning' : 'safe';

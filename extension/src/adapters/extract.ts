@@ -1,6 +1,7 @@
 import { cleanAttachmentName } from '../attachments';
 import { closestEl, getAttr, hasAttr, isFormEl, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
 import { safePercentDecode, type Link } from '../features';
+import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
 export const MAX_BODY_CHARS = 20_000; // cap work per email
@@ -143,7 +144,8 @@ export const linksIn = (el: HTMLElement): Link[] => {
       }
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
-      if (href) out.push({ text: textOf(node).slice(0, MAX_LINK_TEXT_CHARS), href });
+      // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
+      if (href) out.push({ text: textOf(node).slice(0, MAX_LINK_TEXT_CHARS), href: unwrapRedirectUrl(href) });
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? '';
       const href = resolveAgainstBase(raw, base);
