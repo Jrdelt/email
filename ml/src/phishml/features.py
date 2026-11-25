@@ -174,7 +174,7 @@ def shown_host(text: str) -> str:
         return ""
     m = EXPLICIT_URL.search(t)
     if m:
-        candidate = re.sub(r"[.,;:!?]+\Z", "", m.group(0))
+        candidate = m.group(0).rstrip(".,;:!?")  # linear; same result as the TS trimTrailingPunct
         h = _host(candidate)
         return h if (_is_valid_domain(h) or is_ip_host(h)) else ""
     if re.search(r"\s", t):

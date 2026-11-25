@@ -128,3 +128,12 @@ describe('scoreEmail', () => {
     expect(marketingShortLink.level).toBe('safe');
   });
 });
+
+describe('shownHost stays linear on long punctuation runs', () => {
+  it('handles 90k dots inside link text quickly and still trims trailing punctuation', () => {
+    const t = performance.now();
+    shownHost(`https://a.com/${'.'.repeat(90_000)}x`);
+    expect(performance.now() - t).toBeLessThan(100);
+    expect(shownHost('Visit https://www.paypal.com/login.')).toBe('www.paypal.com');
+  });
+});

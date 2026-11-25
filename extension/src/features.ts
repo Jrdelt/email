@@ -97,6 +97,13 @@ export function isCloudHtmlLink(href: string): boolean {
   }
 }
 
+/** Drop trailing . , ; : ! ? in linear time (an anchored regex retries at every position of a long run). */
+function trimTrailingPunct(s: string): string {
+  let end = s.length;
+  while (end > 0 && '.,;:!?'.includes(s[end - 1]!)) end--;
+  return s.slice(0, end);
+}
+
 /**
  * Extract a hostname only when the link text looks like an explicit URL or bare domain/IP,
  * so prose like "please reset your password immediately." or filenames like "report.pdf" return ''.
@@ -106,7 +113,7 @@ export function shownHost(text: string): string {
   if (!t) return '';
   const m = t.match(EXPLICIT_URL);
   if (m) {
-    const candidate = m[0].replace(/[.,;:!?]+$/, '');
+    const candidate = trimTrailingPunct(m[0]);
     const h = hostOf(candidate);
     return isValidDomain(h) || isIpHost(h) ? h : '';
   }

@@ -5,6 +5,7 @@ import type { AttachmentRef } from './types';
 
 export const MAX_BODY_CHARS = 20_000; // cap work per email
 export const MAX_LINKS = 200;
+export const MAX_LINK_TEXT_CHARS = 2048; // link text only needs to show a URL or domain
 /**
  * Safety bound on attachment elements collected per source (inline anchors, or one adapter's chips).
  * This bounds DOM work only: names analysed for the banner are capped separately (attachments.ts), and
@@ -142,7 +143,7 @@ export const linksIn = (el: HTMLElement): Link[] => {
       }
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
-      if (href) out.push({ text: textOf(node), href });
+      if (href) out.push({ text: textOf(node).slice(0, MAX_LINK_TEXT_CHARS), href });
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? '';
       const href = resolveAgainstBase(raw, base);
