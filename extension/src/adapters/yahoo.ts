@@ -54,10 +54,12 @@ function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElemen
   return results;
 }
 
+/** The message card around the body (never the body or its own wrapper, which hold no header or attachments). */
 function findScope(doc: Document, hostEl: HTMLElement): HTMLElement {
+  const start = hostEl.parentElement ?? hostEl;
   return (
-    hostEl.closest<HTMLElement>('[data-test-id="message-view-body"], [data-test-id="message-card"], [role="listitem"]') ??
-    hostEl.closest<HTMLElement>('[data-test-id="message-group-view"], [role="main"]') ??
+    start.closest<HTMLElement>('[data-test-id="message-card"], [role="listitem"]') ??
+    start.closest<HTMLElement>('[data-test-id="message-group-view"], [role="main"]') ??
     doc.body
   );
 }

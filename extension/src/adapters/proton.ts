@@ -60,10 +60,12 @@ function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElemen
   return [];
 }
 
+/** The message view around the body (never the body itself: message-view:body also matches ^="message-view"). */
 function findScope(doc: Document, hostEl: HTMLElement): HTMLElement {
+  const start = hostEl.parentElement ?? hostEl;
   return (
-    hostEl.closest<HTMLElement>('[data-testid^="message-view"], article, [role="listitem"]') ??
-    hostEl.closest<HTMLElement>('[data-testid="conversation-view"], main, [role="main"]') ??
+    start.closest<HTMLElement>('[data-testid^="message-view"]:not([data-testid="message-view:body"]), article, [role="listitem"]') ??
+    start.closest<HTMLElement>('[data-testid="conversation-view"], main, [role="main"]') ??
     doc.body
   );
 }

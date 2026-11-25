@@ -34,3 +34,27 @@ describe('display-name address spoofing', () => {
     expect(gmail.extract(document)!.senderAddress).toBe('x@evil.example');
   });
 });
+
+describe('message scope is the card around the body, not the body wrapper', () => {
+  it('Yahoo: sender and attachment tile next to a wrapped body are found', async () => {
+    const { yahoo } = await import('./yahoo');
+    document.body.innerHTML = `<div data-test-id="message-card">
+      <span data-test-id="message-from" title="billing@vendor.example">Vendor</span>
+      <div data-test-id="message-view-body"><div class="msg-body">Invoice attached <a href="https://vendor.example/">portal</a></div></div>
+      <div data-test-id="attachment-tile" title="invoice.pdf.html">invoice.pdf.html</div></div>`;
+    const [e] = yahoo.extractAll!(document);
+    expect(e!.senderAddress).toBe('billing@vendor.example');
+    expect(e!.attachments?.map((a) => a.name)).toContain('invoice.pdf.html');
+  });
+
+  it('Proton: a message-view:body container still finds the sender in the message view', () => {
+    document.body.innerHTML = `<article data-testid="message-view-0">
+      <div data-testid="message-header:from"><span data-testid="recipient-address" title="billing@vendor.example">x</span></div>
+      <div data-testid="message-view:body">Invoice attached <a href="https://vendor.example/">portal</a></div>
+      <div data-testid="attachment-list"><button data-testid="attachment-item-0"><span data-testid="attachment-item:name">invoice.html</span></button></div>
+    </article>`;
+    const [e] = proton.extractAll!(document);
+    expect(e!.senderAddress).toBe('billing@vendor.example');
+    expect(e!.attachments?.map((a) => a.name)).toContain('invoice.html');
+  });
+});
