@@ -811,7 +811,7 @@ function runICloudSandbox() {
   // The lock decision comes from the app frame after it scores this body. Until it arrives (first render,
   // changed body, or a reloaded frame), clicks are held like a pending scan instead of going straight through.
   let awaitingVerdict = true;
-  let verdictWaiters: (() => void)[] = [];
+  const verdictWaiters: (() => void)[] = [];
   const waitForVerdict = () =>
     awaitingVerdict
       ? new Promise<void>((resolve) => {
