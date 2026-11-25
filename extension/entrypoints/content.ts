@@ -17,6 +17,7 @@ import {
   rawLinkTarget,
   resolveAnchorHref,
   tagOf,
+  textOf,
   useLinks,
 } from '../src/dom';
 import { isLookupDomain } from '../src/domain';
@@ -37,7 +38,8 @@ import {
 import { decideBanner, removeBanner, showBanner } from '../src/ui/banner';
 import type { IntelState } from '../src/ui/details';
 import { isLocked, lockLinks, setLinkBlockedHandler, unlockLinks } from '../src/ui/linkLock';
-import { showPausedAttachmentToast, showPausedLinkToast } from '../src/ui/linkToast';
+import { showListAttachmentToast, showPausedAttachmentToast, showPausedLinkToast } from '../src/ui/linkToast';
+import { ellipsizeMiddle, showable } from '../src/text';
 
 const MAX_THREAD_MESSAGES = 20; // newest messages that get full scoring and domain lookups
 const MAX_SESSION_SET = 200;
@@ -862,6 +864,27 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   };
 
   const scheduler = createScheduler(scan);
+
+  // Gmail's inbox list shows file buttons for emails that were never opened, so never scanned: refuse to open those
+  // files there (for every sender: the list shows no sender verification) and point the user to the email itself.
+  // Click-time only, so no idle cost.
+  const listAttachmentAt = adapter?.listAttachmentAt?.bind(adapter);
+  if (listAttachmentAt) {
+    const onListEvent = (e: Event) => {
+      if (e.type === 'keydown' && (e as KeyboardEvent).key !== 'Enter' && (e as KeyboardEvent).key !== ' ') return;
+      const el = eventElement(e);
+      const chip = el ? listAttachmentAt(el) : null;
+      if (!chip) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.type === 'click' || e.type === 'keydown' || (e.type === 'auxclick' && (e as MouseEvent).button === 1)) {
+        showListAttachmentToast(document, showable(ellipsizeMiddle(textOf(chip).trim(), 80)), chip);
+      }
+    };
+    for (const type of ['click', 'auxclick', 'dblclick', 'mousedown', 'pointerdown', 'dragstart', 'keydown']) {
+      document.addEventListener(type, onListEvent, true);
+    }
+  }
 
   const guardDoc = installClickGuard({
     findTarget: (a) => {

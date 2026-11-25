@@ -22,6 +22,7 @@ Flagged emails pause links (`a`, `area`, SVG `href` & `xlink:href`), `<a ping>` 
 
 ### 2. Always-On Attachment Locking for Untrusted Mail
 Native webmail attachment shelves/cards (Gmail, Outlook Web, iCloud Mail) and inline `a[download]` / `data:` / `blob:` links in **any untrusted email** are locked (`data-ped-att-locked`, stashing `href`, `download`, `download_url`, `formaction`, and blocking `click`, `auxclick`, `dblclick`, `mousedown`, `pointerdown`, `dragstart`, `submit`, and `keydown` `Enter`/`Space`), even when body text scores safe or after dismissing the banner. Local filename inspection (`src/attachments.ts`) highlights dangerous smuggling/executable/double-extension patterns without downloading bytes.
+- *Inbox list (Gmail):* file buttons on list rows open a file whose email was never opened or scanned, so a click (or Enter/Space, middle-click, drag) on them is refused for every sender with a note to open the email first (`listAttachmentAt` in `adapters/gmail.ts`; click-time only, no idle cost). Its selectors are not yet checked against saved real Gmail pages (ROADMAP T7).
 - *Residual limit:* Browser-native context-menu `"Save link as…"` or malicious payloads inside benignly named files (`.pdf`) after the user explicitly chooses to trust the email.
 
 ### 3. Click-Time Destination Inspector & Race-to-Click Gate

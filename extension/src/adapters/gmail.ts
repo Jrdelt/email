@@ -1,6 +1,7 @@
 import { cleanAttachmentName } from '../attachments';
 import { KNOWN_ESP_DOMAINS } from '../brands';
 import { isValidDomain, registrableDomain } from '../domain';
+import { closestEl } from '../dom';
 import {
   ADDRESS_TOKEN_RE,
   MAX_ATTACHMENTS,
@@ -158,9 +159,21 @@ function extractGmailAttachments(
 
 // Best-effort Gmail selectors (T7: verify against saved fixtures and live Gmail).
 // div.a3s = message body; span.gD[email] = standard sender chip; span.go.gD = Spam/via bare address; h2.hP = subject.
+// Inbox/list rows (not an opened conversation). Their file buttons are recognised by Gmail's attachment endpoints
+// (attid= / view=att), drag-to-download attributes and the list's chip containers. Matching a non-file button here only
+// asks the user to open the email first; missing one leaves the pre-existing gap, so the selectors err wide.
+const LIST_ROW_SEL = 'tr.zA, [role="main"] [role="row"]';
+const LIST_FILE_SEL = 'a[href*="attid="], a[href*="view=att"], [download_url], .brc [role="link"], .brc a, .brg';
+const OPENED_EMAIL_SEL = 'div.adn, div.a3s, [role="dialog"]';
+
 export const gmail: WebmailAdapter = {
   name: 'gmail',
   authSignals: true,
+  listAttachmentAt(el: Element): HTMLElement | null {
+    const chip = closestEl(el, LIST_FILE_SEL);
+    if (!chip || !closestEl(chip, LIST_ROW_SEL) || closestEl(chip, OPENED_EMAIL_SEL)) return null;
+    return chip as HTMLElement;
+  },
   matches: (url) => url.hostname === 'mail.google.com',
   extractAll(doc): ExtractedEmail[] {
     const containers = [...doc.querySelectorAll<HTMLElement>('div.a3s')].filter(

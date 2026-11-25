@@ -40,4 +40,9 @@ export interface WebmailAdapter {
    * keeps such emails' attachments locked (see evaluateAndRender in content.ts).
    */
   authSignals?: boolean;
+  /**
+   * The attachment button `el` belongs to when it sits in the inbox/list view, outside any opened email (Gmail shows
+   * file buttons on list rows). Such a file opens without the email ever being scanned, so the click is refused.
+   */
+  listAttachmentAt?(el: Element): HTMLElement | null;
 }

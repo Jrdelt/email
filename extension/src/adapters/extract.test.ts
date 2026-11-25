@@ -328,3 +328,22 @@ describe('bodyText on one huge text node', () => {
     expect(t).toBe(`${'a'.repeat(MAX_BODY_CHARS / 2)}\n${`${'a'.repeat(MAX_BODY_CHARS - 10)}MIDDLE${'b'.repeat(5000)}`.slice(-MAX_BODY_CHARS / 2)}`);
   });
 });
+
+describe('Gmail inbox-list file buttons', () => {
+  it('recognises file buttons on list rows but not the row itself or files inside an opened email', async () => {
+    const { gmail } = await import('./gmail');
+    document.body.innerHTML = `<div role="main"><table><tbody>
+      <tr class="zA zE" role="row" id="row"><td><span class="yP" email="it@evil.example" name="IT Desk">IT Desk</span></td>
+        <td><span class="bog" id="subj">Invoice</span>
+          <div class="brc"><div class="brg" role="link" tabindex="0" id="chip"><span id="chiptext">invoice.html</span></div></div>
+          <a id="dl" href="https://mail.google.com/mail/u/0/?ui=2&ik=x&attid=0.1&permmsgid=msg-f:1&view=att&disp=safe">invoice.html</a>
+        </td></tr></tbody></table></div>
+      <div class="adn"><div class="a3s"><a id="inmail" href="https://mail.google.com/mail/u/0/?view=att&attid=0.2">open.pdf</a></div></div>`;
+    const at = (id: string) => gmail.listAttachmentAt!(document.getElementById(id)!);
+    expect(at('chiptext')?.id).toBe('chip');
+    expect(at('dl')?.id).toBe('dl');
+    expect(at('subj')).toBeNull();
+    expect(at('row')).toBeNull();
+    expect(at('inmail')).toBeNull();
+  });
+});
