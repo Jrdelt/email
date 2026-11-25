@@ -74,3 +74,14 @@ describe('brand claims in the brand\'s own spelling', () => {
     expect(w('Chase Smith', 'chase.smith@gmail.com')).toEqual([]);
   });
 });
+
+describe('country-code second-level domains', () => {
+  it('keeps unrelated domains under com.pl apart, so a foreign relay blocks auto-trust', () => {
+    expect(registrableDomain('mail.mybank.com.pl')).toBe('mybank.com.pl');
+    expect(registrableDomain('www.bankhapoalim.co.il')).toBe('bankhapoalim.co.il');
+    const s = analyzeSender('My Bank', 'alerts@mybank.com.pl', [], { viaDomain: 'mail.evil-relay.com.pl' });
+    expect(s.viaDomain).toBe('mail.evil-relay.com.pl');
+    expect(canTrustByAllowlist(s)).toBe(false);
+    expect(canTrustByAllowlist(analyzeSender('My Bank', 'alerts@mybank.com.pl', [], { viaDomain: 'mta.mybank.com.pl' }))).toBe(true);
+  });
+});

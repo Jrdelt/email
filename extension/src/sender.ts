@@ -1,6 +1,6 @@
 import { normalizeSender } from './allowlist';
 import { BRANDS, FREEMAIL, KNOWN_ESP_DOMAINS, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
-import { hostOf, isInternational, isValidDomain, registrableDomain } from './domain';
+import { hostOf, isInternational, isMultiPartSuffix, isValidDomain, registrableDomain } from './domain';
 import type { Link } from './features';
 
 export interface SenderInfo {
@@ -72,7 +72,10 @@ export function analyzeSender(
     warnings.push('Webmail could not verify that this sender is genuine');
   }
 
-  if (validVia && viaReg && registrable && viaReg !== registrable) {
+  // A relay only counts as the sender's own organisation when the registrable domains match and are not a bare
+  // public suffix (two unrelated domains under com.pl must not look like the same organisation).
+  const sameOrgVia = viaReg === registrable && !isMultiPartSuffix(registrable);
+  if (validVia && viaReg && registrable && !sameOrgVia) {
     info.viaDomain = validVia;
     const labels = validVia.split('.');
     const hasNumericLabel = labels.some((l) => /^\d+$/.test(l));
@@ -145,7 +148,8 @@ export function canTrustByAllowlist(info: SenderInfo): boolean {
   if (!info.valid || info.unauthenticated || info.authIssue) return false;
   if (info.viaDomain) {
     const viaReg = registrableDomain(info.viaDomain);
-    if (viaReg && viaReg !== info.registrable && !KNOWN_ESP_DOMAINS.has(viaReg)) return false;
+    const sameOrg = viaReg === info.registrable && !isMultiPartSuffix(info.registrable);
+    if (viaReg && !sameOrg && !KNOWN_ESP_DOMAINS.has(viaReg)) return false;
   }
   return true;
 }

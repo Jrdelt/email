@@ -55,6 +55,23 @@ MULTI_SUFFIXES = frozenset({
     "com.tr", "co.kr", "com.hk", "com.tw", "com.ar", "co.id", "com.my", "com.ph", "com.vn",
 })
 
+# Generic second-level labels under 2-letter country TLDs and CentralNic-style suffixes (mirror of domain.ts).
+GENERIC_SLDS = frozenset({
+    "com", "net", "org", "co", "gov", "edu", "ac", "or", "ne", "go", "gob", "mil", "nic", "ltd", "plc", "sch", "nom",
+    "info", "biz",
+})
+EXTRA_SUFFIXES = frozenset({
+    "us.com", "uk.com", "eu.com", "ru.com", "sa.com", "za.com", "br.com", "cn.com", "de.com", "jpn.com", "gb.net", "uk.net",
+})
+
+
+def _is_multi_part_suffix(two_labels: str) -> bool:
+    sld, _, tld = two_labels.partition(".")
+    if not sld or not tld or "." in tld:
+        return False
+    return two_labels in MULTI_SUFFIXES or two_labels in EXTRA_SUFFIXES or (len(tld) == 2 and sld in GENERIC_SLDS)
+
+
 # Intentionally omits common non-web file extensions (pdf, js, py, sh, pl, rs, md, zip, mov).
 COMMON_TLDS = frozenset({
     "com", "net", "org", "edu", "gov", "mil", "int", "io", "co", "ai", "app", "dev", "me",
@@ -143,7 +160,7 @@ def _registrable(host: str) -> str:
     parts = [p for p in cleaned.split(".") if p]
     if len(parts) <= 2:
         return ".".join(parts)
-    n = 3 if ".".join(parts[-2:]) in MULTI_SUFFIXES else 2
+    n = 3 if _is_multi_part_suffix(".".join(parts[-2:])) else 2
     return ".".join(parts[-n:])
 
 

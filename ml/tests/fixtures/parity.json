@@ -550,5 +550,59 @@
       "urgency_hits": 6,
       "body_len": 142
     }
+  },
+  {
+    "name": "cctld_generic_suffix_co_il",
+    "sender": "alerts@mail.bankhapoalim.co.il",
+    "body": "Statement ready",
+    "links": [
+      {
+        "text": "https://www.bankhapoalim.co.il/login",
+        "href": "https://bankhapoalim-secure-login.co.il/login"
+      },
+      {
+        "text": "Account",
+        "href": "https://www.bankhapoalim.co.il/account"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 15
+    }
+  },
+  {
+    "name": "cctld_generic_suffix_com_pl_and_centralnic",
+    "sender": "news@allegro.com.pl",
+    "body": "Hi",
+    "links": [
+      {
+        "text": "allegro.com.pl",
+        "href": "https://allegro.com.pl/x"
+      },
+      {
+        "text": "Shop",
+        "href": "https://shop.us.com/y"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 2
+    }
   }
 ]

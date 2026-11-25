@@ -6,6 +6,25 @@ const MULTI_SUFFIXES = new Set([
   'com.tr', 'co.kr', 'com.hk', 'com.tw', 'com.ar', 'co.id', 'com.my', 'com.ph', 'com.vn',
 ]);
 
+// Generic second-level labels under 2-letter country TLDs (co.il, com.pl, org.br, ac.jp, gob.mx, ...) and the
+// common CentralNic-style suffixes. Without them every domain under such a suffix collapses to the suffix itself,
+// merging unrelated organisations. Mirrored in ml/src/phishml/features.py (parity).
+const GENERIC_SLDS = new Set([
+  'com', 'net', 'org', 'co', 'gov', 'edu', 'ac', 'or', 'ne', 'go', 'gob', 'mil', 'nic', 'ltd', 'plc', 'sch', 'nom',
+  'info', 'biz',
+]);
+const EXTRA_SUFFIXES = new Set([
+  'us.com', 'uk.com', 'eu.com', 'ru.com', 'sa.com', 'za.com', 'br.com', 'cn.com', 'de.com', 'jpn.com', 'gb.net', 'uk.net',
+]);
+
+/** True when a two-label name is itself a public suffix (e.g. com.pl, co.il, us.com). */
+export function isMultiPartSuffix(twoLabels: string): boolean {
+  const dot = twoLabels.indexOf('.');
+  if (dot <= 0 || twoLabels.indexOf('.', dot + 1) !== -1) return false;
+  const [sld, tld] = [twoLabels.slice(0, dot), twoLabels.slice(dot + 1)];
+  return MULTI_SUFFIXES.has(twoLabels) || EXTRA_SUFFIXES.has(twoLabels) || (tld.length === 2 && GENERIC_SLDS.has(sld));
+}
+
 const DOMAIN_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 export const IP_V4_RE = /^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 
@@ -46,7 +65,7 @@ export function registrableDomain(host: string): string {
   if (!cleaned || isIpHost(cleaned)) return cleaned;
   const parts = cleaned.split('.').filter(Boolean);
   if (parts.length <= 2) return parts.join('.');
-  const n = MULTI_SUFFIXES.has(parts.slice(-2).join('.')) ? 3 : 2;
+  const n = isMultiPartSuffix(parts.slice(-2).join('.')) ? 3 : 2;
   return parts.slice(-n).join('.');
 }
 
