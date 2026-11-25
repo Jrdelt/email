@@ -160,6 +160,23 @@ describe('false-positive report redaction', () => {
     for (const leak of ['Jane', 'Bob', 'MRI', '192.168', '2001:db8', 'pat@', 'clinic.example']) expect(text).not.toContain(leak);
     expect(r!.reasons[0]).toContain('Attachment "[file]"');
   });
+
+  it('redacts filenames that contain quotes and look-alike (IDN) domains', async () => {
+    const kv = memoryKV();
+    await recordFalsePositive(kv, {
+      score: 0.4,
+      level: 'suspicious',
+      reasons: [
+        'Attachment "Jane "Doe" is MRI.pdf.html" is an HTML/SVG web file (.html) commonly used for offline phishing pages',
+        "The sender's website (pаypal-clínica.com) uses lookalike characters",
+        'Claims to be PayPal, but was sent from clínica-pagos.es',
+      ],
+    });
+    const text = (await listReports(kv))[0]!.reasons.join('\n');
+    for (const leak of ['Jane', 'Doe', 'MRI', 'clínica', 'pаypal']) expect(text).not.toContain(leak);
+    expect(text).toContain('is an HTML/SVG web file');
+    expect(text).toContain('Claims to be PayPal');
+  });
 });
 
 describe('normalizeSender ASCII-only', () => {

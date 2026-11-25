@@ -1,6 +1,6 @@
 # Privacy Policy for Phishing Email Detector
 
-**Last updated:** November 23, 2026
+**Last updated:** November 25, 2026
 
 Phishing Email Detector checks emails you open in supported webmail services (**Gmail / Google Workspace**, **Outlook on the web / Microsoft 365**, **Apple iCloud Mail**, **Yahoo Mail**, and **Proton Mail**) directly inside your browser to warn about phishing, deceptive links, and unsafe attachments.
 
@@ -19,8 +19,8 @@ All extension state is stored **exclusively on your device** using browser local
 - **Trusted senders (`trustedSenders` in `storage.local`):** Exact email addresses you explicitly choose to trust via *"Always trust sender"*.
 - **Trusted emails (`trustedEmails` in `storage.local`, up to 500 entries):** One-way SHA-256 cryptographic hashes only (no email text, links, attachment names, or sender addresses are stored) so emails you unlock with *"I trust this email"* stay unlocked across page refreshes.
 - **False-positive notes (`falsePositiveReports` in `storage.local`, up to 50 entries):** Verdict level, numeric score, and redacted warning reason text saved locally when you click *"Not phishing"* (attachment filenames, email addresses, full URLs, IPv4/IPv6 addresses, and domain names are stripped to `[file]`, `[address]`, `[url]`, `[ip]`, and `[domain]`). Never transmitted anywhere.
-- **Domain lookup caches (`domainIntelCache` for 24 hours, `rdapBootstrap` for 7 days in `storage.local`):** Public domain registration and DNS results keyed by registrable domain name to avoid repeated network lookups.
-- **Temporary tab & link-warning state (`tab:*` and `warn:*` in `storage.session`, in memory only):** `tab:*` holds the latest verdict for each open webmail tab so the toolbar popup can show it, including the sender's display name and address, link domains, and attachment names; it is removed when the tab closes or navigates to a new page. `warn:*` holds the clicked link's URL for the warning page; it is removed when you go back or proceed, after 1 hour, or when the browser closes. *"Clear all local data"* removes both.
+- **Domain lookup caches (`domainIntelCache` for 24 hours, or 15 minutes when a lookup only partly succeeded, `rdapBootstrap` for 7 days in `storage.local`):** Public domain registration and DNS results keyed by registrable domain name to avoid repeated network lookups. Turning on Strict Local Mode (yourself or by IT policy) deletes them.
+- **Temporary tab & link-warning state (`tab:*` and `warn:*` in `storage.session`, in memory only):** `tab:*` holds the latest verdict for each open webmail tab so the toolbar popup can show it, including the sender's display name and address, link domains, and attachment names; it is removed when the tab closes or navigates to another site. `warn:*` holds the clicked link's URL for the warning page; it is removed when you go back, proceed or close the warning tab, is dropped at the next tab close or link warning once it is 1 hour old, and is gone when the browser closes. *"Clear all local data"* removes both.
 
 ## 3. How Data Is Used
 
@@ -43,8 +43,8 @@ We do **not** sell, rent, license, or share user data with third parties. Aside 
 
 ## 6. Data Retention and User Controls
 
-- Temporary session state (`storage.session`) is deleted when you close or navigate the tab, go back from or proceed through a warning, after 1 hour (link warnings), when you click *"Clear all local data"*, or when you close your browser.
-- Cached domain lookups expire after 24 hours.
+- Temporary session state (`storage.session`) is deleted when you close the tab or leave the webmail site, go back from, proceed through or close a warning, once a link warning is over 1 hour old (at the next tab close or warning), when you click *"Clear all local data"*, or when you close your browser.
+- Cached domain lookups expire after 24 hours (15 minutes for partial results) and are deleted when Strict Local Mode is turned on.
 - You can toggle **Strict Local Mode**, view and remove **Trusted senders**, clear **Trusted emails** (or click **Undo** immediately after trusting), clear **False-positive reports**, or wipe everything with **"Clear all local data"** directly from the toolbar popup.
 - Uninstalling the extension permanently deletes all local storage associated with the extension from your browser.
 

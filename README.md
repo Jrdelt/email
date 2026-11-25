@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-26d08c.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-ffd166.svg)](extension/wxt.config.ts)
 
-Privacy-first phishing email protection that runs locally in your browser. One TypeScript codebase ([WXT](https://wxt.dev), Manifest V3, `~188 kB` unpacked / `~73 kB` zipped, zero runtime npm dependencies) ships to **Chrome, Edge, and Firefox**, paired with a reproducible Python ML feature/training pipeline (`ml/`).
+Privacy-first phishing email protection that runs locally in your browser. One TypeScript codebase ([WXT](https://wxt.dev), Manifest V3, `~202 kB` unpacked / `~79 kB` zipped, zero runtime npm dependencies) ships to **Chrome, Edge, and Firefox**, paired with a reproducible Python ML feature/training pipeline (`ml/`).
 
 > **Project status:** Active development. Heuristic content scoring, sender/authentication checks, live domain intelligence, zero-permission link & attachment locking, and click-time destination protection are shipped (**T0–T1**). Calibrated time-split ML model training and in-extension JSON inference are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) (**T2–T10**).
 

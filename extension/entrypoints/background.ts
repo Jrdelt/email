@@ -1,5 +1,5 @@
 import { isLookupDomain } from '../src/domain';
-import { getIntel, type DomainIntel } from '../src/domainIntel';
+import { getIntel, type DomainIntel, type FetchFn } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { MAX_ATTACHMENT_NAMES } from '../src/attachments';
 import { MAX_LINKS, capLinkText } from '../src/adapters/extract';
@@ -31,18 +31,19 @@ async function openTab(url: string, active: boolean, openerTabId?: number) {
   return browser.tabs.create({ url, active });
 }
 
-async function pruneOldWarnings(now: number): Promise<void> {
+/** Drop warn:* entries older than WARN_TTL_MS, and those of a warning tab that was just closed. */
+async function pruneOldWarnings(now: number, closedTabId?: number): Promise<void> {
   const store = browser.storage.session;
   if (!store?.get || !store?.remove) return;
   try {
     const all = (await (store.get as (k?: null) => Promise<Record<string, unknown>>)(null)) ?? {};
     const stale = Object.entries(all)
-      .filter(
-        ([k, v]) =>
-          k.startsWith('warn:') &&
-          typeof (v as { createdAt?: unknown })?.createdAt === 'number' &&
-          now - (v as { createdAt: number }).createdAt > WARN_TTL_MS,
-      )
+      .filter(([k, v]) => {
+        if (!k.startsWith('warn:') || !v || typeof v !== 'object') return false;
+        const e = v as { createdAt?: unknown; warnTabId?: unknown };
+        if (closedTabId !== undefined && e.warnTabId === closedTabId) return true;
+        return typeof e.createdAt === 'number' && now - e.createdAt > WARN_TTL_MS;
+      })
       .map(([k]) => k);
     if (stale.length) await store.remove(stale);
   } catch {
@@ -50,17 +51,55 @@ async function pruneOldWarnings(now: number): Promise<void> {
   }
 }
 
+const originOf = (url?: string): string => {
+  try {
+    return url ? new URL(url).origin : '';
+  } catch {
+    return '';
+  }
+};
+
 export default defineBackground(() => {
   const inflight = new Map<string, Promise<DomainIntel>>();
-  let lookupCachesCleared = false;
+  // Strict Local Mode as last read (user setting or managed policy). Turning it on purges the lookup caches here,
+  // so a policy pushed by IT applies even though content scripts then never ask for a lookup. Every request and
+  // cache write of an in-flight lookup re-checks it, and any purge bumps `generation` so a lookup that started
+  // before cannot write its results back.
+  let strictNow = false;
+  let generation = 0;
+  const refreshStrict = async (): Promise<boolean> => {
+    const { strictLocalMode } = await getSettings(browser.storage.local, browser.storage.managed);
+    if (strictLocalMode && !strictNow) {
+      generation++;
+      inflight.clear();
+      await clearLookupCaches(browser.storage.local).catch(() => {});
+    }
+    strictNow = strictLocalMode;
+    return strictNow;
+  };
+  void refreshStrict();
+  browser.storage?.onChanged?.addListener((changes: Record<string, { newValue?: unknown }>, area: string) => {
+    if (area === 'managed' || (area === 'local' && 'privacySettings' in changes)) void refreshStrict();
+    // Cleared from elsewhere (popup "Clear all local data"): results of lookups already running are discarded.
+    if (area === 'local' && changes.domainIntelCache && changes.domainIntelCache.newValue === undefined) generation++;
+  });
 
   browser.tabs?.onRemoved?.addListener((tabId: number) => {
     void browser.storage.session?.remove?.(`tab:${tabId}`).catch(() => {});
-    void pruneOldWarnings(Date.now());
+    void pruneOldWarnings(Date.now(), tabId);
   });
-  // A tab that starts loading a new page drops its stored verdict; webmail content scripts re-send theirs.
-  browser.tabs?.onUpdated?.addListener((tabId: number, changeInfo: { status?: string }) => {
-    if (changeInfo.status === 'loading') void browser.storage.session?.remove?.(`tab:${tabId}`)?.catch(() => {});
+  // A tab that starts loading a page of another site drops its stored verdict. Subframe loads and same-site
+  // navigations also report 'loading'; there the webmail's content script keeps or replaces the verdict itself.
+  browser.tabs?.onUpdated?.addListener((tabId: number, changeInfo: { status?: string; url?: string }, tab?: { url?: string }) => {
+    if (changeInfo.status !== 'loading') return;
+    const key = `tab:${tabId}`;
+    void (async () => {
+      const store = browser.storage.session;
+      const stored = (await store.get(key))[key] as { origin?: unknown } | null | undefined;
+      if (stored === undefined) return;
+      const origin = originOf(changeInfo.url ?? tab?.url);
+      if (!origin || !stored || stored.origin !== origin) await store.remove(key);
+    })().catch(() => {});
   });
 
   const handleMessage = (
@@ -98,27 +137,30 @@ export default defineBackground(() => {
       isSupportedWebmailUrl(sender.url) &&
       (sender.frameId === 0 || frameRoleOf(sender.url) === 'app')
     ) {
-      void browser.storage.session?.set?.({ [`tab:${sender.tab.id}`]: m.payload })?.catch(() => {});
+      const payload = m.payload && typeof m.payload === 'object' ? { ...m.payload, origin: originOf(sender.url) } : null;
+      void browser.storage.session?.set?.({ [`tab:${sender.tab.id}`]: payload })?.catch(() => {});
       return undefined;
     }
     if (m?.type === 'domainIntel' && typeof m.domain === 'string' && isLookupDomain(m.domain)) {
       const domain = m.domain;
       return (async () => {
-        const settings = await getSettings(browser.storage.local, browser.storage.managed);
-        if (settings.strictLocalMode) {
-          // Also covers Strict Local Mode enforced by managed policy: drop old lookup results once per worker.
-          if (!lookupCachesCleared) {
-            lookupCachesCleared = true;
-            await clearLookupCaches(browser.storage.local).catch(() => {});
-          }
-          return null;
-        }
+        if (await refreshStrict()) return null;
         let p = inflight.get(domain);
         if (!p) {
-          p = getIntel(browser.storage.local, domain, (u, i) => fetch(u, i)).finally(() => inflight.delete(domain));
+          const gen = generation;
+          const allowed = () => !strictNow && gen === generation;
+          const guardedFetch: FetchFn = (u, i) => (allowed() ? fetch(u, i) : Promise.reject(new Error('lookups stopped')));
+          const kv = {
+            get: (k: string) => browser.storage.local.get(k),
+            set: async (items: Record<string, unknown>) => {
+              if (allowed()) await browser.storage.local.set(items);
+            },
+          };
+          p = getIntel(kv, domain, guardedFetch).finally(() => inflight.delete(domain));
           inflight.set(domain, p);
         }
-        return p;
+        const result = await p;
+        return strictNow ? null : result;
       })();
     }
     if (
@@ -146,7 +188,12 @@ export default defineBackground(() => {
       return (async () => {
         await pruneOldWarnings(now);
         await browser.storage.session?.set?.({ [`warn:${id}`]: entry });
-        await openTab(browser.runtime.getURL(`/warning.html?id=${encodeURIComponent(id)}`), true, tabId);
+        const tab = await openTab(browser.runtime.getURL(`/warning.html?id=${encodeURIComponent(id)}`), true, tabId);
+        // Remember which tab shows it, so closing that tab removes the entry (it holds the full clicked URL).
+        if (tab?.id !== undefined) {
+          const cur = (await browser.storage.session.get(`warn:${id}`))[`warn:${id}`];
+          if (cur && typeof cur === 'object') await browser.storage.session.set({ [`warn:${id}`]: { ...cur, warnTabId: tab.id } });
+        }
       })();
     }
     if (

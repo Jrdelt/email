@@ -91,3 +91,12 @@ describe('Strict Local Mode clears lookup caches', () => {
     expect(Object.keys((await kv.get('domainIntelCache')).domainIntelCache as object)).toEqual([]);
   });
 });
+
+describe('unreadable settings', () => {
+  it('assume Strict Local Mode when the local setting cannot be read (managed policy still wins)', async () => {
+    const broken = { get: async () => { throw new Error('io'); } };
+    expect((await getSettings(broken)).strictLocalMode).toBe(true);
+    const managed = { get: async (k: string) => (k === 'strictLocalMode' ? { strictLocalMode: false } : {}) };
+    expect((await getSettings(broken, managed)).strictLocalMode).toBe(false);
+  });
+});

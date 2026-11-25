@@ -13,7 +13,7 @@ Read `docs/ROADMAP.md` for the task list. Pick the first unchecked task; do one 
   When Strict Local Mode (`src/settings.ts` + `public/managed_schema.json`) is enabled, **zero** network traffic leaves the
   browser. Otherwise, the ONLY network traffic is domain lookups in `src/domainIntel.ts`, run from the background script:
   the sender's or clicked external destination's registrable domain (validated by `isValidDomain`) sent to IANA/registry
-  RDAP (`rdap.org` fallback), `cloudflare-dns.com` and `dns.google` (URIBL fallback), cached 24 h. Do not add endpoints
+  RDAP (`rdap.org` fallback), `cloudflare-dns.com` and `dns.google` (URIBL fallback), cached 24 h (15 min for partial results). Do not add endpoints
   or send anything else without updating `docs/privacy.md` and `docs/hipaa-and-compliance.md`.
 - **Lock links and attachments:** any warning (content phishing flag, sender warning, or domain/spam warning) pauses all links (`a`, `area`, SVG `xlink:href`), `<a ping>`, embedded image links, image maps, forms, and `[formaction]` controls (including `keydown` `Enter`/`Space` and dynamically mutated DOM additions) until the user unlocks the email or trusts the sender. Any attachment (native webmail attachment shelf/cards or inline `download`/`data:`/`blob:` anchors) from an **untrusted** email is always blocked (`src/ui/attachmentLock.ts` + `src/attachments.ts`) even when the body scores safe or the banner is dismissed; never block reading the email itself.
 - **Parity contract:** `ml/src/phishml/features.py` and `extension/src/features.ts` must produce identical features.

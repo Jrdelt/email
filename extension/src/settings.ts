@@ -47,6 +47,7 @@ export async function getSettings(localKV: ReadableKV, managedKV?: ReadableKV): 
 
   let localStrict = false;
   let localNoReports = false;
+  let localUnreadable = false;
   try {
     const raw = (await localKV.get(SETTINGS_KEY))[SETTINGS_KEY];
     if (raw && typeof raw === 'object') {
@@ -55,10 +56,11 @@ export async function getSettings(localKV: ReadableKV, managedKV?: ReadableKV): 
       localNoReports = obj.disableLocalReports === true;
     }
   } catch {
-    // Default safely when storage read fails.
+    // The user's choice cannot be read: assume Strict Local Mode rather than risk lookups they turned off.
+    localUnreadable = true;
   }
 
-  const strictLocalMode = managedStrict !== undefined ? managedStrict : localStrict;
+  const strictLocalMode = managedStrict !== undefined ? managedStrict : localStrict || localUnreadable;
   const disableLocalReports = managedNoReports !== undefined ? managedNoReports : localNoReports;
   const managedLocked = managedStrict !== undefined;
   return { strictLocalMode, disableLocalReports, managedLocked };
