@@ -10,7 +10,19 @@
 // when the form is recognised as a <form>. Not emulated: getAttribute and action, which happy-dom's own selector
 // matching and form handling read; those inputs are still in the markup.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { $, type Msg, bootContent, click, gmailMessage, lastVerdict, settled, submit } from './harness';
+import {
+  $,
+  type Msg,
+  bootContent,
+  click,
+  gmailMessage,
+  lastVerdict,
+  lookups,
+  quietly,
+  settled,
+  submit,
+  verdictsOf,
+} from './harness';
 
 const EMULATED = [
   'closest', 'contains', 'matches', 'hasAttribute', 'querySelector', 'querySelectorAll',
@@ -42,7 +54,7 @@ let sent: Msg[];
 
 beforeAll(async () => {
   ({ sent } = await bootContent(PAGE, { beforeMain: () => clobber($('f')) }));
-  await settled(sent);
+  await quietly(settled(sent));
 });
 
 describe('content.ts: phishing email with a clobbering <form>', () => {
@@ -54,9 +66,14 @@ describe('content.ts: phishing email with a clobbering <form>', () => {
     expect(typeof form.localName).not.toBe('string');
   });
 
+  it('completes the scan of the clobbered page: a verdict is sent and the sender domain looked up', () => {
+    expect(verdictsOf(sent).length, 'verdicts sent by the scan of the clobbered page').toBeGreaterThan(0);
+    expect(lookups(sent)).toEqual(['paypa1-secure.example']);
+  });
+
   it('still scores the email, including the form action, and locks its body', () => {
     const v = lastVerdict(sent);
-    expect(v).toMatchObject({ verdict: { level: 'likely-phishing' }, trusted: false });
+    expect(v, 'verdict').toMatchObject({ verdict: { level: 'likely-phishing' }, trusted: false });
     // Only the form posts to a numeric address: this finding needs tagOf(form) === 'form' despite the clobbering.
     expect(v!.verdict.reasons).toContain('A link goes to a numeric web address instead of a real website');
     expect(document.querySelector('div.a3s')!.hasAttribute('data-ped-locked')).toBe(true);
@@ -65,11 +82,11 @@ describe('content.ts: phishing email with a clobbering <form>', () => {
 
   it('stashes the form action and cancels submit, the submit button and the link', () => {
     const form = $('f');
-    expect(Element.prototype.hasAttribute.call(form, 'action')).toBe(false);
+    expect(Element.prototype.hasAttribute.call(form, 'action'), 'live form action').toBe(false);
     expect(Element.prototype.getAttribute.call(form, 'data-ped-action')).toBe(ACTION);
-    expect(submit(form)).toBe(true);
-    expect(click($('go'))).toBe(true);
-    expect(click($('link'))).toBe(true);
+    expect(submit(form), 'submit cancelled').toBe(true);
+    expect(click($('go')), 'submit button click cancelled').toBe(true);
+    expect(click($('link')), 'link click cancelled').toBe(true);
     expect(sent.some((m) => m.type === 'openSafeLink' || m.type === 'openWarning')).toBe(false);
   });
 });

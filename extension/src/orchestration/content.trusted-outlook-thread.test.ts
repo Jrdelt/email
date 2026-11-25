@@ -5,7 +5,7 @@
 // attachment notice must never become the thread's banner and hide the impersonator's warning, and the impersonator
 // must not pause the trusted sender's links.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { $, type Msg, bootContent, fakeBrowser, lastVerdict, tick, until } from './harness';
+import { $, type Msg, bootContent, fakeBrowser, lastVerdict, quietly, tick, until, verdictsOf } from './harness';
 
 const TRUSTED = 'anna@smallfirm.example';
 const PAGE = `<div data-app-section="ConversationContainer">
@@ -24,20 +24,22 @@ beforeAll(async () => {
     beforeMain: () =>
       fakeBrowser.storage.local.set({ trustedSenders: [TRUSTED], privacySettings: { strictLocalMode: true } }),
   }));
-  await until(() => expect(lastVerdict(sent)).toMatchObject({ sender: { address: 'service@paypa1-alerts.example' } }));
+  // Strict Local Mode: no lookups, so the first verdict is the only one. Which message it reports is tested below.
+  await quietly(until(() => expect(verdictsOf(sent).length).toBeGreaterThan(0)));
   await tick();
 });
 
 describe('content.ts: trusted sender and impersonator in one Outlook thread', () => {
   it("reports the impersonator's warning, not the trusted sender's attachment notice", () => {
-    const v = lastVerdict(sent) as { sender: { warnings: string[] } };
-    expect(v.sender.warnings.join(' ')).toMatch(/Claims to be PayPal/);
+    const v = lastVerdict(sent);
+    expect(v, 'thread verdict').toMatchObject({ sender: { address: 'service@paypa1-alerts.example' } });
+    expect(v!.sender.warnings.join(' ')).toMatch(/Claims to be PayPal/);
   });
 
   it("pauses the impersonator's links only, and keeps the trusted sender's attachment locked", () => {
-    expect($('b2').hasAttribute('data-ped-locked')).toBe(true);
-    expect($('b1').hasAttribute('data-ped-locked')).toBe(false);
+    expect($('b2').hasAttribute('data-ped-locked'), "impersonator's links locked").toBe(true);
+    expect($('b1').hasAttribute('data-ped-locked'), "trusted sender's links locked").toBe(false);
     expect($('l1').getAttribute('href')).toBe('https://smallfirm.example/x');
-    expect($('att').hasAttribute('data-ped-att-locked')).toBe(true);
+    expect($('att').hasAttribute('data-ped-att-locked'), "trusted sender's attachment locked").toBe(true);
   });
 });

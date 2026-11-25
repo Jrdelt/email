@@ -2,6 +2,7 @@
 // copy of the background (vi.resetModules + fakeBrowser.reset(), which also drops the previous copy's listeners)
 // and talks to it through runtime.onMessage / tabs / storage events exactly as the browser would.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WARN_TTL_MS } from '../linkGuard';
 import { GMAIL_URL, fakeBrowser, until } from './harness';
 
 interface Sender {
@@ -301,5 +302,42 @@ describe('B4 iCloud relays are stateless and trust only the browser-verified sen
       [4, { type: 'icloudLock', locked: true, attachmentsLocked: false, sig: 'abc123' }, { frameId: 9 }],
       [4, { type: 'icloudLock', locked: true, attachmentsLocked: false, sig: 'abc123' }, { frameId: 12 }],
     ]);
+  });
+});
+
+describe('B5 warn:* entries (the full clicked URL for warning.html) expire', () => {
+  const MINUTE = 60_000;
+  const entry = (href: string, ageMs: number, warnTabId?: number) => ({
+    href,
+    host: new URL(href).hostname,
+    registrable: new URL(href).hostname,
+    level: 'danger',
+    reasons: [],
+    createdAt: Date.now() - ageMs,
+    ...(warnTabId === undefined ? {} : { warnTabId }),
+  });
+  const keys = async () => (await warnEntries()).map(([k]) => k).sort();
+
+  it('drops entries older than WARN_TTL_MS on the next openWarning and keeps fresh ones', async () => {
+    const { send, createTab } = await boot();
+    await fakeBrowser.storage.session.set({
+      'warn:stale': entry('https://old.example/login', WARN_TTL_MS + MINUTE),
+      'warn:fresh': entry('https://recent.example/login', WARN_TTL_MS - MINUTE),
+    });
+    await send({ type: 'openWarning', href: 'https://evil.example/login', level: 'danger' }, gmailTop());
+    const { url } = createTab.mock.calls[0]![0] as { url: string };
+    const id = new URL(url).searchParams.get('id');
+    expect(await keys(), 'warn:* entries after openWarning').toEqual([`warn:${id}`, 'warn:fresh'].sort());
+  });
+
+  it('when a tab closes, drops expired entries and the entry of the warning shown in that tab', async () => {
+    await boot();
+    await fakeBrowser.storage.session.set({
+      'warn:stale': entry('https://old.example/login', WARN_TTL_MS + MINUTE, 40),
+      'warn:closed': entry('https://shown.example/login', MINUTE, 41),
+      'warn:open': entry('https://other.example/login', MINUTE, 42),
+    });
+    await (fakeBrowser.tabs.onRemoved as unknown as { trigger: (...a: unknown[]) => Promise<unknown> }).trigger(41, {});
+    await until(async () => expect(await keys(), 'warn:* entries after tab 41 closed').toEqual(['warn:open']));
   });
 });

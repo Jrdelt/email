@@ -5,7 +5,19 @@
 // links but keeps the email's attachments locked (entrypoints/content.ts evaluateAndRender "attachmentsOnly").
 // The Gmail counterpart, where sender trust also opens attachments, is content.trusted-gmail-download.test.ts.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { $, type Msg, bootContent, click, fakeBrowser, lastVerdict, navigations, press, tick, until } from './harness';
+import {
+  $,
+  type Msg,
+  bootContent,
+  click,
+  fakeBrowser,
+  lastVerdict,
+  navigations,
+  press,
+  quietly,
+  tick,
+  until,
+} from './harness';
 
 const ADDRESS = 'bob@corp.example';
 // Outlook conversation markup as in src/adapters/extract.test.ts ("attachment-only message inside a conversation").
@@ -22,9 +34,8 @@ beforeAll(async () => {
   ({ sent } = await bootContent(PAGE, {
     beforeMain: () => fakeBrowser.storage.local.set({ trustedSenders: [ADDRESS] }),
   }));
-  await until(() =>
-    expect(lastVerdict(sent)).toMatchObject({ sender: { address: ADDRESS }, attachments: { level: 'locked' } }),
-  );
+  // Any verdict for this sender: the tests below check what it decided, so a wrong decision names itself.
+  await quietly(until(() => expect(lastVerdict(sent)).toMatchObject({ sender: { address: ADDRESS } })));
   await tick();
 });
 
@@ -45,7 +56,7 @@ describe('content.ts: trusted sender on Outlook, attachment card', () => {
   });
 
   it('locks the attachment card and cancels its click and keyboard activation', () => {
-    expect($('att').hasAttribute('data-ped-att-locked')).toBe(true);
+    expect($('att').hasAttribute('data-ped-att-locked'), 'attachment card locked').toBe(true);
     expect(click($('attbtn'))).toBe(true);
     expect(press($('attbtn'), 'Enter')).toBe(true);
     expect(document.getElementById('ped-toast-host')).not.toBeNull(); // "attachment blocked" notice

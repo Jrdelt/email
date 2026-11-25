@@ -139,6 +139,59 @@ export const navigations = (sent: readonly Msg[], from = 0): Msg[] =>
 /** Let pending microtasks, MutationObserver callbacks and zero-delay timers run (far shorter than a scan debounce). */
 export const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
+/**
+ * For beforeAll: wait as `wait` does, but never fail the hook. A failed hook skips every test of the file and
+ * reports only the wait's own message; the tests assert what they need, so a broken run names what broke.
+ */
+export async function quietly(wait: Promise<unknown>): Promise<void> {
+  await wait.catch(() => undefined);
+}
+
+/**
+ * The warning banner (src/ui/banner.ts) lives in a closed shadow root that page scripts cannot reach. Call this
+ * before bootContent: it records every shadow root the page creates, so a test can press the banner's own buttons
+ * the way a user does (as src/ui/ui.test.ts does for the banner alone).
+ */
+export function captureBanner(): {
+  /** The banner's shadow root, or null when no banner is shown. */
+  root: () => ShadowRoot | null;
+  /** The shown banner's button with exactly this text or aria-label (throws when there is none). */
+  button: (label: string) => HTMLButtonElement;
+  /** All of the banner's text (empty when no banner is shown). */
+  text: () => string;
+} {
+  const roots = new WeakMap<Element, ShadowRoot>();
+  const attach = HTMLElement.prototype.attachShadow;
+  vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+    const shadow = attach.call(this, init);
+    roots.set(this, shadow);
+    return shadow;
+  });
+  const root = () => {
+    const host = document.getElementById('ped-banner-host');
+    return host ? (roots.get(host) ?? null) : null;
+  };
+  return {
+    root,
+    button: (label) => {
+      const shown = root();
+      if (!shown) throw new Error(`no banner is shown (looking for its "${label}" button)`);
+      const buttons = [...shown.querySelectorAll('button')];
+      const found = buttons.find((b) => b.textContent === label || b.getAttribute('aria-label') === label);
+      if (!found) {
+        const labels = buttons.map((b) => b.textContent || b.getAttribute('aria-label'));
+        throw new Error(`the banner has no "${label}" button (it has: ${labels.join(', ')})`);
+      }
+      return found;
+    },
+    text: () =>
+      [...(root()?.children ?? [])]
+        .filter((el) => el.localName !== 'style')
+        .map((el) => el.textContent)
+        .join(''),
+  };
+}
+
 export const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`#${id} not found`);

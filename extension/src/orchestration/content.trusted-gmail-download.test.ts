@@ -4,7 +4,7 @@
 // (authSignals: no "couldn't verify" badge, no unexpected "via" relay here). Sender trust then covers the whole email,
 // so its inline download is NOT attachment-locked, unlike on Outlook (content.trusted-outlook-attachment.test.ts).
 import { beforeAll, describe, expect, it } from 'vitest';
-import { $, type Msg, bootContent, click, fakeBrowser, gmailMessage, lastVerdict, until } from './harness';
+import { $, type Msg, bootContent, click, fakeBrowser, gmailMessage, lastVerdict, quietly, until } from './harness';
 
 const ADDRESS = 'jordan@northwind.example';
 const DATA_PDF = 'data:application/pdf;base64,JVBERi0xLjQK';
@@ -22,7 +22,8 @@ beforeAll(async () => {
   ({ sent } = await bootContent(PAGE, {
     beforeMain: () => fakeBrowser.storage.local.set({ trustedSenders: [ADDRESS] }),
   }));
-  await until(() => expect(lastVerdict(sent)).toMatchObject({ trusted: true }));
+  // Any verdict for this sender: the tests below check what it decided, so a wrong decision names itself.
+  await quietly(until(() => expect(lastVerdict(sent)).toMatchObject({ sender: { address: ADDRESS } })));
 });
 
 describe('content.ts: trusted sender on Gmail, inline download', () => {
@@ -34,7 +35,7 @@ describe('content.ts: trusted sender on Gmail, inline download', () => {
 
   it('leaves the inline download usable', () => {
     const dl = $('dl');
-    expect(dl.hasAttribute('data-ped-att-locked')).toBe(false);
+    expect(dl.hasAttribute('data-ped-att-locked'), 'download locked').toBe(false);
     expect(dl.getAttribute('href')).toBe(DATA_PDF);
     expect(dl.getAttribute('download')).toBe('minutes.pdf');
     expect(click(dl)).toBe(false);
