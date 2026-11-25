@@ -193,6 +193,11 @@ export default defineBackground(() => {
       }
       return undefined;
     }
+    if (m?.type === 'icloudBlocked' && sender.tab?.id !== undefined && frameRoleOf(sender.url) === 'sandbox') {
+      // Stateless relay: a paused click in a message frame asks the app frame to reopen its dismissed banner.
+      void browser.tabs.sendMessage(sender.tab.id, { type: 'icloudBlocked' }).catch(() => {});
+      return undefined;
+    }
     if (m?.type === 'icloudPing' && sender.tab?.id !== undefined && frameRoleOf(sender.url) === 'app') {
       void browser.tabs.sendMessage(sender.tab.id, { type: 'icloudPing' }).catch(() => {});
       return undefined;

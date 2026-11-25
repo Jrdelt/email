@@ -121,6 +121,26 @@ function storageChangeAffectsVerdicts(
   return affected;
 }
 
+// Documents (top page plus same-origin message iframes) whose paused-click handler reopens the banner.
+const blockedHandlerDocs = new Set<Document>();
+let currentReopen: (() => void) | null = null;
+
+/** Point every document that hosts a locked message at `handler` (or clear them all with null). */
+function setBlockedHandlers(handler: (() => void) | null, docs: Iterable<Document> = []): void {
+  for (const doc of blockedHandlerDocs) {
+    setLinkBlockedHandler(doc, null);
+    setAttachmentBlockedHandler(doc, null);
+  }
+  blockedHandlerDocs.clear();
+  currentReopen = handler;
+  if (!handler) return;
+  for (const doc of new Set([document, ...docs])) {
+    setLinkBlockedHandler(doc, handler);
+    setAttachmentBlockedHandler(doc, handler);
+    blockedHandlerDocs.add(doc);
+  }
+}
+
 function addBounded(set: Set<string>, key: string): void {
   if (set.has(key)) return;
   if (set.size >= MAX_SESSION_SET) {
@@ -464,6 +484,10 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   }
 
   let showingUndoPill = false;
+  const containerDocs = messages.flatMap((m) => {
+    const c = (m as { container?: HTMLElement }).container;
+    return c ? [ownerDocOf(c)] : [];
+  });
 
   const render = () => {
     const unlockedThread = trustedThisSession.has(threadHashKey);
@@ -513,8 +537,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     });
 
     if (!primaryBanner) {
-      setAttachmentBlockedHandler(document, null);
-      setLinkBlockedHandler(document, null);
+      setBlockedHandlers(null);
       if (!showingUndoPill) removeBanner();
       return;
     }
@@ -523,8 +546,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       if (!dismissed.delete(threadHashKey)) return;
       render();
     };
-    setAttachmentBlockedHandler(document, reopenBanner);
-    setLinkBlockedHandler(document, reopenBanner);
+    setBlockedHandlers(reopenBanner, containerDocs);
 
     if (dismissed.has(threadHashKey)) {
       removeBanner();
@@ -547,8 +569,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
             item.verdict = SAFE_VERDICT;
             item.attAnalysis = undefined;
           }
-          setAttachmentBlockedHandler(document, null);
-          setLinkBlockedHandler(document, null);
+          setBlockedHandlers(null);
           unlockAll(evaluated.map((e) => e.item.email));
           void sendRuntime({
             type: 'verdict',
@@ -636,8 +657,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     if (emails.length === 0) {
       for (const c of activeContainers) unlockLinks(c);
       if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
-      setAttachmentBlockedHandler(document, null);
-      setLinkBlockedHandler(document, null);
+      setBlockedHandlers(null);
       activeContainers = [];
       activeMessages = [];
       activeAttachmentEls = [];
@@ -805,6 +825,10 @@ function runICloudSandbox() {
   };
 
   const scheduler = createScheduler(async () => report(false));
+  // The banner lives in the app frame: a paused click here asks it (via the background relay) to reopen it.
+  const askAppToReopen = () => void sendRuntime({ type: 'icloudBlocked' });
+  setLinkBlockedHandler(document, askAppToReopen);
+  setAttachmentBlockedHandler(document, askAppToReopen);
 
   installClickGuard({
     findTarget: (a) =>
@@ -881,8 +905,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
     if (messages.length === 0) {
       setFramesLocked([...sandboxBodies.keys()], false, false);
       if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
-      setAttachmentBlockedHandler(document, null);
-      setLinkBlockedHandler(document, null);
+      setBlockedHandlers(null);
       activeMessages = [];
       activeAttachmentEls = [];
       lastKey = '';
@@ -973,6 +996,10 @@ function runICloudApp(kv: typeof browser.storage.local) {
     const m = msg as
       | { type?: string; frameId?: unknown; active?: unknown; body?: unknown; links?: unknown; attachmentNames?: unknown }
       | undefined;
+    if (m?.type === 'icloudBlocked') {
+      currentReopen?.();
+      return;
+    }
     if (m?.type !== 'icloudBody' || typeof m.frameId !== 'number') return;
     if (m.active) {
       const attachmentNames = Array.isArray(m.attachmentNames)
