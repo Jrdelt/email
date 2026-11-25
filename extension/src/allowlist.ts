@@ -69,7 +69,7 @@ export async function hashEmail(
   body: string,
   links: readonly { href: string }[],
   attachmentNames?: readonly string[],
-  auth: { unauthenticated?: boolean; viaDomain?: string } = {},
+  auth: { unauthenticated?: boolean; viaDomain?: string; attachmentCount?: number } = {},
 ): Promise<string> {
   const normSender = senderAddress.trim().toLowerCase();
   const normBody = body.replace(/\s+/g, ' ').trim();
@@ -79,7 +79,10 @@ export async function hashEmail(
     : '';
   const via = auth.viaDomain?.trim().toLowerCase() ?? '';
   const normAuth = `${auth.unauthenticated ? '\0auth:unverified' : ''}${via ? `\0via:${via}` : ''}`;
-  const bytes = new TextEncoder().encode(`v1\0${normSender}\0${normBody}\0${normLinks}${normAtts}${normAuth}`);
+  // Unnamed attachments (chips without a readable filename) still count, so an extra payload changes the hash.
+  const named = attachmentNames?.filter((n) => n.trim()).length ?? 0;
+  const normCount = (auth.attachmentCount ?? 0) > named ? `\0attn:${auth.attachmentCount}` : '';
+  const bytes = new TextEncoder().encode(`v1\0${normSender}\0${normBody}\0${normLinks}${normAtts}${normAuth}${normCount}`);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

@@ -168,3 +168,12 @@ describe('normalizeSender ASCII-only', () => {
     expect(normalizeSender('José <jose@bank.com>')).toBe('jose@bank.com');
   });
 });
+
+describe('hashEmail attachment count', () => {
+  it('counts unnamed attachments without changing fingerprints of fully named ones', async () => {
+    const base = ['a@vendor.example', 'Invoice', [], ['invoice.pdf']] as const;
+    const plain = await hashEmail(...base);
+    expect(await hashEmail(...base, { attachmentCount: 1 })).toBe(plain);
+    expect(await hashEmail(...base, { attachmentCount: 2 })).not.toBe(plain);
+  });
+});

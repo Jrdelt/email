@@ -436,6 +436,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
         const hash = await hashEmail(email.senderAddress, email.body, email.links, attNames, {
           unauthenticated: email.unauthenticated,
           viaDomain: email.viaDomain,
+          attachmentCount: attCount,
         });
         return { email, attNames, attCount, hash };
       }),
