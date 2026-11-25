@@ -492,6 +492,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   overflowCount?: number;
   trustedThisSession: Set<string>;
   dismissed: Set<string>;
+  /** The webmail's sender-verification signals are visible to the adapter (only Gmail today). */
+  authSignals: boolean;
   isStale: () => boolean;
   onEvaluated?: (items: { email: T; sender: ReturnType<typeof analyzeSender> }[]) => void;
   applyLocks: (items: { email: T; trusted: boolean; hasAttachments: boolean }[], anyLinksLocked: boolean) => void;
@@ -552,10 +554,39 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
         `Claims to be a trusted sender (${sender.address}), but failed authentication or used an unexpected relay`,
       );
     }
-    const trusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash) || allowlistTrusted;
-    const verdict: Verdict = trusted || skipped ? SAFE_VERDICT : untrustedVerdict(overflow, sender, email);
-    const attAnalysis: AttachmentAnalysis | undefined = trusted ? undefined : analyzeAttachments(attNames, attCount);
-    return { email, attNames, attCount, hash, sender, allowlistTrusted, trusted, overflow, skipped, verdict, attAnalysis };
+    const emailTrusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash);
+    // Where the adapter cannot see the webmail's sender verification, a forged copy of an allowlisted address looks
+    // identical, so sender trust keeps the email's attachments locked (an attachment banner only; links stay open
+    // unless the attachment type is itself risky, as for any unverified email). Trusting or unlocking it opens them.
+    const attachmentsOnly = allowlistTrusted && !opts.authSignals && !emailTrusted && attCount > 0 && !inOverflow;
+    const trusted = emailTrusted || (allowlistTrusted && !attachmentsOnly);
+    const verdict: Verdict = trusted || skipped || attachmentsOnly ? SAFE_VERDICT : untrustedVerdict(overflow, sender, email);
+    const bannerSender: SenderInfo = attachmentsOnly ? { ...sender, warnings: [], allowlisted: true } : sender;
+    const analysis = trusted ? undefined : analyzeAttachments(attNames, attCount);
+    const attAnalysis: AttachmentAnalysis | undefined =
+      analysis && attachmentsOnly
+        ? {
+            ...analysis,
+            reasons: [
+              "You trust this sender, but this webmail doesn't show the extension whether the email really came from them, so its attachments still need one click to open",
+              ...analysis.reasons,
+            ],
+          }
+        : analysis;
+    return {
+      email,
+      attNames,
+      attCount,
+      hash,
+      sender: bannerSender,
+      allowlistTrusted,
+      attachmentsOnly,
+      trusted,
+      overflow,
+      skipped,
+      verdict,
+      attAnalysis,
+    };
   });
   if (isStale()) return;
   onEvaluated?.(items);
@@ -564,6 +595,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   for (const item of items) {
     if (
       !item.trusted &&
+      !item.attachmentsOnly &&
       !item.overflow &&
       !item.skipped &&
       isLookupDomain(item.sender.registrable) &&
@@ -797,6 +829,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
       intelPending,
       trustedThisSession,
+      authSignals: adapter?.authSignals === true,
       dismissed,
       isStale: () => my !== token,
       onEvaluated: (items) => {
@@ -1172,6 +1205,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       messages,
       overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
       trustedThisSession,
+      authSignals: false, // iCloud shows no per-message sender verification the adapter can read
       dismissed,
       isStale: () => my !== token,
       applyLocks: (items, anyLinksLocked) => {

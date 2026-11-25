@@ -34,4 +34,10 @@ export interface WebmailAdapter {
    * them and rescans when they change, since mutations inside an iframe never reach the top-level observer.
    */
   frameDocs?(doc: Document): Document[];
+  /**
+   * True when the adapter reads the webmail's own sender-verification signals (unauthenticated badge, 'via'
+   * relay). Without them a forged copy of an allowlisted address cannot be told apart, so "Always trust sender"
+   * keeps such emails' attachments locked (see evaluateAndRender in content.ts).
+   */
+  authSignals?: boolean;
 }

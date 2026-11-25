@@ -483,11 +483,13 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
       b.disabled = false;
     }
   });
-  if (!canAllowlist) {
+  if (!canAllowlist || model.sender?.allowlisted) {
     trust.disabled = true;
-    const reasonWhy = !model.sender?.valid
-      ? "Sender address couldn't be verified"
-      : 'Sender failed authentication or used an unexpected relay';
+    const reasonWhy = model.sender?.allowlisted
+      ? 'You already trust this sender; use Unlock to open these attachments'
+      : !model.sender?.valid
+        ? "Sender address couldn't be verified"
+        : 'Sender failed authentication or used an unexpected relay';
     trust.title = reasonWhy;
     trust.setAttribute('aria-description', reasonWhy);
   }

@@ -30,7 +30,8 @@ Clicking a link or submitting a form before the 400 ms debounced scan finishes t
 
 ### 4. Spoof-Resistant Allowlist
 Sender trust (`trustedSenders`) matches exact validated email addresses only (never domains, wildcards, or display names). Whenever webmail exposes an unauthenticated badge or a conflicting non-ESP `via` relay, `canTrustByAllowlist` refuses auto-trust, disables `"Always trust sender"` in the banner, and surfaces a spoofing warning.
-- *Residual limit:* Webmail views where authentication metadata is hidden until headers are expanded.
+- *Coverage:* only the Gmail adapter reads the webmail's sender-verification signals today (`WebmailAdapter.authSignals`). On Outlook, Yahoo, Proton and iCloud a forged copy of an allowlisted address cannot be told apart, so there "Always trust sender" hides the warning banner but keeps that email's attachments locked (one Unlock or "I trust this email" opens them); risky attachment types also keep links paused, as for any unverified email.
+- *Residual limit:* Webmail views where authentication metadata is hidden until headers are expanded; on the non-Gmail adapters a spoofed trusted sender's links and content are not re-checked (the click-time guard still checks every external destination).
 
 ## Third-Party Domain Lookups & HIPAA Strict Local Mode
 

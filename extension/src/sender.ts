@@ -17,6 +17,7 @@ export interface SenderInfo {
   unauthenticated?: boolean; // true when webmail explicitly flags verification failure
   authIssue?: boolean; // true when authentication failed or relay looks suspicious
   warnings: string[]; // shown in the banner; never block anything
+  allowlisted?: boolean; // already on "Always trust sender" (attachments still checked where auth is not visible)
 }
 
 const CONFUSABLES: [RegExp, string][] = [[/0/g, 'o'], [/[1i]/g, 'l'], [/3/g, 'e'], [/5/g, 's'], [/rn/g, 'm'], [/vv/g, 'w']];

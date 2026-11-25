@@ -160,6 +160,7 @@ function extractGmailAttachments(
 // div.a3s = message body; span.gD[email] = standard sender chip; span.go.gD = Spam/via bare address; h2.hP = subject.
 export const gmail: WebmailAdapter = {
   name: 'gmail',
+  authSignals: true,
   matches: (url) => url.hostname === 'mail.google.com',
   extractAll(doc): ExtractedEmail[] {
     const containers = [...doc.querySelectorAll<HTMLElement>('div.a3s')].filter(
