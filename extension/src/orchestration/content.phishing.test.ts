@@ -4,7 +4,7 @@
 // first (debounced) scan has run; that click is held, then dropped once the scan locks the email. The verdict
 // reaches the background and every later attempt to follow a link is cancelled, including links added afterwards.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { $, type Msg, bootContent, click, gmailMessage, lastVerdict, press, settled, until, verdictsOf } from './harness';
+import { $, type Msg, bootContent, click, gmailMessage, lastVerdict, press, settled, tick, verdictsOf } from './harness';
 
 const PAGE = gmailMessage({
   name: 'PayPal Support',
@@ -57,10 +57,14 @@ describe('content.ts: phishing email in Gmail', () => {
     expect(navigations()).toEqual([]);
   });
 
-  it('pauses a link the page adds to the locked body afterwards', async () => {
+  it('pauses a link the page adds to the locked body afterwards, before any rescan', async () => {
     const mark = sent.length;
     body().insertAdjacentHTML('beforeend', '<a id="late" href="https://evil.example/step2">Continue</a>');
-    await until(() => expect($('late').hasAttribute('href')).toBe(false));
+    // The lock's own MutationObserver stashes it at once; the rescan the mutation schedules is 400 ms away.
+    await tick();
+    expect(verdictsOf(sent.slice(mark))).toEqual([]);
+    expect($('late').hasAttribute('href')).toBe(false);
+    expect($('late').getAttribute('data-ped-href')).toBe('https://evil.example/step2');
     expect(click($('late'))).toBe(true);
     await settled(sent, mark); // the rescan triggered by the new link keeps the email locked
     expect(body().hasAttribute('data-ped-locked')).toBe(true);

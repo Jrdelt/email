@@ -17,6 +17,8 @@ export interface VerdictPayload {
   verdict: { level: string; score: number; reasons: string[]; unchecked?: boolean };
   sender: { address: string; registrable: string; warnings: string[] };
   attachments?: { count: number; level: string; names: string[] };
+  /** The sender-domain lookup state shown with the verdict ('loading', 'offline', 'unavailable' or a DomainIntel). */
+  intel?: unknown;
   trusted: boolean;
 }
 
@@ -34,7 +36,8 @@ let contentBooted = false;
  * Boot entrypoints/content.ts on the current happy-dom page. The page URL comes from the test file's
  * `@vitest-environment-options` docblock. `beforeMain` runs after the page HTML is in place and before main().
  * The background is simulated: every runtime message is recorded; domain lookups answer `intel` (default
- * undefined, i.e. "lookup unavailable"; null is the background's Strict Local Mode answer).
+ * undefined, i.e. "lookup unavailable"; null is the background's Strict Local Mode answer). A function `intel` is
+ * called with the looked-up domain and may return a promise, so a test can answer each lookup when it chooses.
  */
 export async function bootContent(
   html: string,
@@ -48,7 +51,8 @@ export async function bootContent(
   const sent: Msg[] = [];
   const sendMessage = vi.fn(async (msg: Msg) => {
     sent.push(msg);
-    return msg?.type === 'domainIntel' ? opts.intel : undefined;
+    if (msg?.type !== 'domainIntel') return undefined;
+    return typeof opts.intel === 'function' ? (opts.intel as (domain: unknown) => unknown)(msg.domain) : opts.intel;
   });
   (fakeBrowser.runtime as unknown as { sendMessage: typeof sendMessage }).sendMessage = sendMessage;
   document.body.innerHTML = html;
@@ -78,7 +82,7 @@ export async function settled(sent: readonly Msg[], from = 0): Promise<void> {
     expect(lookup, 'sender domain lookup').toBeGreaterThanOrEqual(0);
     expect(sent.slice(lookup + 1).some((m) => m.type === 'verdict'), 'verdict after the lookup').toBe(true);
   });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await tick();
 }
 
 /**
@@ -107,12 +111,33 @@ function dispatch(el: Element, ev: Event): boolean {
 export const click = (el: Element, init: MouseEventInit = {}): boolean =>
   dispatch(el, new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init }));
 
-/** Keyboard activation (Enter / Space); true when the extension cancelled it. */
-export const press = (el: Element, key: 'Enter' | ' ' = 'Enter'): boolean =>
+/** Any other mouse-type event (mousedown, auxclick, dragstart, ...); true when the extension cancelled it. */
+export const fire = (el: Element, type: string, init: MouseEventInit = {}): boolean =>
+  dispatch(el, new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...init }));
+
+/** A keydown (Enter / Space activate links and buttons); true when the extension cancelled it. */
+export const press = (el: Element, key = 'Enter'): boolean =>
   dispatch(el, new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
 
 /** Form submission event; true when the extension cancelled it. */
 export const submit = (form: Element): boolean => dispatch(form, new Event('submit', { bubbles: true, cancelable: true }));
+
+/** Deliver a runtime message to the content script as the background (or its iCloud relay) would. */
+export const deliver = (msg: unknown): Promise<unknown> => {
+  const onMessage = fakeBrowser.runtime.onMessage as unknown as { trigger: (m: unknown, s: unknown) => Promise<unknown> };
+  return onMessage.trigger(msg, { id: fakeBrowser.runtime.id });
+};
+
+/** Domain lookups (type 'domainIntel') among `sent`, from index `from` on. */
+export const lookups = (sent: readonly Msg[], from = 0): unknown[] =>
+  sent.slice(from).filter((m) => m.type === 'domainIntel').map((m) => m.domain);
+
+/** Navigations the content script asked the background for (openSafeLink / openWarning), from index `from` on. */
+export const navigations = (sent: readonly Msg[], from = 0): Msg[] =>
+  sent.slice(from).filter((m) => m.type === 'openSafeLink' || m.type === 'openWarning');
+
+/** Let pending microtasks, MutationObserver callbacks and zero-delay timers run (far shorter than a scan debounce). */
+export const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 export const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
