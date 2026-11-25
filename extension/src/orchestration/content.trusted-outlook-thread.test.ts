@@ -8,13 +8,15 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { $, type Msg, bootContent, fakeBrowser, lastVerdict, quietly, tick, until, verdictsOf } from './harness';
 
 const TRUSTED = 'anna@smallfirm.example';
+// The impersonator comes first: equal ranks go to the later message, so only the trusted sender's lower rank keeps
+// its notice from becoming the thread's banner here.
 const PAGE = `<div data-app-section="ConversationContainer">
-  <div aria-label="Email message"><span class="OZZZK">Anna &lt;${TRUSTED}&gt;</span>
-    <div aria-label="Message body" id="b1">Invoice attached. <a id="l1" href="https://smallfirm.example/x">portal</a></div>
-    <div role="listitem" aria-label="Attached file invoice.pdf" id="att"><button>invoice.pdf</button></div></div>
   <div aria-label="Email message"><span class="OZZZK">PayPal Support &lt;service@paypa1-alerts.example&gt;</span>
     <div aria-label="Message body" id="b2">Hello, here is your monthly statement.
       <a id="l2" href="https://paypa1-alerts.example/s">statement</a></div></div>
+  <div aria-label="Email message"><span class="OZZZK">Anna &lt;${TRUSTED}&gt;</span>
+    <div aria-label="Message body" id="b1">Invoice attached. <a id="l1" href="https://smallfirm.example/x">portal</a></div>
+    <div role="listitem" aria-label="Attached file invoice.pdf" id="att"><button>invoice.pdf</button></div></div>
 </div>`;
 
 let sent: Msg[];

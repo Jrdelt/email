@@ -108,7 +108,9 @@ describe('content.ts: the banner buttons on an email from a sender Gmail could n
 
   it('Undo locks the links and the download again and forgets the fingerprint', async () => {
     banner.button('Undo').click();
-    await until(() => expect(linksLocked(), 'links locked').toBe(true));
+    // Undo itself must re-lock: check before the 400 ms rescan that the storage change also triggers could do it.
+    for (let i = 0; i < 5 && !linksLocked(); i++) await tick();
+    expect(linksLocked(), 'links locked by Undo itself (before any rescan)').toBe(true);
     expect(downloadLocked(), 'download locked').toBe(true);
     expect($('agenda').hasAttribute('href')).toBe(false);
     expect(await local('trustedEmails')).toEqual([]);
