@@ -30,7 +30,7 @@ const STASHED_PAIRS: readonly [attr: string, stashAttr: string][] = [
   ['formaction', ATT_FA_ATTR],
 ];
 
-const installed = new WeakSet<Document>();
+const styles = new WeakMap<Document, HTMLStyleElement>();
 const watchers = new WeakMap<HTMLElement, MutationObserver>();
 const blockedHandlers = new WeakMap<Document, () => void>();
 
@@ -67,19 +67,22 @@ function blockAttachmentEvent(e: Event): void {
   }
 }
 
+/** Idempotent, like the link lock's: document.open() erases listeners but keeps the Document object. */
 function install(doc: Document): void {
-  if (installed.has(doc)) return;
-  installed.add(doc);
   for (const type of ['click', 'auxclick', 'dblclick', 'mousedown', 'pointerdown', 'dragstart', 'submit', 'keydown']) {
     doc.addEventListener(type, blockAttachmentEvent, true);
   }
+  if (styles.get(doc)?.isConnected) return;
+  const parent = doc.head ?? doc.documentElement;
+  if (!parent) return;
   const style = doc.createElement('style');
   style.id = ATT_STYLE_ID;
   style.textContent = [
     `[${ATT_LOCK_ATTR}]{cursor:not-allowed!important;opacity:.55!important;outline:2px dashed #b91c1c!important;outline-offset:-2px!important;border-radius:8px!important}`,
     `[${ATT_LOCK_ATTR}] :is(a,area,button,[role="button"]){cursor:not-allowed!important}`,
   ].join('');
-  (doc.head ?? doc.documentElement).appendChild(style);
+  parent.appendChild(style);
+  styles.set(doc, style);
 }
 
 // What this lock removed, recorded in the isolated world (see linkLock.ts): email HTML cannot pre-seed
@@ -88,7 +91,19 @@ const stashes = new WeakMap<Element, Map<string, string>>();
 const stashedIn = new WeakMap<HTMLElement, Set<Element>>(); // locked root -> elements it stashed
 const ARIA_HOLDER = 'attachments';
 const XLINK_STASH_ATTR = 'data-ped-att-xlink-href';
-const WATCHED_ATTRS = ['href', 'xlink:href', 'download', 'download_url', 'formaction'];
+// SVG SMIL can point a download link back at a data: URL with no href attribute (see linkLock.ts).
+const ANIM_STASH_ATTR = 'data-ped-att-anim-attr';
+const ANIMATED_LINK_ATTRS = new Set(['href', 'xlink:href']);
+// Local names, matched in the callback: attributeFilter never reports namespaced attributes such as xlink:href.
+const WATCHED_ATTRS = new Set(['href', 'xlink:href', 'download', 'download_url', 'formaction', 'attributename']);
+const MIN_PRUNE = 256;
+const pruneAt = new WeakMap<HTMLElement, number>();
+
+function pruneDetached(root: HTMLElement, set: Set<Element>): void {
+  if (set.size < (pruneAt.get(root) ?? MIN_PRUNE)) return;
+  for (const el of set) if (el !== root && !root.contains(el)) set.delete(el);
+  pruneAt.set(root, Math.max(MIN_PRUNE, set.size * 2));
+}
 
 function stashTarget(root: HTMLElement): void {
   const targets = [
@@ -97,6 +112,20 @@ function stashTarget(root: HTMLElement): void {
   ];
   let set = stashedIn.get(root);
   if (!set) stashedIn.set(root, (set = new Set()));
+  pruneDetached(root, set);
+  for (const anim of root.querySelectorAll<Element>('set, animate')) {
+    const target = getAttr(anim, 'attributeName');
+    if (target === null || !ANIMATED_LINK_ATTRS.has(target.trim().toLowerCase())) {
+      if (stashes.has(anim)) set.add(anim);
+      continue;
+    }
+    let st = stashes.get(anim);
+    if (!st) stashes.set(anim, (st = new Map()));
+    st.set('attributeName', target);
+    setAttr(anim, ANIM_STASH_ATTR, target);
+    rmAttr(anim, 'attributeName');
+    set.add(anim);
+  }
   for (const el of targets) {
     let st = stashes.get(el);
     for (const [attr, stashAttr] of STASHED_PAIRS) {
@@ -129,10 +158,13 @@ export function lockAttachments(elements: readonly HTMLElement[], names?: Readon
     if (name) setAttr(el, ATT_NAME_ATTR, name);
     stashTarget(el);
     if (!watchers.has(el) && typeof MutationObserver !== 'undefined') {
-      const obs = new MutationObserver(() => {
-        if (hasAttr(el, ATT_LOCK_ATTR)) stashTarget(el);
+      const obs = new MutationObserver((records) => {
+        if (!hasAttr(el, ATT_LOCK_ATTR)) return;
+        if (records.some((r) => r.type === 'childList' || WATCHED_ATTRS.has((r.attributeName ?? '').toLowerCase()))) {
+          stashTarget(el);
+        }
       });
-      obs.observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: WATCHED_ATTRS });
+      obs.observe(el, { childList: true, subtree: true, attributes: true });
       watchers.set(el, obs);
     }
   }
@@ -167,6 +199,7 @@ export function unlockAttachments(elements: readonly HTMLElement[]): void {
       }
       for (const [, stashAttr] of STASHED_PAIRS) rmAttr(el, stashAttr);
       rmAttr(el, XLINK_STASH_ATTR);
+      rmAttr(el, ANIM_STASH_ATTR);
       releaseDisabled(el, ARIA_HOLDER);
     }
     stashedIn.delete(root);

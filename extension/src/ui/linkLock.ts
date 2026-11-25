@@ -12,6 +12,7 @@ import {
   rmAttrNS,
   setAttr,
   setAttrNS,
+  useLinks,
 } from '../dom';
 import { hostOf } from '../domain';
 import { holdDisabled, releaseDisabled } from './ariaDisabled';
@@ -28,7 +29,7 @@ const ACTION_ATTR = 'data-ped-action';
 const FORMACTION_ATTR = 'data-ped-formaction';
 const STYLE_ID = 'ped-lock-style';
 
-const installed = new WeakSet<Document>();
+const styles = new WeakMap<Document, HTMLStyleElement>();
 const watchers = new WeakMap<HTMLElement, MutationObserver>();
 const blockedHandlers = new WeakMap<Document, () => void>();
 
@@ -48,11 +49,16 @@ function matchesLockedTarget(el: Element): boolean {
   }
   // Any SVG <a> is a navigation target, even without href: SMIL <set>/<animate> can supply one.
   const a = closestEl(el, 'a');
-  return Boolean(a && (a.namespaceURI === SVG_NS || getAttrNS(a, XLINK_NS, 'href') !== null || hasAttr(a, 'xlink:href')));
+  if (a && (a.namespaceURI === SVG_NS || getAttrNS(a, XLINK_NS, 'href') !== null || hasAttr(a, 'xlink:href'))) return true;
+  // A click on an SVG <use> instance of a link reaches us retargeted to the <use> element.
+  const use = closestEl(el, 'use');
+  return Boolean(use && useLinks(use).length > 0);
 }
 
 function targetHostOf(el: Element): string {
-  const node = closestEl(el, `a, area, [formaction], [${FORMACTION_ATTR}], form`);
+  const use = closestEl(el, 'use');
+  const node =
+    closestEl(el, `a, area, [formaction], [${FORMACTION_ATTR}], form`) ?? (use ? (useLinks(use)[0] ?? null) : null);
   if (!node) return '';
   const raw =
     getAttr(node, HREF_ATTR) ??
@@ -101,12 +107,17 @@ function block(e: Event) {
   }
 }
 
+/**
+ * Idempotent on purpose: document.open() (used to write some message iframes) erases a document's listeners and
+ * content but keeps the same Document object, so re-adding (a no-op when present) is what keeps the lock armed.
+ */
 function install(doc: Document) {
-  if (installed.has(doc)) return;
-  installed.add(doc);
   for (const type of ['click', 'auxclick', 'dragstart', 'submit', 'keydown']) {
     doc.addEventListener(type, block, true);
   }
+  if (styles.get(doc)?.isConnected) return;
+  const parent = doc.head ?? doc.documentElement;
+  if (!parent) return;
   const style = doc.createElement('style');
   style.id = STYLE_ID;
   style.textContent = [
@@ -114,7 +125,8 @@ function install(doc: Document) {
     `[${LOCK_ATTR}] :is(a[${HREF_ATTR}], a[href], a[${XLINK_ATTR}]) img{cursor:not-allowed!important;opacity:.65!important;outline:2px dashed #b91c1c!important;outline-offset:-2px!important}`,
     `[${LOCK_ATTR}] :is([formaction], [${FORMACTION_ATTR}], form :is(button:not([type="button"]), input[type="submit"], input[type="image"])){cursor:not-allowed!important;opacity:.6!important}`,
   ].join('');
-  (doc.head ?? doc.documentElement).appendChild(style);
+  parent.appendChild(style);
+  styles.set(doc, style);
 }
 
 // What this lock removed, recorded in the isolated world: email HTML can pre-seed or edit the page-visible
@@ -126,18 +138,48 @@ const ARIA_HOLDER = 'links';
 // SVG SMIL can retarget an <a> without any href attribute: <set|animate attributeName="href" to=...>.
 const ANIM_ATTR = 'data-ped-anim-attr';
 const ANIMATED_LINK_ATTRS = new Set(['href', 'xlink:href']);
-const WATCHED_ATTRS = ['href', 'xlink:href', 'ping', 'action', 'formaction', 'attributeName'];
+// Local names: a namespaced xlink:href change is reported as 'href' (attributeFilter would miss it entirely).
+const WATCHED_ATTRS = new Set(['href', 'xlink:href', 'ping', 'action', 'formaction', 'attributename']);
+const MIN_PRUNE = 256;
+const pruneAt = new WeakMap<HTMLElement, number>();
+
+function trackedIn(container: HTMLElement): Set<Element> {
+  let set = stashedIn.get(container);
+  if (!set) stashedIn.set(container, (set = new Set()));
+  return set;
+}
 
 function record(container: HTMLElement, el: Element, key: string, value: string): void {
   let st = stashes.get(el);
   if (!st) stashes.set(el, (st = new Map()));
   st.set(key, value);
-  let set = stashedIn.get(container);
-  if (!set) stashedIn.set(container, (set = new Set()));
-  set.add(el);
+  trackedIn(container).add(el);
+}
+
+/** True when a mutation batch may have added a live link target the lock must stash. */
+export function touchesLinkTargets(records: readonly MutationRecord[]): boolean {
+  return records.some(
+    (r) => r.type === 'childList' || WATCHED_ATTRS.has((r.attributeName ?? '').toLowerCase()),
+  );
+}
+
+/**
+ * Forget stashed elements the webmail has since removed, so a container that stays locked while its content is
+ * re-rendered does not keep old DOM alive. Records stay in the WeakMap: re-inserted elements are tracked again.
+ */
+function pruneDetached(container: HTMLElement): void {
+  const set = stashedIn.get(container);
+  if (!set || set.size < (pruneAt.get(container) ?? MIN_PRUNE)) return;
+  for (const el of set) if (!container.contains(el)) set.delete(el);
+  pruneAt.set(container, Math.max(MIN_PRUNE, set.size * 2));
 }
 
 function stashInside(container: HTMLElement): void {
+  pruneDetached(container);
+  const tracked = trackedIn(container);
+  for (const el of container.querySelectorAll<Element>('a, area, form, [formaction], set, animate')) {
+    if (stashes.has(el)) tracked.add(el);
+  }
   for (const el of container.querySelectorAll<Element>('a, area')) {
     const href = getAttr(el, 'href');
     if (href !== null) {
@@ -204,11 +246,11 @@ export function lockLinks(container: HTMLElement): void {
   setAttr(container, LOCK_ATTR, '');
   stashInside(container);
   if (!watchers.has(container) && typeof MutationObserver !== 'undefined') {
-    const obs = new MutationObserver(() => {
-      if (hasAttr(container, LOCK_ATTR)) stashInside(container);
+    const obs = new MutationObserver((records) => {
+      if (hasAttr(container, LOCK_ATTR) && touchesLinkTargets(records)) stashInside(container);
     });
     // Also watch link attributes: the webmail (or a lock being lifted elsewhere) may set href after we locked.
-    obs.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: WATCHED_ATTRS });
+    obs.observe(container, { childList: true, subtree: true, attributes: true });
     watchers.set(container, obs);
   }
 }

@@ -30,6 +30,17 @@ describe('createScheduler', () => {
     expect(runScan).toHaveBeenCalled();
   });
 
+  it('runs no later than the maximum wait after the first request', async () => {
+    const { runScan, s } = make();
+    for (let t = 0; t < MAX_DEBOUNCE_WAIT_MS - 50; t += 16) {
+      s.schedule();
+      await vi.advanceTimersByTimeAsync(16);
+    }
+    expect(runScan).not.toHaveBeenCalled(); // now ~50 ms before the maximum wait
+    await vi.advanceTimersByTimeAsync(60);
+    expect(runScan).toHaveBeenCalledTimes(1);
+  });
+
   it('flush runs a pending scan immediately', async () => {
     const { runScan, s } = make();
     s.schedule();

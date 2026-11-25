@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
-import { linksIn } from '../adapters/extract';
+import { inlineAttachmentsIn, linksIn } from '../adapters/extract';
+import { rawLinkTarget, useLinks } from '../dom';
 import { lockAttachments, unlockAttachments } from './attachmentLock';
 import { lockLinks, unlockLinks } from './linkLock';
 
@@ -98,5 +99,85 @@ describe('attachment lock hardening', () => {
     expect($('s').getAttributeNS('http://www.w3.org/1999/xlink', 'href') ?? $('s').getAttribute('xlink:href')).toBe(
       'data:text/html,x',
     );
+  });
+});
+
+describe('lock gaps found in review', () => {
+  const XLINK = 'http://www.w3.org/1999/xlink';
+
+  it('re-stashes a namespaced xlink:href set after locking (attributeFilter never reports namespaced attributes)', async () => {
+    document.body.innerHTML = `<div id="m"><svg><a id="s"><text>x</text></a></svg></div>`;
+    lockLinks($('m'));
+    $('s').setAttributeNS(XLINK, 'xlink:href', 'https://evil.example/');
+    await new Promise((r) => setTimeout(r, 0));
+    expect($('s').getAttributeNS(XLINK, 'href')).toBeNull();
+    unlockLinks($('m'));
+    expect($('s').getAttributeNS(XLINK, 'href')).toBe('https://evil.example/');
+  });
+
+  it('blocks a click on an SVG <use> instance of a link inside a locked email', () => {
+    document.body.innerHTML = `<div id="m"><svg><defs><a id="L" href="https://evil.example/"><rect/></a></defs>
+      <use id="u" href="#L"/></svg></div><svg><use id="icon" href="#sprite"/><symbol id="sprite"><path/></symbol></svg>`;
+    expect(useLinks($('u')).map((e) => e.id)).toEqual(['L']);
+    expect(useLinks($('icon'))).toEqual([]); // webmail icon sprites are not links
+    lockLinks($('m'));
+    expect(clickPrevented($('u'))).toBe(true);
+    unlockLinks($('m'));
+    expect(clickPrevented($('u'))).toBe(false);
+  });
+
+  it('follows <use> chains without looping', () => {
+    document.body.innerHTML = `<svg><g id="g1"><use id="u2" href="#g2"/></g><g id="g2"><use href="#g1"/><a id="a" href="https://x.example/"><rect/></a></g>
+      <use id="u1" href="#g1"/></svg>`;
+    expect(useLinks($('u1')).map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('reads an SVG link target from its SMIL-animated value before the #fragment href', () => {
+    document.body.innerHTML = `<svg><a id="s" href="#top"><text>x</text></a></svg><a id="h" href="#top">t</a>`;
+    expect(rawLinkTarget($('h'))).toBe('#top');
+    Object.defineProperty($('s'), 'href', { value: { animVal: 'https://evil.example/' } });
+    expect(rawLinkTarget($('s'))).toBe('https://evil.example/');
+  });
+
+  it('stashes SMIL href animations inside locked attachments and keeps them detected as downloads', () => {
+    document.body.innerHTML = `<div id="m"><svg><a id="d"><set id="s" attributeName="href" to="data:text/html;base64,PHA+"/><text>f</text></a></svg></div>`;
+    const found = inlineAttachmentsIn($('m'));
+    expect(found.map((a) => a.element.id)).toEqual(['d']);
+    lockAttachments([$('d')]);
+    expect($('s').hasAttribute('attributeName')).toBe(false);
+    expect(inlineAttachmentsIn($('m')).map((a) => a.element.id)).toEqual(['d']); // no lock/unlock flip-flop
+    unlockAttachments([$('d')]);
+    expect($('s').getAttribute('attributeName')).toBe('href');
+  });
+
+  it('locks the whole body for a download animation aimed at another element', () => {
+    document.body.innerHTML = `<div id="m"><svg><a id="t"><text>f</text></a><set href="#t" attributeName="href" to="blob:https://x/1"/></svg></div>`;
+    expect(inlineAttachmentsIn($('m')).map((a) => a.element.id)).toEqual(['m']);
+  });
+
+  it('re-installs its style when a rewritten document lost it (install is idempotent)', () => {
+    document.body.innerHTML = '<div id="m"><a id="a" href="https://evil.example/">x</a></div>';
+    lockLinks($('m'));
+    document.getElementById('ped-lock-style')!.remove();
+    unlockLinks($('m'));
+    lockLinks($('m'));
+    expect(document.querySelectorAll('#ped-lock-style').length).toBe(1);
+    lockLinks($('m'));
+    expect(document.querySelectorAll('#ped-lock-style').length).toBe(1);
+    expect(clickPrevented($('a'))).toBe(true);
+    unlockLinks($('m'));
+  });
+
+  it('forgets detached elements while a re-rendered container stays locked', async () => {
+    document.body.innerHTML = '<div id="m"></div>';
+    const m = $('m');
+    lockLinks(m);
+    for (let i = 0; i < 6; i++) {
+      m.innerHTML = Array.from({ length: 100 }, (_, j) => `<a href="https://x.example/${i}/${j}">l</a>`).join('');
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    unlockLinks(m);
+    // Only the current links are restored; earlier generations were pruned rather than held.
+    expect(m.querySelectorAll('a[href]').length).toBe(100);
   });
 });

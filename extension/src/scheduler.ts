@@ -57,13 +57,17 @@ export function createScheduler(
   const schedule = () => {
     pending = true;
     const t = now();
+    let delay = DEBOUNCE_MS;
     if (timer !== undefined) {
-      if (t - firstRequestAt >= MAX_DEBOUNCE_WAIT_MS) return; // let the armed timer fire despite ongoing changes
+      const elapsed = t - firstRequestAt;
+      if (elapsed >= MAX_DEBOUNCE_WAIT_MS) return; // let the armed timer fire despite ongoing changes
       clearTimeout(timer);
+      // Never re-arm past the maximum wait measured from the first request.
+      delay = Math.min(DEBOUNCE_MS, MAX_DEBOUNCE_WAIT_MS - elapsed);
     } else {
       firstRequestAt = t;
     }
-    timer = setTimeout(() => idle(() => void exec()), DEBOUNCE_MS);
+    timer = setTimeout(() => idle(() => void exec()), delay);
   };
 
   return { schedule, flush: exec, isPending: () => pending || inflight !== null };

@@ -8,7 +8,17 @@ import {
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from '../src/adapters/types';
 import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender, untrustEmails } from '../src/allowlist';
 import { type AttachmentAnalysis, analyzeAttachments } from '../src/attachments';
-import { closestEl, eventElement, getAttr, getAttrNS, ownerDocOf, resolveAnchorHref, XLINK_NS } from '../src/dom';
+import {
+  closestEl,
+  eventElement,
+  getAttr,
+  ownerDocOf,
+  queryAll,
+  rawLinkTarget,
+  resolveAnchorHref,
+  tagOf,
+  useLinks,
+} from '../src/dom';
 import { isLookupDomain } from '../src/domain';
 import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
@@ -261,6 +271,29 @@ function matchAttachmentInMessages(
   return null;
 }
 
+/**
+ * The link a click activates: the closest <a>/<area>, or the link an SVG <use> instance renders (the click is
+ * retargeted to the <use>). `at` is where the click landed, for finding its message. 'ambiguous' when a <use>
+ * renders several different links and the clicked one cannot be told apart.
+ */
+function clickedLink(el: Element): { anchor: Element; at: Element } | 'ambiguous' | null {
+  const a = closestEl(el, 'a, area');
+  if (a) return { anchor: a, at: a };
+  const use = closestEl(el, 'use');
+  const links = use ? useLinks(use) : [];
+  if (!use || links.length === 0) return null;
+  const targets = new Set(links.map((l) => resolveAnchorHref(l)).filter(Boolean));
+  return targets.size > 1 ? 'ambiguous' : { anchor: links[0]!, at: use };
+}
+
+/** Navigate as the click itself would have (used once a held click is cleared by a local-only check). */
+function replayNavigation(anchor: Element, href: string, activeTab: boolean): void {
+  const win = ownerDocOf(anchor).defaultView ?? window;
+  const target = (getAttr(anchor, 'target') ?? '').trim().toLowerCase();
+  if (!activeTab || (target && target !== '_self')) win.open(href, '_blank', 'noopener,noreferrer');
+  else win.location.assign(href);
+}
+
 function installClickGuard(opts: {
   findTarget: (
     el: Element,
@@ -269,7 +302,6 @@ function installClickGuard(opts: {
   isPending: () => boolean;
   flushScan: () => Promise<void>;
 }) {
-  const attachedDocs = new WeakSet<Document>();
   const onEvent = (e: Event) => {
     const el = eventElement(e);
     if (!el) return;
@@ -315,12 +347,22 @@ function installClickGuard(opts: {
 
     if (e.type !== 'click' && e.type !== 'auxclick') return;
 
-    const a = closestEl(el, 'a, area');
-    if (!a) return;
-    const rawAttr = (getAttr(a, 'href') ?? getAttrNS(a, XLINK_NS, 'href') ?? getAttr(a, 'xlink:href') ?? '').trim();
-    if (rawAttr.startsWith('#')) return;
+    const clicked = clickedLink(el);
+    if (!clicked) return;
+    if (clicked === 'ambiguous') {
+      // Several links behind one <use>: which one was clicked is unknowable, so pause rather than guess.
+      if (!opts.findTarget(el)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      showPausedLinkToast(ownerDocOf(el), '', el instanceof HTMLElement ? el : null);
+      return;
+    }
+    const { anchor: a, at } = clicked;
+    // Same-page anchors (#section) do not leave the email. Uses the SMIL-animated value of an SVG <a>, so
+    // <a href="#"> retargeted by <set attributeName="href" to="https://..."> is still checked.
+    if (rawLinkTarget(a).startsWith('#')) return;
 
-    const hit = opts.findTarget(a);
+    const hit = opts.findTarget(at) ?? (at === a ? null : opts.findTarget(a));
     if (!hit || isLocked(hit.container)) return;
 
     // Includes the SMIL-animated target of an SVG <a>, which can navigate with no href attribute at all.
@@ -329,27 +371,41 @@ function installClickGuard(opts: {
 
     const me = e as MouseEvent;
     const pending = opts.isPending();
+    const activeTab = !(me.metaKey || me.ctrlKey || (e.type === 'auxclick' && me.button === 1));
     const initialRisk = analyzeLinkDestination(rawHref, hit.senderRegistrable, location.origin);
     if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
+    // Clicks held for a scan that then locks the message get the same notice as a click on a locked link.
+    const lockedAfterScan = () => {
+      const refreshed = opts.findTarget(at);
+      if (!isLocked(hit.container) && !(refreshed && isLocked(refreshed.container))) return false;
+      showPausedLinkToast(ownerDocOf(a), initialRisk.host, a instanceof HTMLElement ? a : null);
+      return true;
+    };
     if (!extensionAlive()) {
-      // Orphaned by an extension update: the background can no longer check or open links for us,
-      // so let safe links navigate natively and keep risky ones paused until the tab is reloaded.
-      if (initialRisk.level === 'safe') return;
+      // Orphaned by an extension update: the background can no longer check or open links for us. Risky links
+      // stay paused until the tab is reloaded; safe ones still wait for a pending scan (which runs locally) and
+      // then navigate natively.
+      if (initialRisk.level === 'safe' && !pending) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      showPausedLinkToast(ownerDocOf(a), initialRisk.host, a instanceof HTMLElement ? a : null);
+      if (initialRisk.level !== 'safe') {
+        showPausedLinkToast(ownerDocOf(a), initialRisk.host, a instanceof HTMLElement ? a : null);
+        return;
+      }
+      void (async () => {
+        await opts.flushScan();
+        if (!lockedAfterScan()) replayNavigation(a, rawHref, activeTab);
+      })();
       return;
     }
 
     e.preventDefault();
     e.stopImmediatePropagation();
-    const activeTab = !(me.metaKey || me.ctrlKey || (e.type === 'auxclick' && me.button === 1));
 
     void (async () => {
       if (opts.isPending()) {
         await opts.flushScan();
-        const refreshed = opts.findTarget(a);
-        if (isLocked(hit.container) || (refreshed && isLocked(refreshed.container))) return;
+        if (lockedAfterScan()) return;
       }
 
       const latest = opts.findTarget(a) ?? hit;
@@ -407,9 +463,9 @@ function installClickGuard(opts: {
     })();
   };
 
+  // Idempotent (re-adding is a no-op): document.open() erases a document's listeners but keeps the Document object,
+  // so callers re-attach whenever a frame document may have been rewritten.
   const attachDoc = (doc: Document) => {
-    if (attachedDocs.has(doc)) return;
-    attachedDocs.add(doc);
     for (const type of ['click', 'auxclick', 'mousedown', 'pointerdown', 'keydown', 'submit']) {
       doc.addEventListener(type, onEvent, true);
     }
@@ -676,8 +732,11 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   let activeAttachmentEls: HTMLElement[] = [];
   let token = 0;
 
+  let watchFrames = () => {};
+
   const scan = async () => {
     if (document.hidden) return; // never work in background tabs
+    watchFrames();
     const emails = extractAll(adapter, document);
     if (emails.length === 0) {
       for (const c of activeContainers) unlockLinks(c);
@@ -796,25 +855,40 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
 
   // Message bodies rendered in same-origin iframes (Proton, Outlook/Yahoo fallbacks): guard their clicks from
   // the moment they appear and rescan when they change, since iframe mutations never reach the top observer.
+  // The observer sits on the Document node itself and re-guards on every change: a document.open() rewrite keeps
+  // the Document object but drops its listeners and root element.
   const watchedFrameDocs = new WeakSet<Document>();
-  const watchFrames = () => {
+  watchFrames = () => {
     for (const frameDoc of adapter?.frameDocs?.(document) ?? []) {
+      guardDoc(frameDoc);
       if (watchedFrameDocs.has(frameDoc)) continue;
       watchedFrameDocs.add(frameDoc);
-      guardDoc(frameDoc);
-      const root = frameDoc.documentElement;
-      if (root) new MutationObserver(scheduler.schedule).observe(root, { childList: true, subtree: true });
+      new MutationObserver(() => {
+        guardDoc(frameDoc);
+        scheduler.schedule();
+      }).observe(frameDoc, { childList: true, subtree: true });
     }
   };
-  const onTopMutation = () => {
-    watchFrames();
-    scheduler.schedule();
-  };
+  // Look for new frames only when a mutation adds one (or on an iframe load below); scans also re-check.
+  const addsFrame = (records: MutationRecord[]) =>
+    records.some((r) =>
+      Array.from(r.addedNodes).some(
+        (n) => n.nodeType === 1 && (tagOf(n as Element) === 'iframe' || queryAll(n as Element, 'iframe').length > 0),
+      ),
+    );
   const rootTarget = document.body ?? document.documentElement;
-  if (rootTarget) new MutationObserver(onTopMutation).observe(rootTarget, { childList: true, subtree: true });
+  if (rootTarget) {
+    new MutationObserver((records) => {
+      if (adapter?.frameDocs && addsFrame(records)) watchFrames();
+      scheduler.schedule();
+    }).observe(rootTarget, { childList: true, subtree: true });
+  }
   // An iframe that (re)loads gets a new document without any top-level DOM change.
   document.addEventListener('load', (e) => {
-    if (e.target instanceof HTMLIFrameElement) onTopMutation();
+    if (e.target instanceof HTMLIFrameElement) {
+      watchFrames();
+      scheduler.schedule();
+    }
   }, true);
   watchFrames();
   document.addEventListener('visibilitychange', () => {
@@ -868,8 +942,23 @@ function runICloudSandbox() {
     }
   };
 
+  const releaseVerdictWaiters = () => {
+    awaitingVerdict = false;
+    for (const release of verdictWaiters.splice(0)) release();
+  };
+
   const report = (force = false) => {
     if (document.hidden) return;
+    if (!extensionAlive()) {
+      // Orphaned by an extension update or reload: no verdict can arrive from the app frame any more, so lock
+      // links and inline downloads (fail closed) until the page is reloaded.
+      desiredLocked = true;
+      desiredAttachmentsLocked = true;
+      releaseVerdictWaiters();
+      if (document.body) lockLinks(document.body);
+      syncInlineAttachmentLocks(extractICloudSandbox(document).attachments, true);
+      return;
+    }
     const { active, body, links, linksTruncated = false, attachments, container } = extractICloudSandbox(document);
     if (!active || !container) {
       if (document.body) unlockLinks(document.body);
@@ -928,6 +1017,7 @@ function runICloudSandbox() {
     isPending: () => scheduler.isPending() || awaitingVerdict,
     flushScan: async () => {
       await scheduler.flush();
+      if (!extensionAlive()) report(); // fail closed now rather than wait out a verdict that cannot come
       await waitForVerdict();
     },
   });
@@ -939,8 +1029,7 @@ function runICloudSandbox() {
       if (typeof m.sig === 'string' && m.sig !== lastSigHash) return;
       desiredLocked = Boolean(m.locked);
       desiredAttachmentsLocked = Boolean(m.attachmentsLocked);
-      awaitingVerdict = false;
-      for (const release of verdictWaiters.splice(0)) release();
+      releaseVerdictWaiters();
       if (document.body) {
         if (desiredLocked) lockLinks(document.body);
         else unlockLinks(document.body);

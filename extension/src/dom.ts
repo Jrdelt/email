@@ -13,6 +13,7 @@ const protoHasAttr = hasElement ? Element.prototype.hasAttribute : undefined;
 const protoGetAttrNS = hasElement ? Element.prototype.getAttributeNS : undefined;
 const protoSetAttrNS = hasElement ? Element.prototype.setAttributeNS : undefined;
 const protoRmAttrNS = hasElement ? Element.prototype.removeAttributeNS : undefined;
+const protoQsa = hasElement ? Element.prototype.querySelectorAll : undefined;
 
 export const getAttr = (el: Element, name: string): string | null =>
   (protoGetAttr ?? Element.prototype.getAttribute).call(el, name);
@@ -67,6 +68,78 @@ export function resolveAgainstBase(raw: string, base: string): string {
   }
 }
 
+/** querySelectorAll that a `<form>`'s named controls cannot shadow. */
+export const queryAll = (el: Element, selector: string): Element[] => [
+  ...(protoQsa ?? Element.prototype.querySelectorAll).call(el, selector),
+];
+
+/** The current SMIL-animated href of an SVG element (`<set>/<animate attributeName="href">`), or ''. */
+function animatedHref(el: Element): string {
+  if (el.namespaceURI !== SVG_NS) return '';
+  const anim = (el as unknown as { href?: { animVal?: unknown } }).href?.animVal;
+  return typeof anim === 'string' ? anim.trim() : '';
+}
+
+/**
+ * The unresolved target an <a>/<area> navigates to right now: an SVG link's animated value first (SMIL can
+ * retarget `<a href="#">` anywhere), then href, then xlink:href. '' when there is none.
+ */
+export function rawLinkTarget(el: Element): string {
+  return (animatedHref(el) || getAttr(el, 'href') || getAttrNS(el, XLINK_NS, 'href') || getAttr(el, 'xlink:href') || '').trim();
+}
+
+const MAX_USE_DEPTH = 4;
+const MAX_USE_LINKS = 20;
+
+/**
+ * Links an SVG `<use>` renders. A click on its (closed) shadow instance is retargeted to the `<use>` element, so
+ * `closest('a')` finds nothing, yet an instanced `<a>` still navigates. Follows same-document `#id` references,
+ * including `<use>` chains (bounded), and returns the referenced `<a>` (or the one containing it) or the links in it.
+ */
+export function useLinks(use: Element): Element[] {
+  const out = new Set<Element>();
+  const seen = new Set<Element>();
+  const visit = (u: Element, depth: number): void => {
+    if (depth >= MAX_USE_DEPTH || seen.has(u) || out.size >= MAX_USE_LINKS) return;
+    seen.add(u);
+    const ref = useReference(u);
+    if (!ref) return;
+    const owning = closestEl(ref, 'a, area');
+    if (owning) {
+      out.add(owning);
+      return;
+    }
+    for (const el of queryAll(ref, 'a, area, use')) {
+      if (out.size >= MAX_USE_LINKS || seen.size > MAX_USE_LINKS) return;
+      if (tagOf(el) === 'use') visit(el, depth + 1);
+      else out.add(el);
+    }
+  };
+  visit(use, 0);
+  return [...out];
+}
+
+/** The same-document element a `<use>` points at (`href`, SMIL-animated href, or xlink:href), if any. */
+function useReference(use: Element): Element | null {
+  const raw = animatedHref(use) || getAttr(use, 'href') || getAttrNS(use, XLINK_NS, 'href') || getAttr(use, 'xlink:href') || '';
+  const doc = ownerDocOf(use);
+  const hash = raw.indexOf('#');
+  if (hash < 0) return null;
+  const before = raw.slice(0, hash).trim();
+  if (before) {
+    // Only same-document references can carry the email's own links.
+    const resolved = resolveAgainstBase(before, doc.baseURI || 'https://invalid.local');
+    if (resolved !== doc.URL.split('#')[0] && resolved !== (doc.baseURI || '').split('#')[0]) return null;
+  }
+  let id = raw.slice(hash + 1);
+  try {
+    id = decodeURIComponent(id);
+  } catch {
+    /* keep the raw id */
+  }
+  return id ? Document.prototype.getElementById.call(doc, id) : null;
+}
+
 /**
  * Resolve the navigation target of an <a> or <area>: href, SVG xlink:href, the SMIL-animated value of an SVG
  * <a> (<set>/<animate attributeName="href"> can retarget it, even with no href attribute), and optionally the
@@ -74,10 +147,8 @@ export function resolveAgainstBase(raw: string, base: string): string {
  */
 export function resolveAnchorHref(el: Element, includeStashed = false): string {
   const base = ownerDocOf(el).baseURI || 'https://invalid.local';
-  if (el.namespaceURI === SVG_NS) {
-    const anim = (el as unknown as { href?: { animVal?: unknown } }).href?.animVal;
-    if (typeof anim === 'string' && anim.trim()) return resolveAgainstBase(anim, base);
-  }
+  const anim = animatedHref(el);
+  if (anim) return resolveAgainstBase(anim, base);
   if (hasAttr(el, 'href')) {
     const prop = (el as HTMLAnchorElement).href;
     if (typeof prop === 'string' && prop) return prop;

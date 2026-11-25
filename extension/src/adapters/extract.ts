@@ -1,5 +1,5 @@
 import { cleanAttachmentName } from '../attachments';
-import { closestEl, getAttr, hasAttr, isFormEl, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
+import { XLINK_NS, closestEl, getAttr, getAttrNS, hasAttr, isFormEl, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
 import { INVISIBLE_RE, safePercentDecode, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
@@ -250,6 +250,17 @@ export function extractSenderFromElement(
 
 const ANIMATED_HREF = new Set(['href', 'xlink:href']);
 
+/** True for a SMIL <set>/<animate> that retargets a link, including one whose attributeName a lock stashed. */
+function animatesHref(anim: Element): boolean {
+  const target =
+    getAttr(anim, 'attributeName') ?? getAttr(anim, 'data-ped-anim-attr') ?? getAttr(anim, 'data-ped-att-anim-attr') ?? '';
+  return ANIMATED_HREF.has(target.trim().toLowerCase());
+}
+
+/** Every value a SMIL animation can set (de-duplicated). */
+const animValues = (anim: Element): Set<string> =>
+  new Set([getAttr(anim, 'to') ?? '', ...(getAttr(anim, 'values') ?? '').split(';')]);
+
 /**
  * Links, form actions and SMIL link targets inside `el` (de-duplicated). `truncated` is set when there are more
  * distinct links than MAX_LINKS: the extras cannot be checked, so callers treat the email as suspicious (fail closed)
@@ -271,12 +282,10 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     const tag = tagOf(node);
     if (tag === 'set' || tag === 'animate') {
       // SVG SMIL retargeting an <a>: score every distinct value it can navigate to.
-      const target = (getAttr(node, 'attributeName') ?? getAttr(node, 'data-ped-anim-attr') ?? '').trim().toLowerCase();
-      if (!ANIMATED_HREF.has(target)) continue;
+      if (!animatesHref(node)) continue;
       const anchor = closestEl(node, 'a');
       const text = anchor ? capText(textOf(anchor), MAX_LINK_TEXT_CHARS) : '';
-      const values = new Set([getAttr(node, 'to') ?? '', ...(getAttr(node, 'values') ?? '').split(';')]);
-      for (const raw of values) {
+      for (const raw of animValues(node)) {
         const href = resolveAgainstBase(raw, base);
         if (!href) continue;
         if (out.length >= MAX_LINK_SCAN) {
@@ -344,15 +353,23 @@ function filenameFromHref(rawHref: string, base: string): string {
 export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
   const base = ownerDocOf(container).baseURI || 'https://invalid.local';
   const out: AttachmentRef[] = [];
+  const seen = new Set<Element>();
+  const isDownloadUrl = (u: string) => u.startsWith('data:') || u.startsWith('blob:');
+  const add = (el: HTMLElement, name: string): boolean => {
+    if (seen.has(el)) return true;
+    if (out.length >= MAX_ATTACHMENTS) {
+      out.push({ name: '', element: container });
+      return false;
+    }
+    seen.add(el);
+    out.push({ name, element: el });
+    return true;
+  };
 
   for (const el of container.querySelectorAll<HTMLElement>('a, area')) {
     const dl = getAttr(el, 'download') ?? getAttr(el, 'data-ped-att-download');
     const href = resolveAnchorHref(el, true);
-    if (dl === null && !href.startsWith('data:') && !href.startsWith('blob:')) continue;
-    if (out.length >= MAX_ATTACHMENTS) {
-      out.push({ name: '', element: container });
-      break;
-    }
+    if (dl === null && !isDownloadUrl(href)) continue;
     const dlAttr = dl ?? '';
     const name = cleanAttachmentName(
       dlAttr ||
@@ -362,7 +379,17 @@ export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
         textOf(el) ||
         '',
     );
-    out.push({ name, element: el });
+    if (!add(el, name)) return out;
+  }
+  // SVG SMIL can point a link at a data:/blob: download with no such href in the markup (and keeps doing so after
+  // a lock stashes the animation). An animation aimed elsewhere by its own href locks the whole body instead.
+  for (const anim of container.querySelectorAll<Element>('set, animate')) {
+    if (!animatesHref(anim)) continue;
+    if (![...animValues(anim)].some((v) => isDownloadUrl(resolveAgainstBase(v, base)))) continue;
+    const aimed = hasAttr(anim, 'href') || hasAttr(anim, 'xlink:href') || getAttrNS(anim, XLINK_NS, 'href') !== null;
+    const parent = anim.parentElement;
+    const el = aimed ? container : parent && tagOf(parent) === 'a' ? (parent as HTMLElement) : null;
+    if (el && !add(el, cleanAttachmentName(getAttr(el, 'download') ?? getAttr(el, 'data-ped-att-download') ?? ''))) return out;
   }
   return out;
 }
