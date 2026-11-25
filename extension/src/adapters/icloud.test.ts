@@ -289,3 +289,12 @@ describe('icloud adapter', () => {
     expect(msg.links).toEqual([{ text: 'Pay', href: 'https://evil.example/pay' }]);
   });
 });
+
+describe('icloudFrameRole matches only the manifest paths', () => {
+  it('rejects look-alike paths', () => {
+    for (const u of ['https://www.icloud.com/mail2', 'https://www.icloud.com/mailto/x', 'https://www.icloud.com/applications/mail2xyz', 'https://p1.icloud-sandbox.com/applications/mail2-messagefoo']) {
+      expect(icloudFrameRole(new URL(u))).toBeNull();
+    }
+    expect(icloudFrameRole(new URL('https://www.icloud.com/mail/'))).toBe('shell');
+  });
+});

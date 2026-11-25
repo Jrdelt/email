@@ -32,9 +32,12 @@ const STANDARD_WEBMAIL_HOSTS = new Set([
 export function icloudFrameRole(url: URL): ICloudFrameRole {
   if (url.protocol !== 'https:') return null;
   const host = url.hostname.toLowerCase().replace(/\.$/, '');
-  if (host === 'www.icloud.com' && url.pathname.startsWith('/applications/mail2')) return 'app';
-  if (host === 'www.icloud.com' && url.pathname.startsWith('/mail')) return 'shell';
-  if (host.endsWith('.icloud-sandbox.com') && url.pathname.startsWith('/applications/mail2-message')) return 'sandbox';
+  // Same paths as the manifest match patterns (…/mail/*, …/applications/mail2/*, …/applications/mail2-message/*),
+  // so the background's sender-URL checks are no looser than where the content script can run.
+  const path = url.pathname;
+  if (host === 'www.icloud.com' && path.startsWith('/applications/mail2/')) return 'app';
+  if (host === 'www.icloud.com' && path.startsWith('/mail/')) return 'shell';
+  if (host.endsWith('.icloud-sandbox.com') && path.startsWith('/applications/mail2-message/')) return 'sandbox';
   return null;
 }
 
