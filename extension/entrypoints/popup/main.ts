@@ -137,10 +137,22 @@ async function renderPrivacySettings() {
   await setStrictLocalMode(kv, (e.currentTarget as HTMLInputElement).checked, browser.storage.managed);
   await renderPrivacySettings();
 });
+/** Remove every per-tab verdict and link-warning entry (they hold sender details and clicked URLs). */
+async function clearSessionData(): Promise<void> {
+  const store = browser.storage.session;
+  if (!store?.get || !store?.remove) return;
+  try {
+    const all = (await (store.get as (k?: null) => Promise<Record<string, unknown>>)(null)) ?? {};
+    const keys = Object.keys(all).filter((k) => k.startsWith('warn:') || k.startsWith('tab:'));
+    if (keys.length) await store.remove(keys);
+  } catch {
+    /* best effort */
+  }
+}
+
 $('clear-all-data').addEventListener('click', async () => {
   await clearAllLocalData(kv);
-  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id !== undefined) await browser.storage.session?.remove?.(`tab:${tab.id}`).catch(() => {});
+  await clearSessionData();
   $('clear-all-status').textContent = 'All local data cleared.';
   await Promise.all([renderTrusted(), renderTrustedEmails(), renderReports()]);
 });

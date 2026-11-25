@@ -17,10 +17,12 @@ interface StoredWarning {
 const WARN_TTL_MS = 3600_000;
 
 const $ = (id: string) => document.getElementById(id)!;
+let warnKey: string | null = null; // session entry holding the clicked URL; removed when the user backs out
 
 $('logo').append(createLogoSvg(document, 32));
 
 async function closeOrBack() {
+  if (warnKey) await browser.storage.session?.remove?.(warnKey)?.catch(() => {});
   try {
     const tab = await browser.tabs?.getCurrent?.();
     if (tab?.id !== undefined) {
@@ -122,6 +124,7 @@ async function init() {
   }
 
   const key = `warn:${id}`;
+  warnKey = key;
   const stored = (await browser.storage.session?.get?.(key))?.[key] as StoredWarning | undefined;
   const expired = typeof stored?.createdAt === 'number' && Date.now() - stored.createdAt > WARN_TTL_MS;
   if (!stored || expired || !isSafeHttpUrl(stored.href)) {

@@ -88,6 +88,38 @@ function overflowVerdict(overflowCount: number): Verdict {
   };
 }
 
+const stringsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+/**
+ * True when a storage change should trigger a rescan. Trust the user removed elsewhere (popup "Clear", another
+ * tab's Undo) is also dropped from this tab's in-memory session trust, so a cleared email re-locks here too.
+ * Additions do not rescan: they come from this tab's own trust buttons, which already re-render.
+ */
+function storageChangeAffectsVerdicts(
+  changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
+  areaName: string,
+  trustedThisSession: Set<string>,
+): boolean {
+  if (areaName === 'managed') return true;
+  if (areaName !== 'local') return false;
+  let affected = 'privacySettings' in changes;
+  for (const key of ['trustedEmails', 'trustedSenders'] as const) {
+    const change = changes[key];
+    if (!change) continue;
+    const next = new Set(stringsOf(change.newValue));
+    if (stringsOf(change.oldValue).some((v) => !next.has(v))) affected = true;
+    if (key === 'trustedEmails') {
+      for (const entry of [...trustedThisSession]) {
+        if (!entry.split(',').every((h) => next.has(h))) {
+          trustedThisSession.delete(entry);
+          affected = true;
+        }
+      }
+    }
+  }
+  return affected;
+}
+
 function addBounded(set: Set<string>, key: string): void {
   if (set.has(key)) return;
   if (set.size >= MAX_SESSION_SET) {
@@ -707,7 +739,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     if (!document.hidden) scheduler.schedule();
   });
   browser.storage?.onChanged?.addListener((changes, areaName) => {
-    if ((areaName === 'local' && 'privacySettings' in changes) || areaName === 'managed') {
+    if (storageChangeAffectsVerdicts(changes, areaName, trustedThisSession)) {
       lastKey = '';
       scheduler.schedule();
     }
@@ -956,7 +988,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
     if (!document.hidden) scheduler.schedule();
   });
   browser.storage?.onChanged?.addListener((changes, areaName) => {
-    if ((areaName === 'local' && 'privacySettings' in changes) || areaName === 'managed') {
+    if (storageChangeAffectsVerdicts(changes, areaName, trustedThisSession)) {
       lastKey = '';
       scheduler.schedule();
     }
