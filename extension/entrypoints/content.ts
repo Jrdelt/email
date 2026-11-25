@@ -129,9 +129,12 @@ function unlockMessageAttachments(e: ScannableMsg): void {
 const arraysEqual = <T>(a: readonly T[], b: readonly T[]): boolean =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
+// Everything that can change a verdict or a trust hash: a reused reading-pane element with the same text
+// but different link targets must still trigger a rescan.
 const msgKey = (e: ScannableMsg) => {
   const names = attachmentNamesOf(e);
-  return `${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}\natt:${names.join('|')}:${names.length}:${e.attachments?.length ?? 0}:${e.attachmentContainers?.length ?? 0}`;
+  const links = e.links.map((l) => `${l.href}\t${l.text}`).join('\n');
+  return `${e.senderName}\n${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}\nlinks:${links}\natt:${names.join('|')}:${names.length}:${e.attachments?.length ?? 0}:${e.attachmentContainers?.length ?? 0}`;
 };
 
 function createScheduler(runScan: () => Promise<void>) {
