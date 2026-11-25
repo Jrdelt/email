@@ -1,5 +1,5 @@
-// Single source of truth for supported webmail. Used by wxt.config.ts (host_permissions),
-// content.ts (matches), and background.ts (sender URL verification).
+// Single source of truth for supported webmail. Used by wxt.config.ts (host_permissions, and the per-frame
+// content-script entries via contentScriptSplit.ts), content.ts (declared matches), and background.ts (sender URLs).
 export type ICloudFrameRole = 'shell' | 'app' | 'sandbox' | null;
 
 export const ICLOUD_APP_MATCHES = ['https://www.icloud.com/applications/mail2/*'];

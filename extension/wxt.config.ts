@@ -1,5 +1,6 @@
 import { defineConfig } from 'wxt';
-import { ICLOUD_FRAME_MATCHES, STANDARD_WEBMAIL_MATCHES, WEBMAIL_MATCHES } from './src/hosts';
+import { splitContentScripts } from './src/contentScriptSplit';
+import { WEBMAIL_MATCHES } from './src/hosts';
 
 const ICONS = {
   16: 'icons/icon-16.png',
@@ -10,21 +11,9 @@ const ICONS = {
 
 export default defineConfig({
   hooks: {
-    // One content.js, two manifest entries: standard webmail in the top frame only (it reaches same-origin message
-    // iframes from there, and returns at once in any subframe), iCloud's app and message frames (which are
-    // subframes) in all frames. The iCloud page itself needs no script. No second bundle is built.
+    // One content.js, two manifest entries (top frame on standard webmail, all frames on iCloud's mail frames).
     'build:manifestGenerated': (_wxt, manifest) => {
-      const scripts = manifest.content_scripts ?? [];
-      const sameSet = (a: readonly string[], b: readonly string[]) =>
-        a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
-      const [cs] = scripts;
-      if (scripts.length !== 1 || !cs || !sameSet(cs.matches ?? [], WEBMAIL_MATCHES)) {
-        throw new Error('Expected exactly one content script matching WEBMAIL_MATCHES (src/hosts.ts) to split by frame.');
-      }
-      manifest.content_scripts = [
-        { ...cs, matches: [...STANDARD_WEBMAIL_MATCHES], all_frames: false },
-        { ...cs, matches: [...ICLOUD_FRAME_MATCHES], all_frames: true },
-      ];
+      manifest.content_scripts = splitContentScripts(manifest.content_scripts);
     },
     // Firefox ignores storage.managed_schema (policies come from policies.json), so don't ship the schema there.
     'build:publicAssets': (wxt, files) => {
