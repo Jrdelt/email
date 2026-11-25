@@ -88,7 +88,12 @@ export function analyzeSender(
   if (!info.valid) warnings.push("The sender's email address looks invalid or forged");
   if (domain && isInternational(domain)) warnings.push(`The sender's website (${domain}) uses lookalike characters`);
 
-  const shownAddr = displayName.match(/[^\s<>"'()]+@[^\s<>"'()]+\.[a-z]{2,}/i)?.[0]?.toLowerCase();
+  // '@' is excluded from the repeated classes and the input is capped so attacker display names cannot cause
+  // catastrophic regex backtracking.
+  const shownAddr = displayName
+    .slice(0, 1000)
+    .match(/[^\s<>"'()@]+@[^\s<>"'()@]+\.[a-z]{2,}/i)?.[0]
+    ?.toLowerCase();
   if (shownAddr && shownAddr !== address && shownAddr !== raw.toLowerCase()) {
     warnings.push(`The display name shows ${shownAddr}, but it was really sent from ${raw}`);
   }

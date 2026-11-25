@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { MAX_ATTACHMENTS, inlineAttachmentsIn } from './extract';
+import { analyzeSender } from '../sender';
+import { MAX_ATTACHMENTS, inlineAttachmentsIn, parseSenderHeader } from './extract';
 import { outlook } from './outlook';
 import { proton } from './proton';
 import { yahoo } from './yahoo';
@@ -69,4 +70,20 @@ describe('decoy body markers inside the email cannot replace the real body', () 
       expect(all[0]!.links.map((l) => l.href)).toContain('http://192.168.4.20/login');
     });
   }
+});
+
+describe('address parsing stays linear on attacker text', () => {
+  it('handles display names made of thousands of @ and dots within a few ms', () => {
+    for (const name of ['@'.repeat(5000), `a@${'.'.repeat(5000)}`, 'a@b.'.repeat(2000)]) {
+      const t = performance.now();
+      parseSenderHeader(name);
+      analyzeSender(name, 'x@evil.example', []);
+      expect(performance.now() - t).toBeLessThan(50);
+    }
+  });
+
+  it('still parses normal headers', () => {
+    expect(parseSenderHeader('PayPal <service@paypal.com>')).toEqual({ senderName: 'PayPal', senderAddress: 'service@paypal.com' });
+    expect(parseSenderHeader('From: billing@shop.example')).toEqual({ senderName: '', senderAddress: 'billing@shop.example' });
+  });
 });

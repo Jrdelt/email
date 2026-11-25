@@ -1,10 +1,19 @@
 import { cleanAttachmentName } from '../attachments';
 import { isValidDomain } from '../domain';
-import { MAX_ATTACHMENTS, MAX_BODY_CHARS, bodyText, inlineAttachmentsIn, isHidden, isUnsafeNode, linksIn } from './extract';
+import {
+  ADDRESS_TOKEN_RE,
+  MAX_ATTACHMENTS,
+  MAX_BODY_CHARS,
+  MAX_HEADER_CHARS,
+  bodyText,
+  inlineAttachmentsIn,
+  isHidden,
+  isUnsafeNode,
+  linksIn,
+} from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
-const extractEmailText = (raw: string): string =>
-  raw.match(/([^\s<>"'(),;]+@[^\s<>"'(),;]+\.[^\s<>"'(),;]+)/)?.[1]?.trim() ?? '';
+const extractEmailText = (raw: string): string => raw.slice(0, MAX_HEADER_CHARS).match(ADDRESS_TOKEN_RE)?.[0]?.trim() ?? '';
 
 const cleanHost = (raw: string): string =>
   raw.trim().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '').toLowerCase();

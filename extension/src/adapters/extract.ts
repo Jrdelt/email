@@ -32,6 +32,13 @@ export function isNestedIn(el: Element, selectors: readonly string[]): boolean {
   return parent !== null && closestEl(parent, selectors.join(', ')) !== null;
 }
 
+/**
+ * Longest header/label text parsed for an address. Real headers are far shorter; the cap plus excluding '@'
+ * from the repeated classes keeps address matching linear on attacker text (e.g. a display name of 2,000 '@').
+ */
+export const MAX_HEADER_CHARS = 1000;
+export const ADDRESS_TOKEN_RE = /[^\s<>"'(),;@]+@[^\s<>"'(),;@]+\.[^\s<>"'(),;@]+/;
+
 export const bodyText = (el: HTMLElement) => textOf(el).slice(0, MAX_BODY_CHARS);
 
 /** Parse a header string like `PayPal <a@b.com>`, `PayPal (a@b.com)`, or bare `a@b.com`. */
@@ -40,6 +47,7 @@ export function parseSenderHeader(
   fallbackName = '',
 ): { senderName: string; senderAddress: string } | null {
   const cleaned = raw
+    .slice(0, MAX_HEADER_CHARS)
     .trim()
     .replace(/^(?:from|sender)\s*:\s*/i, '')
     .replace(/^opens card for\s+/i, '')
@@ -56,10 +64,10 @@ export function parseSenderHeader(
   if (paren) {
     return { senderName: paren[1].trim().replace(/^["']|["']$/g, '') || fallback, senderAddress: paren[2].trim() };
   }
-  const bare = cleaned.match(/([^\s<>"'(),;]+@[^\s<>"'(),;]+\.[^\s<>"'(),;]+)/);
+  const bare = cleaned.match(ADDRESS_TOKEN_RE);
   if (bare && bare.index !== undefined) {
     const before = cleaned.slice(0, bare.index).replace(/^[\s,:;\-"']+|[\s,:;\-"'<]+$/g, '').trim();
-    return { senderName: before || fallback, senderAddress: bare[1].trim() };
+    return { senderName: before || fallback, senderAddress: bare[0].trim() };
   }
   return null;
 }
