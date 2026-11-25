@@ -63,3 +63,14 @@ describe('analyzeSender', () => {
     expect(canTrustByAllowlist(unknownVia)).toBe(false);
   });
 });
+
+describe('brand claims in the brand\'s own spelling', () => {
+  const w = (n: string, a: string) => analyzeSender(n, a, []).warnings;
+  it('flags camelCase brand names used alone or with service words', () => {
+    for (const name of ['PayPal', 'Your PayPal Account', 'DocuSign', 'LinkedIn', 'FedEx', 'McAfee']) {
+      expect(w(name, 'x@account-review.example').join(' ')).toMatch(/Claims to be/);
+    }
+    expect(w('PayPal', 'service@paypal.com')).toEqual([]);
+    expect(w('Chase Smith', 'chase.smith@gmail.com')).toEqual([]);
+  });
+});

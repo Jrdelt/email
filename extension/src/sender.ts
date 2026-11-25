@@ -107,12 +107,16 @@ export function analyzeSender(
       .trim();
 
   const normalizedName = splitDisplayName(displayName);
+  // Without camelCase splitting too: "PayPal" / "Your PayPal Account" must match /\bPayPal\b/, which the split
+  // form "Pay Pal" does not.
+  const plainName = displayName.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
   const compactName = displayName.toLowerCase().replace(/[\s_.-]+/g, '');
   for (const brand of BRANDS) {
     const brandCompact = brand.name.toLowerCase().replace(/\s+/g, '');
+    const names = [normalizedName, plainName];
     const tokenizedClaim =
-      brand.pattern.test(normalizedName) &&
-      (SERVICE_WORDS.test(normalizedName) || normalizedName.toLowerCase() === brand.name.toLowerCase());
+      names.some((n) => brand.pattern.test(n)) &&
+      (names.some((n) => SERVICE_WORDS.test(n)) || compactName === brandCompact);
     const compactClaim =
       compactName.startsWith(brandCompact) && SERVICE_PREFIX.test(compactName.slice(brandCompact.length));
     if ((tokenizedClaim || compactClaim) && registrable && !brand.domains.includes(registrable)) {
