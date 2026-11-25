@@ -33,6 +33,9 @@ const DEBOUNCE_MS = 400;
 const MAX_THREAD_MESSAGES = 20; // newest messages that get full scoring and domain lookups
 const MAX_SESSION_SET = 200;
 const CLICK_INTEL_TIMEOUT_MS = 700;
+// While the sender's own domain lookup is still running, a click on a same-domain link waits a little longer
+// for it: a brand-new or non-existent sender domain is the classic phishing shape.
+const SENDER_INTEL_WAIT_MS = 2500;
 const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
 
 /** True while this content script still talks to a live extension (false after an update or reload orphans it). */
@@ -257,7 +260,9 @@ function matchAttachmentInMessages(
 }
 
 function installClickGuard(opts: {
-  findTarget: (el: Element) => { container: HTMLElement; senderAddress: string; senderRegistrable: string } | null;
+  findTarget: (
+    el: Element,
+  ) => { container: HTMLElement; senderAddress: string; senderRegistrable: string; senderIntelPending?: boolean } | null;
   findAttachment?: (el: Element) => { element: HTMLElement; name: string } | null;
   isPending: () => boolean;
   flushScan: () => Promise<void>;
@@ -363,10 +368,11 @@ function installClickGuard(opts: {
         const settings = await getSettings(browser.storage.local, managedStorage());
         if (!settings.strictLocalMode) {
           let timerId: ReturnType<typeof setTimeout> | undefined;
+          const waitMs = latest.senderIntelPending ? SENDER_INTEL_WAIT_MS : CLICK_INTEL_TIMEOUT_MS;
           const intel = await Promise.race([
             sendRuntime<DomainIntel>({ type: 'domainIntel', domain: risk.registrable }),
             new Promise<undefined>((resolve) => {
-              timerId = setTimeout(() => resolve(undefined), CLICK_INTEL_TIMEOUT_MS);
+              timerId = setTimeout(() => resolve(undefined), waitMs);
             }),
           ]).finally(() => clearTimeout(timerId));
           const finalRisk = mergeLinkIntel(risk, intel);
@@ -414,6 +420,8 @@ function installClickGuard(opts: {
 async function evaluateAndRender<T extends ScannableMsg>(opts: {
   kv: typeof browser.storage.local;
   messages: T[];
+  /** Sender domains whose online lookup is still running (shared with the click guard). */
+  intelPending?: Set<string>;
   /** Leading messages (oldest) that exceed MAX_THREAD_MESSAGES: locked unless trusted, never scored or looked up. */
   overflowCount?: number;
   trustedThisSession: Set<string>;
@@ -632,7 +640,9 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   if (!settings.strictLocalMode && intelByDomain.size > 0) {
     void Promise.all(
       [...intelByDomain.keys()].map(async (domain) => {
+        opts.intelPending?.add(domain);
         const res = await sendRuntime<DomainIntel | null>({ type: 'domainIntel', domain });
+        opts.intelPending?.delete(domain);
         intelByDomain.set(domain, res === null ? 'offline' : (res ?? 'unavailable'));
       }),
     ).then(() => {
@@ -645,6 +655,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   const trustedThisSession = new Set<string>();
   const dismissed = new Set<string>();
   const containerSender = new WeakMap<HTMLElement, { address: string; registrable: string }>();
+  const intelPending = new Set<string>();
   let lastKey = '';
   let activeContainers: HTMLElement[] = [];
   let activeMessages: ExtractedEmail[] = [];
@@ -701,6 +712,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       kv,
       messages,
       overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
+      intelPending,
       trustedThisSession,
       dismissed,
       isStale: () => my !== token,
@@ -740,7 +752,15 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       for (const c of activeContainers) {
         if (c.contains(a)) {
           const meta = containerSender.get(c);
-          return { container: c, senderAddress: meta?.address ?? '', senderRegistrable: meta?.registrable ?? '' };
+          const registrable = meta?.registrable ?? '';
+          // Until the sender's domain is checked, treat same-domain links as external so they get a click-time check.
+          const senderIntelPending = intelPending.has(registrable);
+          return {
+            container: c,
+            senderAddress: meta?.address ?? '',
+            senderRegistrable: senderIntelPending ? '' : registrable,
+            senderIntelPending,
+          };
         }
       }
       if (scheduler.isPending()) {
