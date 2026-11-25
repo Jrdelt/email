@@ -2,7 +2,8 @@ import type { Verdict } from './features';
 import type { KV } from './storage';
 
 // False-positive reports stay on this device (never sent). The user can view and clear them in the popup.
-// No email body, sender or full URLs are stored: only the verdict level, score and reason text.
+// No email body, sender, attachment names or full URLs are stored: only the verdict level, score and redacted
+// reason text.
 const KEY = 'falsePositiveReports';
 const MAX = 50;
 
@@ -22,11 +23,17 @@ export async function clearReports(kv: KV): Promise<void> {
   await kv.set({ [KEY]: [] });
 }
 
-/** Strip emails, full URLs, IP literals, and domain names so local false-alarm notes retain zero PII/PHI. */
+/**
+ * Strip attachment filenames, emails, full URLs, IP literals, and domain names so local false-alarm notes retain
+ * zero PII/PHI (a filename like "Jane Doe DOB 1980 - MRI.pdf" is health information).
+ */
 function redact(reason: string): string {
   return reason
+    .replace(/Attachment "[^"]*"/g, 'Attachment "[file]"')
+    .replace(/(blocked until you trust this email or sender) \(.*\)$/, '$1')
     .replace(/https?:\/\/[^\s)<>"]+/gi, '[url]')
     .replace(/[^\s@<>()]+@[^\s@<>()]+/g, '[address]')
     .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
+    .replace(/\b[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}\b/gi, '[ip]')
     .replace(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b/gi, '[domain]');
 }

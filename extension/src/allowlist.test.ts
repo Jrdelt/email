@@ -142,3 +142,22 @@ describe('hashEmail authentication flags', () => {
     expect(await hashEmail(...args, { viaDomain: '12.relay.evil.example' })).not.toBe(plain);
   });
 });
+
+describe('false-positive report redaction', () => {
+  it('never stores attachment filenames, addresses, URLs, IPs or domains', async () => {
+    const kv = memoryKV();
+    await recordFalsePositive(kv, {
+      score: 0.4,
+      level: 'suspicious',
+      reasons: [
+        'Attachment "Jane Doe DOB 1980 - MRI results.pdf.html" is an HTML/SVG web file (.html) commonly used for offline phishing pages',
+        'Attachments from untrusted emails are blocked until you trust this email or sender (Jane Doe MRI.pdf, Bob Smith labs.pdf +1 more)',
+        'A link goes to http://192.168.4.20/x and [2001:db8::1] via pat@clinic.example on clinic.example',
+      ],
+    });
+    const [r] = await listReports(kv);
+    const text = r!.reasons.join('\n');
+    for (const leak of ['Jane', 'Bob', 'MRI', '192.168', '2001:db8', 'pat@', 'clinic.example']) expect(text).not.toContain(leak);
+    expect(r!.reasons[0]).toContain('Attachment "[file]"');
+  });
+});
