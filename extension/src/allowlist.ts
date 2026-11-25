@@ -36,6 +36,10 @@ export async function listTrusted(kv: KV): Promise<string[]> {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && normalizeSender(x) === x) : [];
 }
 
+/**
+ * Exact-address membership only. Callers deciding trust must ALSO apply canTrustByAllowlist (sender.ts), which
+ * refuses unauthenticated senders and unexpected relays; content.ts does both.
+ */
 export async function isTrusted(kv: KV, sender: string): Promise<boolean> {
   const addr = normalizeSender(sender);
   return addr !== '' && (await listTrusted(kv)).includes(addr);
@@ -85,6 +89,7 @@ export async function listTrustedEmails(kv: KV): Promise<string[]> {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && HASH_RE.test(x)) : [];
 }
 
+/** Fingerprint membership only (see hashEmail, which already folds in the auth/relay flags). */
 export async function isEmailTrusted(kv: KV, hash: string): Promise<boolean> {
   return HASH_RE.test(hash) && (await listTrustedEmails(kv)).includes(hash);
 }
