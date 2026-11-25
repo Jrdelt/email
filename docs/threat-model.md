@@ -38,6 +38,8 @@ By default, lookup services learn only the **registrable domain** of opened emai
 - **Strict Local Mode & Enterprise Policy (`src/settings.ts`, `public/managed_schema.json`):** Users can toggle **Strict Local Mode** directly in the popup, or HIPAA/enterprise IT administrators can enforce `strictLocalMode: true` via `browser.storage.managed`, disabling all `domainIntel` `fetch()` calls (0 bytes off-device) across content, click-guard, warning, and background scripts.
 - Strict `isValidDomain` validation before constructing any request URL; `https:`-only registry RDAP bootstrap validation (`Object.create(null)` map + hostname verification).
 - `credentials: 'omit'` and `referrerPolicy: 'no-referrer'` on every `fetch`.
+- Private-use and special-use TLDs (`.local`, `.lan`, `.corp`, `.internal`, `.home`, ...) are never looked up (`isLookupDomain`), so intranet host names are not disclosed.
+- *Residual limit:* DNS-over-HTTPS queries for a sender's domain reach that domain's authoritative name servers, so a sender who runs its own DNS can infer that (and roughly when) the email was opened, even when remote content is blocked. The user's IP is not exposed (the resolver asks on its behalf). Strict Local Mode removes the signal.
 - 24-hour local cache (`domainIntelCache`), DNS `NOERROR`/`NXDOMAIN` RCODE verification (ignoring transient `SERVFAIL` errors), and `127.0.0.x` URIBL response validation.
 - Hardened local report redaction (`feedback.ts` strips emails, full URLs, IP literals, and domain names to `[address]`/`[url]`/`[ip]`/`[domain]`) and zero sender addresses stored inside `warn:*` session warnings (minimum-necessary principle).
 

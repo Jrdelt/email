@@ -9,6 +9,14 @@ const ICONS = {
 };
 
 export default defineConfig({
+  hooks: {
+    // Firefox ignores storage.managed_schema (policies come from policies.json), so don't ship the schema there.
+    'build:publicAssets': (wxt, files) => {
+      if (wxt.config.browser !== 'firefox') return;
+      const i = files.findIndex((f) => f.relativeDest === 'managed_schema.json');
+      if (i !== -1) files.splice(i, 1);
+    },
+  },
   manifest: ({ browser }) => ({
     name: 'Phishing Email Detector',
     description:

@@ -21,9 +21,9 @@ Under **45 CFR § 164.514(b)(2)** (HIPAA Safe Harbor de-identification) and **HH
 
 ### Technical Safeguards Implemented in Code
 
-1. **Zero-Egress Switch (`src/settings.ts`):** Checking **"Strict Local Mode (0 network lookups)"** in the popup — or locking `strictLocalMode: true` via enterprise policy — blocks `{ type: 'domainIntel' }` at three independent gates: `evaluateAndRender` in [content.ts](../extension/entrypoints/content.ts), `installClickGuard` in [content.ts](../extension/entrypoints/content.ts), [warning/main.ts](../extension/entrypoints/warning/main.ts), and `background.ts` before any `fetch()` is constructed.
-2. **Minimum-Necessary Ephemeral Session Storage:** Intercepted click warnings in `browser.storage.session` (`warn:*`, 1-hour TTL) intentionally omit sender email addresses (`senderAddress` is neither transmitted to `background.ts` nor stored), and tab verdicts (`tab:*`) are purged automatically when a tab closes (`tabs.onRemoved`).
-3. **Aggressive Local Redaction ([feedback.ts](../extension/src/feedback.ts)):** When saving optional local false-positive notes (`falsePositiveReports`), email addresses (`[address]`), full `http(s)` URLs (`[url]`), IPv4 literals (`[ip]`), and domain names (`[domain]`) are redacted before writing to `storage.local`. Admins can also disable local false-positive notes altogether via `disableLocalReports: true`.
+1. **Zero-Egress Switch (`src/settings.ts`):** Checking **"Strict Local Mode (0 network lookups)"** in the popup — or locking `strictLocalMode: true` via enterprise policy — blocks `{ type: 'domainIntel' }` at four independent gates: `evaluateAndRender` in [content.ts](../extension/entrypoints/content.ts), `installClickGuard` in [content.ts](../extension/entrypoints/content.ts), [warning/main.ts](../extension/entrypoints/warning/main.ts), and `background.ts` before any `fetch()` is constructed.
+2. **Minimum-Necessary Ephemeral Session Storage:** Intercepted click warnings in `browser.storage.session` (`warn:*`) hold the clicked URL but no sender address, and are removed when the user backs out or proceeds, after 1 hour, or by *"Clear all local data"*. Tab verdicts (`tab:*`) hold the latest verdict shown in the popup, including the sender's display name and address and attachment names, in memory only; they are removed when the tab closes or navigates (`tabs.onRemoved` / `tabs.onUpdated`) and by *"Clear all local data"*. Enabling Strict Local Mode also deletes cached domain-lookup results.
+3. **Aggressive Local Redaction ([feedback.ts](../extension/src/feedback.ts)):** When saving optional local false-positive notes (`falsePositiveReports`), attachment filenames (`[file]`), email addresses (`[address]`), full `http(s)` URLs (`[url]`), IPv4/IPv6 literals (`[ip]`), and domain names (`[domain]`) are redacted before writing to `storage.local`. Admins can also disable local false-positive notes altogether via `disableLocalReports: true`.
 4. **One-Way Cryptographic Trust (`trustedEmails`):** Email trust uses SHA-256 digests (`allowlist.ts`) rather than storing email text or sender names on disk, and `"Clear all local data"` in the popup wipes all allowlists, hashes, false-alarm logs, and domain caches on demand.
 5. **No `storage.sync` & No Remote Code:** All state stays strictly local in `storage.local` / `storage.session` (never synced to Google/Microsoft/Mozilla cloud profiles), with zero analytics SDKs or remote scripts.
 
@@ -35,7 +35,13 @@ Organizations subject to HIPAA, HITECH, or SOC 2 policies can lock **Strict Loca
 
 ### Google Chrome & Microsoft Edge (`ExtensionSettings` / `3rdparty` Policy)
 
-Deploy via Windows Group Policy / Intune / macOS Configuration Profile (`com.google.Chrome` or `com.microsoft.Edge`), substituting `<EXTENSION_ID>` with the published Chrome Web Store ID (`bdpnkkpanopdfhnclfcpllnlccphlejp`) or Edge Add-ons ID:
+Chromium reads extension policy from a different place on each platform. Substitute the published Chrome Web Store ID (`bdpnkkpanopdfhnclfcpllnlccphlejp`) or your Edge Add-ons ID:
+
+- **Linux:** the JSON below as a file in `/etc/opt/chrome/policies/managed/` (Chrome) or `/etc/opt/edge/policies/managed/` (Edge).
+- **Windows (GPO / Intune):** registry values under `HKLM\Software\Policies\Google\Chrome\3rdparty\extensions\<ID>\policy` (Edge: `HKLM\Software\Policies\Microsoft\Edge\3rdparty\extensions\<ID>\policy`), e.g. `strictLocalMode` = REG_DWORD `1`; set `ExtensionSettings` through the normal browser policy.
+- **macOS (Configuration Profile):** a payload for the domain `com.google.Chrome.extensions.<ID>` (Edge: `com.microsoft.Edge.extensions.<ID>`) with the key `strictLocalMode` = `true`; `ExtensionSettings` goes in the `com.google.Chrome` / `com.microsoft.Edge` payload.
+
+Linux JSON (the `3rdparty` block is the extension's managed storage):
 
 ```json
 {

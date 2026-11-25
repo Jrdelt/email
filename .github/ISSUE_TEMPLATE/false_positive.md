@@ -11,7 +11,7 @@ labels: detection
 - [ ] False negative (phishing email missed)
 
 ### Webmail Provider & Browser
-- Webmail (Gmail / Outlook Web / iCloud Mail):
+- Webmail (Gmail / Outlook Web / iCloud Mail / Yahoo Mail / Proton Mail):
 - Browser:
 
 ### Redacted Signal Summary

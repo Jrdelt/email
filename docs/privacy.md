@@ -35,6 +35,8 @@ When **Strict Local Mode** is off and the extension checks a sender's registrabl
 - **Google Public DNS (`dns.google`):** Used only as a fallback if Cloudflare's URIBL DNS query is rate-limited ([Google Public DNS Privacy](https://developers.google.com/speed/public-dns/privacy)).
 - **URIBL (`multi.uribl.com` via DNS):** Queried via DNS to check whether a domain is publicly listed for spam or phishing ([URIBL About/Policy](https://uribl.com/about.shtml)).
 
+DNS lookups are answered by the queried domain's own name servers (through the public resolver, so they see the resolver, not your IP address). Whoever runs a sender's domain, which can be the sender, may therefore notice that the domain was looked up shortly after their email was opened, even when your webmail blocks remote images. Strict Local Mode removes this signal along with every other lookup.
+
 ## 5. Data Sharing and Sale
 
 We do **not** sell, rent, license, or share user data with third parties. Aside from the bare registrable-domain lookups in Section 4 (which are disabled completely when Strict Local Mode is on), zero data leaves your browser.

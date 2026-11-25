@@ -8,7 +8,7 @@
 
 ## Store Packages Ready to Upload
 
-All ready-to-upload files are gathered in `/Users/cesardeltoro-lemire/email-detection/store-upload/` (regenerate anytime with `cd extension && npm run build:all && npm run zip:all`):
+All ready-to-upload files are gathered in `store-upload/` at the repo root (gitignored; regenerate anytime with `cd extension && npm run build:all && npm run zip:all`):
 - **Chrome Web Store ZIP:** `store-upload/phishing-email-detection-extension-0.1.0-chrome.zip` (also at `extension/.output/phishing-email-detection-extension-0.1.0-chrome.zip`)
 - **Microsoft Edge Add-ons ZIP:** `store-upload/phishing-email-detection-extension-0.1.0-edge.zip` (also at `extension/.output/phishing-email-detection-extension-0.1.0-edge.zip`)
 
@@ -24,7 +24,7 @@ Warns about phishing in webmail. Email content stays in your browser; only sende
 
 **Detailed Description** [REQUIRED — plain text, copy-paste directly]
 ```text
-Warns you about phishing emails, deceptive links, and unsafe attachments in Gmail, Outlook on the web, and iCloud Mail while keeping your email content private on your device.
+Warns you about phishing emails, deceptive links, and unsafe attachments in Gmail, Outlook on the web, iCloud Mail, Yahoo Mail, and Proton Mail while keeping your email content private on your device.
 
 FEATURES
 • Spots impersonation and scam tactics — flags fake sender names, lookalike websites, urgent account threats, unverified senders, and links that display one website in the text while pointing somewhere else.

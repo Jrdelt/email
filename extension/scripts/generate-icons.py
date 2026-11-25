@@ -1,5 +1,12 @@
-#!/usr/bin/env python3
-"""Generate crisp neo-brutalist extension PNG icons (16, 32, 48, 128) matching the website style."""
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pillow"]
+# ///
+"""Generate crisp neo-brutalist extension PNG icons (16, 32, 48, 128) matching the website style.
+
+Run with: uv run extension/scripts/generate-icons.py
+"""
 from __future__ import annotations
 
 from pathlib import Path

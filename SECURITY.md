@@ -13,7 +13,7 @@
 Use [GitHub Private Vulnerability Reporting](https://github.com/Jrdelt/email/security/advisories/new) on this repository so findings can be triaged, patched, and regression-tested before public disclosure.
 
 Include:
-1. Affected browser(s) and version(s) (Chrome, Edge, Firefox) and webmail provider (Gmail, Outlook Web, iCloud Mail).
+1. Affected browser(s) and version(s) (Chrome, Edge, Firefox) and webmail provider (Gmail, Outlook Web, iCloud Mail, Yahoo Mail, Proton Mail).
 2. A minimal, **synthetic** HTML/URL reproduction (never attach real personal emails, live phishing infrastructure, or third-party credentials).
 3. Impact assessment (e.g., link/attachment lock bypass, click-time guard bypass, allowlist spoofing, cross-frame message spoofing, or unintended network egress).
 
