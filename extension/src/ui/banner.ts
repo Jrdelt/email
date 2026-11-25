@@ -2,6 +2,7 @@ import type { AttachmentAnalysis } from '../attachments';
 import { intelWarnings } from '../domainIntel';
 import type { Verdict } from '../features';
 import { canTrustByAllowlist, type SenderInfo } from '../sender';
+import { ellipsizeMiddle, showable } from '../text';
 import { type IntelState, renderITDetails, renderSimpleDetails } from './details';
 import { createCloseIcon, createLockIcon, createStatusIcon } from './icons';
 
@@ -366,14 +367,15 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   copy.append(title, tag, reason);
   if ((model.sender && (model.sender.rawAddress || model.sender.linkDomains.length > 0)) || model.attachmentNames?.length) {
     const parts: string[] = [];
-    if (model.sender?.rawAddress) parts.push(`From: ${model.sender.rawAddress}`);
+    if (model.sender?.rawAddress) parts.push(`From: ${showable(ellipsizeMiddle(model.sender.rawAddress, 120))}`);
     if (model.sender && model.sender.linkDomains.length > 0) {
       const doms = model.sender.linkDomains;
       parts.push(`Links go to: ${doms.slice(0, 2).join(', ')}${doms.length > 2 ? ` (+${doms.length - 2})` : ''}`);
     }
     if (model.attachmentNames?.length) {
       const atts = model.attachmentNames;
-      parts.push(`Attachments: ${atts.slice(0, 2).join(', ')}${atts.length > 2 ? ` (+${atts.length - 2})` : ''}`);
+      const shownAtts = atts.slice(0, 2).map((n) => showable(ellipsizeMiddle(n, 80)));
+      parts.push(`Attachments: ${shownAtts.join(', ')}${atts.length > 2 ? ` (+${atts.length - 2})` : ''}`);
     }
     const compare = doc.createElement('div');
     compare.className = 'compare';

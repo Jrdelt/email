@@ -2,6 +2,7 @@ import { normalizeSender } from './allowlist';
 import { BRANDS, FREEMAIL, KNOWN_ESP_DOMAINS, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
 import { hostOf, isInternational, isMultiPartSuffix, isValidDomain, registrableDomain } from './domain';
 import type { Link } from './features';
+import { ellipsizeMiddle, showable } from './text';
 
 export interface SenderInfo {
   name: string; // display name as shown
@@ -89,7 +90,9 @@ export function analyzeSender(
   if (!raw) return info;
 
   if (!info.valid) warnings.push("The sender's email address looks invalid or forged");
-  if (domain && isInternational(domain)) warnings.push(`The sender's website (${domain}) uses lookalike characters`);
+  if (domain && isInternational(domain)) {
+    warnings.push(`The sender's website (${showable(ellipsizeMiddle(domain, 120))}) uses lookalike characters`);
+  }
 
   // '@' is excluded from the repeated classes and the input is capped so attacker display names cannot cause
   // catastrophic regex backtracking.
@@ -98,7 +101,9 @@ export function analyzeSender(
     .match(/[^\s<>"'()@]+@[^\s<>"'()@]+\.[a-z]{2,}/i)?.[0]
     ?.toLowerCase();
   if (shownAddr && shownAddr !== address && shownAddr !== raw.toLowerCase()) {
-    warnings.push(`The display name shows ${shownAddr}, but it was really sent from ${raw}`);
+    warnings.push(
+      `The display name shows ${showable(ellipsizeMiddle(shownAddr, 120))}, but it was really sent from ${showable(ellipsizeMiddle(raw, 120))}`,
+    );
   }
 
   const splitDisplayName = (s: string) =>

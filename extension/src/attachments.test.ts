@@ -73,3 +73,26 @@ describe('analyzeAttachments', () => {
     expect(res.reasons).toHaveLength(2);
   });
 });
+
+describe('attachment classification hardening', () => {
+  it('classifies the real extension of very long names and shows them shortened', () => {
+    const name = `Remittance_Advice_${'x'.repeat(170)}.html`;
+    const a = analyzeAttachments([name]);
+    expect(a.level).toBe('danger');
+    expect(a.reasons[0]!.length).toBeLessThan(300);
+    expect(a.reasons[0]).toContain('.html');
+  });
+
+  it('flags commonly abused container and script types', () => {
+    for (const n of ['invoice.one', 'scan.vhd', 'addin.xll', 'console.msc', 'update.appinstaller', 'q.search-ms']) {
+      expect(analyzeAttachments([n]).level).toBe('danger');
+    }
+    expect(analyzeAttachments(['photos.zipx']).level).toBe('warning');
+  });
+
+  it('treats right-to-left override names as dangerous and keeps them from reordering the sentence', () => {
+    const a = analyzeAttachments(['invoice‮fdp.exe']);
+    expect(a.level).toBe('danger');
+    expect(a.reasons.join(' ')).not.toMatch(/[‪-‮⁦-⁩]/);
+  });
+});

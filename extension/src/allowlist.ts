@@ -23,7 +23,10 @@ export function normalizeSender(input: string): string {
   if (s.length > 320 || /[,;"()\\\s]/.test(s.replace(/^[^<]*</, '').replace(/>$/, ''))) return '';
   const brackets = (s.match(/</g) ?? []).length;
   if (brackets > 1 || (s.match(/>/g) ?? []).length !== brackets) return '';
-  const addr = (brackets ? (s.match(/<([^<>]*)>$/)?.[1] ?? '') : s).toLowerCase();
+  const rawAddr = brackets ? (s.match(/<([^<>]*)>$/)?.[1] ?? '') : s;
+  // ASCII only, checked BEFORE lowercasing: 'K' (U+212A KELVIN SIGN) would otherwise fold into an ASCII 'k'.
+  if (/[^\x00-\x7f]/.test(rawAddr)) return '';
+  const addr = rawAddr.toLowerCase();
   return addr.length <= 254 && !addr.includes('..') && STRICT_EMAIL.test(addr) ? addr : '';
 }
 

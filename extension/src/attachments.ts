@@ -9,17 +9,29 @@ export interface AttachmentAnalysis {
 
 const MAX_ATTACHMENT_NAMES = 50;
 
-const HTML_SVG_EXTS = new Set(['html', 'htm', 'shtml', 'xhtml', 'svg', 'mht', 'mhtml']);
+import { ellipsizeMiddle, hasBidiControls, showable } from './text';
+
+const HTML_SVG_EXTS = new Set(['html', 'htm', 'shtml', 'xhtml', 'xht', 'svg', 'svgz', 'mht', 'mhtml']);
 
 const EXEC_EXTS = new Set([
   'exe', 'msi', 'dmg', 'pkg', 'apk', 'iso', 'img', 'lnk', 'scr', 'bat', 'cmd', 'ps1',
   'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'hta', 'jar', 'com', 'pif', 'reg', 'cpl',
   'docm', 'xlsm', 'pptm', 'dotm', 'xltm', 'potm', 'xlam', 'ppam',
+  // Containers and script types abused in recent campaigns (OneNote, disk images that skip Mark-of-the-Web,
+  // Excel add-ins, MMC snap-ins, shortcuts, help files, scriptlets, app installers, search/library connectors).
+  'one', 'vhd', 'vhdx', 'xll', 'msc', 'url', 'chm', 'wsc', 'sct', 'inf', 'psm1', 'appx', 'msix', 'appxbundle',
+  'msixbundle', 'appinstaller', 'jnlp', 'xlsb', 'library-ms', 'search-ms', 'settingcontent-ms', 'application',
 ]);
 
 const DANGEROUS_EXTS = new Set([...HTML_SVG_EXTS, ...EXEC_EXTS]);
 
-const ARCHIVE_EXTS = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'cab', 'xz', 'bz2']);
+const ARCHIVE_EXTS = new Set([
+  'zip', 'zipx', 'rar', 'r00', '001', '7z', 'tar', 'gz', 'tgz', 'cab', 'xz', 'bz2', 'arj', 'lzh', 'ace', 'uue',
+]);
+const EXT = '([a-z0-9-]{1,20})';
+const SINGLE_EXT_RE = new RegExp(`\\.${EXT}$`, 'i');
+const DOUBLE_EXT_RE = new RegExp(`\\.${EXT}\\.${EXT}$`, 'i');
+const MAX_NAME_CHARS = 1024; // classify the real (untruncated) name, bounded so matching stays cheap
 
 const PREFIX_RE =
   /^(?:attached\s+file|attachment|download\s+attachment|open\s+attachment|save\s+to\s+drive|download|preview)(?:\s*:\s*|\s+|$)/i;
@@ -37,7 +49,8 @@ export function cleanAttachmentName(raw: string): string {
     .replace(/\s*\(\s*\d+(?:[.,]\d+)?\s*(?:bytes?|kb|mb|gb)\s*\)\s*$/i, '')
     .replace(/,\s*\d+(?:[.,]\d+)?\s*(?:bytes?|kb|mb|gb)\s*$/i, '')
     .trim();
-  return s.slice(0, 160);
+  // Keep the end: a name padded past any display limit must not lose the extension the danger check reads.
+  return s.length > MAX_NAME_CHARS ? s.slice(-MAX_NAME_CHARS) : s;
 }
 
 /** Locally classify attachment filenames from an untrusted email; zero file contents touched. */
@@ -62,31 +75,37 @@ export function analyzeAttachments(names: readonly string[], rawCount = 0): Atta
   const reasons: string[] = [];
 
   for (const name of uniqueNames) {
+    const shown = showable(ellipsizeMiddle(name));
+    if (hasBidiControls(name)) {
+      hasDanger = true;
+      reasons.push(`Attachment "${shown}" hides its real file type with invisible text-direction characters`);
+      continue;
+    }
     const trimmed = name.replace(/[. ]+$/, '');
-    const dbl = trimmed.match(/\.([a-z0-9]{2,5})\.([a-z0-9]{2,5})$/i);
+    const dbl = trimmed.match(DOUBLE_EXT_RE);
     if (dbl) {
-      const ext = dbl[2].toLowerCase();
+      const ext = dbl[2]!.toLowerCase();
       if (DANGEROUS_EXTS.has(ext)) {
         hasDanger = true;
         reasons.push(
-          `Attachment "${name}" uses a disguised double extension (.${ext}) commonly used in phishing or malware`,
+          `Attachment "${shown}" uses a disguised double extension (.${ext}) commonly used in phishing or malware`,
         );
         continue;
       }
     }
 
-    const ext = trimmed.match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase() ?? '';
+    const ext = trimmed.match(SINGLE_EXT_RE)?.[1]?.toLowerCase() ?? '';
     if (!ext) continue;
     if (HTML_SVG_EXTS.has(ext)) {
       hasDanger = true;
-      reasons.push(`Attachment "${name}" is an HTML/SVG web file (.${ext}) commonly used for offline phishing pages`);
+      reasons.push(`Attachment "${shown}" is an HTML/SVG web file (.${ext}) commonly used for offline phishing pages`);
     } else if (EXEC_EXTS.has(ext)) {
       hasDanger = true;
-      reasons.push(`Attachment "${name}" is a high-risk file type (.${ext}) that can run code or carry malware`);
+      reasons.push(`Attachment "${shown}" is a high-risk file type (.${ext}) that can run code or carry malware`);
     } else if (ARCHIVE_EXTS.has(ext)) {
       hasWarning = true;
       reasons.push(
-        `Attachment "${name}" is an archive (.${ext}) — archives are commonly used to hide phishing pages or malware`,
+        `Attachment "${shown}" is an archive (.${ext}) — archives are commonly used to hide phishing pages or malware`,
       );
     }
   }
@@ -95,7 +114,10 @@ export function analyzeAttachments(names: readonly string[], rawCount = 0): Atta
   if (deduped.length === 0) {
     const shown =
       uniqueNames.length > 0
-        ? ` (${uniqueNames.slice(0, 2).join(', ')}${uniqueNames.length > 2 ? ` +${uniqueNames.length - 2} more` : ''})`
+        ? ` (${uniqueNames
+            .slice(0, 2)
+            .map((n) => showable(ellipsizeMiddle(n, 80)))
+            .join(', ')}${uniqueNames.length > 2 ? ` +${uniqueNames.length - 2} more` : ''})`
         : '';
     return {
       count,

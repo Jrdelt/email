@@ -161,3 +161,10 @@ describe('false-positive report redaction', () => {
     expect(r!.reasons[0]).toContain('Attachment "[file]"');
   });
 });
+
+describe('normalizeSender ASCII-only', () => {
+  it('rejects non-ASCII addresses instead of case-folding them into ASCII', () => {
+    expect(normalizeSender('Kate@bank.com')).toBe('');
+    expect(normalizeSender('José <jose@bank.com>')).toBe('jose@bank.com');
+  });
+});
