@@ -171,12 +171,13 @@ const LIST_FILE_SEL = [
   'a[href^="blob:"]',
   'a[href^="data:"]',
   '[download_url]',
-  // The chip strip and chips themselves (icon and padding included), not only their inner labels.
-  '.brd',
+  // The chips themselves (icon and padding included) and controls in the chip strip, but never the strip
+  // container itself, which may be a wider wrapper on real Gmail.
   '.brc',
   '.brg',
   '.brd [role="link"]',
   '.brd [role="button"]',
+  '.brd a',
 ].join(', ');
 // Anything the adapter treats as an opened message (and its attachment shelf) is handled by the normal locks.
 const OPENED_EMAIL_SEL = 'div.adn, div.a3s, [role="listitem"], div.hq, div.aQH, [role="dialog"]';

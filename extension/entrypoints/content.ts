@@ -898,9 +898,18 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     // (the context menu too: "Open link in new tab" / "Save link as" would open the unscanned file).
     for (const type of [
       'click', 'auxclick', 'dblclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
-      'touchstart', 'touchend', 'dragstart', 'keydown', 'keyup',
+      'dragstart', 'keydown', 'keyup',
     ]) {
-      document.addEventListener(type, onListEvent, { capture: true, passive: false });
+      document.addEventListener(type, onListEvent, true);
+    }
+    // Touch: keep the page's touch handlers away from the button but do not cancel the tap (that would also block
+    // scrolls that start on it); the tap's click then reaches the handler above and is refused with the notice.
+    const onListTouch = (e: Event) => {
+      const el = eventElement(e);
+      if (el && listAttachmentAt(el)) e.stopImmediatePropagation();
+    };
+    for (const type of ['touchstart', 'touchend']) {
+      document.addEventListener(type, onListTouch, { capture: true, passive: true });
     }
   }
 
