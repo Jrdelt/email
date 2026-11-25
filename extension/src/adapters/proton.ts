@@ -5,8 +5,10 @@ import {
   withSubject,
   extractSenderFromElement,
   inlineAttachmentsIn,
+  type BodyHit,
   isHidden,
-  isNestedIn,
+  pickBodies,
+  pickFrameBodies,
   sameOriginFrameDocs,
   isUnsafeNode,
   linksIn,
@@ -30,33 +32,15 @@ const isCompose = (el: HTMLElement): boolean =>
   el.getAttribute('contenteditable') === 'true' ||
   el.closest('[contenteditable="true"], [data-testid^="composer"], .composer') !== null;
 
-const hasContent = (el: HTMLElement): boolean =>
-  (el.textContent ?? '').trim().length > 0 ||
-  el.querySelector('a[href], a[data-ped-href], area[href], area[data-ped-href]') !== null;
-
-function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElement }[] {
-  const iframeHits: { container: HTMLElement; hostEl: HTMLElement }[] = [];
-  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(CONTENT_IFRAMES)) {
-    if (isHidden(iframe) || isCompose(iframe)) continue;
-    try {
-      const body = iframe.contentDocument?.body;
-      if (body && !isCompose(body) && hasContent(body)) iframeHits.push({ container: body, hostEl: iframe });
-    } catch {
-      /* cross-origin iframe */
-    }
-  }
-  if (iframeHits.length > 0) return iframeHits;
-
-  for (const sel of DIRECT_BODY_SELECTORS) {
-    const valid: HTMLElement[] = [];
-    for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
-      if (isCompose(el) || isHidden(el) || !hasContent(el)) continue;
-      if (isNestedIn(el, DIRECT_BODY_SELECTORS)) continue;
-      if (el.querySelector('iframe[data-testid="content-iframe"]')) continue;
-      if (valid.some((prev) => prev.contains(el))) continue;
-      valid.push(el);
-    }
-    if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
+function findBodies(doc: Document): BodyHit[] {
+  // A direct body that merely wraps the content iframe is not itself the message.
+  const excludedDirect = (el: HTMLElement) => isCompose(el) || el.querySelector('iframe[data-testid="content-iframe"]') !== null;
+  // Prefer bodies with content; then accept an empty one (attachment-only email) rather than skipping the message.
+  for (const requireContent of [true, false]) {
+    const framed = pickFrameBodies(doc, CONTENT_IFRAMES, isCompose, requireContent);
+    if (framed.length > 0) return framed;
+    const direct = pickBodies(doc, DIRECT_BODY_SELECTORS, excludedDirect, requireContent);
+    if (direct.length > 0) return direct;
   }
   return [];
 }

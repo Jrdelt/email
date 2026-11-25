@@ -7,8 +7,10 @@ import {
   withSubject,
   extractSenderFromElement,
   inlineAttachmentsIn,
+  type BodyHit,
   isHidden,
-  isNestedIn,
+  pickBodies,
+  pickFrameBodies,
   sameOriginFrameDocs,
   isUnsafeNode,
   linksIn,
@@ -32,33 +34,18 @@ const isEditable = (el: HTMLElement): boolean =>
   isUnsafeNode(el) ||
   el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.closest('[contenteditable="true"]') !== null;
 
-const hasContent = (el: HTMLElement): boolean =>
-  (el.textContent ?? '').trim().length > 0 ||
-  el.querySelector('a[href], a[data-ped-href], area[href], area[data-ped-href]') !== null;
-
 /** Unwrap Microsoft Defender Safe Links (and nested redirect wrappers) when pointing to http(s). */
 export const unwrapSafeLink = unwrapRedirectUrl;
 
-function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElement }[] {
-  for (const sel of BODY_SELECTORS) {
-    const valid: HTMLElement[] = [];
-    for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
-      if (isEditable(el) || isHidden(el) || !hasContent(el)) continue;
-      if (isNestedIn(el, BODY_SELECTORS)) continue;
-      if (valid.some((prev) => prev.contains(el))) continue;
-      valid.push(el);
-    }
-    if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
+function findBodies(doc: Document): BodyHit[] {
+  // Prefer bodies with content; then accept an empty one (attachment-only email) rather than skipping the message.
+  for (const requireContent of [true, false]) {
+    const direct = pickBodies(doc, BODY_SELECTORS, isEditable, requireContent);
+    if (direct.length > 0) return direct;
+    const framed = pickFrameBodies(doc, BODY_IFRAMES, isEditable, requireContent);
+    if (framed.length > 0) return framed;
   }
-  const results: { container: HTMLElement; hostEl: HTMLElement }[] = [];
-  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(BODY_IFRAMES)) {
-    if (isHidden(iframe)) continue;
-    try {
-      const body = iframe.contentDocument?.body;
-      if (body && !isEditable(body) && hasContent(body)) results.push({ container: body, hostEl: iframe });
-    } catch { /* cross-origin iframe */ }
-  }
-  return results;
+  return [];
 }
 
 function findMessageScope(doc: Document, hostEl: HTMLElement): HTMLElement | null {

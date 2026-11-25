@@ -5,8 +5,10 @@ import {
   withSubject,
   extractSenderFromElement,
   inlineAttachmentsIn,
+  type BodyHit,
   isHidden,
-  isNestedIn,
+  pickBodies,
+  pickFrameBodies,
   sameOriginFrameDocs,
   isUnsafeNode,
   linksIn,
@@ -27,32 +29,15 @@ const isCompose = (el: HTMLElement): boolean =>
   el.getAttribute('contenteditable') === 'true' ||
   el.closest('[contenteditable="true"], [data-test-id="compose-editor"], [data-test-id="rte"]') !== null;
 
-const hasContent = (el: HTMLElement): boolean =>
-  (el.textContent ?? '').trim().length > 0 ||
-  el.querySelector('a[href], a[data-ped-href], area[href], area[data-ped-href]') !== null;
-
-function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElement }[] {
-  for (const sel of BODY_SELECTORS) {
-    const valid: HTMLElement[] = [];
-    for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
-      if (isCompose(el) || isHidden(el) || !hasContent(el)) continue;
-      if (isNestedIn(el, BODY_SELECTORS)) continue;
-      if (valid.some((prev) => prev.contains(el))) continue;
-      valid.push(el);
-    }
-    if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
+function findBodies(doc: Document): BodyHit[] {
+  // Prefer bodies with content; then accept an empty one (attachment-only email) rather than skipping the message.
+  for (const requireContent of [true, false]) {
+    const direct = pickBodies(doc, BODY_SELECTORS, isCompose, requireContent);
+    if (direct.length > 0) return direct;
+    const framed = pickFrameBodies(doc, BODY_IFRAMES, isCompose, requireContent);
+    if (framed.length > 0) return framed;
   }
-  const results: { container: HTMLElement; hostEl: HTMLElement }[] = [];
-  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(BODY_IFRAMES)) {
-    if (isHidden(iframe)) continue;
-    try {
-      const body = iframe.contentDocument?.body;
-      if (body && !isCompose(body) && hasContent(body)) results.push({ container: body, hostEl: iframe });
-    } catch {
-      /* cross-origin iframe */
-    }
-  }
-  return results;
+  return [];
 }
 
 /** The message card around the body (never the body or its own wrapper, which hold no header or attachments). */

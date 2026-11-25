@@ -42,6 +42,65 @@ export function isNestedIn(el: Element, selectors: readonly string[]): boolean {
 export const MAX_HEADER_CHARS = 1000;
 export const ADDRESS_TOKEN_RE = /[^\s<>"'(),;@]+@[^\s<>"'(),;@]+\.[^\s<>"'(),;@]+/;
 
+/**
+ * True when a body element holds anything worth scanning: text, any kind of link (HTML/SVG/image map), a form,
+ * media, or an inline/stashed download. Image-only, SVG-only and form-only phishing bodies count.
+ */
+export function hasMessageContent(el: Element): boolean {
+  if (textOf(el).trim().length > 0) return true;
+  return (
+    el.querySelector(
+      'a, area, form, input, button, img, svg, picture, video, object, embed, [formaction], [data-ped-href], [data-ped-xlink-href], [data-ped-att-href], [data-ped-formaction]',
+    ) !== null
+  );
+}
+
+export type BodyHit = { container: HTMLElement; hostEl: HTMLElement };
+
+/**
+ * Message bodies for adapters: the first selector (in priority order) with visible, non-excluded matches, keeping
+ * only the outermost candidates. With `requireContent`, empty candidates are skipped; adapters retry without it so
+ * an email with only an attachment (empty body) is still found, scanned and attachment-locked.
+ */
+export function pickBodies(
+  doc: Document,
+  selectors: readonly string[],
+  excluded: (el: HTMLElement) => boolean,
+  requireContent: boolean,
+): BodyHit[] {
+  for (const sel of selectors) {
+    const valid: HTMLElement[] = [];
+    for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
+      if (excluded(el) || isHidden(el) || (requireContent && !hasMessageContent(el))) continue;
+      if (isNestedIn(el, selectors)) continue;
+      if (valid.some((prev) => prev.contains(el))) continue;
+      valid.push(el);
+    }
+    if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
+  }
+  return [];
+}
+
+/** Bodies of same-origin message iframes (cross-origin ones are skipped). */
+export function pickFrameBodies(
+  doc: Document,
+  selector: string,
+  excluded: (el: HTMLElement) => boolean,
+  requireContent: boolean,
+): BodyHit[] {
+  const out: BodyHit[] = [];
+  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(selector)) {
+    if (isHidden(iframe) || excluded(iframe)) continue;
+    try {
+      const body = iframe.contentDocument?.body;
+      if (body && !excluded(body) && (!requireContent || hasMessageContent(body))) out.push({ container: body, hostEl: iframe });
+    } catch {
+      /* cross-origin iframe */
+    }
+  }
+  return out;
+}
+
 /** Same-origin documents of the iframes matching `selector` (cross-origin ones are skipped). */
 export function sameOriginFrameDocs(doc: Document, selector: string): Document[] {
   const out: Document[] = [];

