@@ -82,3 +82,12 @@ describe('setStrictLocalMode keeps managed policy out of local storage', () => {
     expect(afterPolicyRemoved.disableLocalReports).toBe(false);
   });
 });
+
+describe('Strict Local Mode clears lookup caches', () => {
+  it('removes cached domain intel when turned on', async () => {
+    const kv = memoryKV() as ReturnType<typeof memoryKV> & { remove?: (k: string | string[]) => Promise<void> };
+    await kv.set({ domainIntelCache: { 'evil.example': {} }, rdapBootstrap: { at: 1, map: {} } });
+    await setStrictLocalMode(kv, true);
+    expect(Object.keys((await kv.get('domainIntelCache')).domainIntelCache as object)).toEqual([]);
+  });
+});

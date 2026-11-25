@@ -2,7 +2,7 @@ import { isLookupDomain } from '../src/domain';
 import { getIntel, type DomainIntel } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { isSafeHttpUrl } from '../src/linkGuard';
-import { getSettings } from '../src/settings';
+import { clearLookupCaches, getSettings } from '../src/settings';
 
 const WARN_TTL_MS = 3600_000;
 const MAX_BODY_CHARS = 20_000;
@@ -49,6 +49,7 @@ async function pruneOldWarnings(now: number): Promise<void> {
 
 export default defineBackground(() => {
   const inflight = new Map<string, Promise<DomainIntel>>();
+  let lookupCachesCleared = false;
 
   browser.tabs?.onRemoved?.addListener((tabId: number) => {
     void browser.storage.session?.remove?.(`tab:${tabId}`).catch(() => {});
@@ -98,7 +99,14 @@ export default defineBackground(() => {
       const domain = m.domain;
       return (async () => {
         const settings = await getSettings(browser.storage.local, browser.storage.managed);
-        if (settings.strictLocalMode) return null;
+        if (settings.strictLocalMode) {
+          // Also covers Strict Local Mode enforced by managed policy: drop old lookup results once per worker.
+          if (!lookupCachesCleared) {
+            lookupCachesCleared = true;
+            await clearLookupCaches(browser.storage.local).catch(() => {});
+          }
+          return null;
+        }
         let p = inflight.get(domain);
         if (!p) {
           p = getIntel(browser.storage.local, domain, (u, i) => fetch(u, i)).finally(() => inflight.delete(domain));
