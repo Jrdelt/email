@@ -15,7 +15,7 @@ import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
 import { icloudFrameRole, WEBMAIL_MATCHES } from '../src/hosts';
 import { analyzeLinkDestination, isSafeHttpUrl, mergeLinkIntel } from '../src/linkGuard';
-import { analyzeSender, canTrustByAllowlist } from '../src/sender';
+import { analyzeSender, canTrustByAllowlist, type SenderInfo } from '../src/sender';
 import { getSettings } from '../src/settings';
 import {
   isAttachmentLocked,
@@ -29,7 +29,7 @@ import { isLocked, lockLinks, setLinkBlockedHandler, unlockLinks } from '../src/
 import { showPausedAttachmentToast, showPausedLinkToast } from '../src/ui/linkToast';
 
 const DEBOUNCE_MS = 400;
-const MAX_THREAD_MESSAGES = 20;
+const MAX_THREAD_MESSAGES = 20; // newest messages that get full scoring and domain lookups
 const MAX_SESSION_SET = 200;
 const CLICK_INTEL_TIMEOUT_MS = 700;
 const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
@@ -70,6 +70,22 @@ interface ScannableMsg {
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
   attachmentNames?: string[];
+}
+
+const SAFE_VERDICT: Verdict = { score: 0, level: 'safe', reasons: [] };
+
+/**
+ * Verdict for open messages beyond MAX_THREAD_MESSAGES. They are not scored, so fail closed:
+ * treat them as suspicious, which pauses links and attachments until the user trusts the thread.
+ */
+function overflowVerdict(overflowCount: number): Verdict {
+  return {
+    score: 0.3,
+    level: 'suspicious',
+    reasons: [
+      `This conversation has too many open messages to check; links and attachments in the oldest ${overflowCount} are paused`,
+    ],
+  };
 }
 
 function addBounded(set: Set<string>, key: string): void {
@@ -344,6 +360,8 @@ function installClickGuard(opts: {
 async function evaluateAndRender<T extends ScannableMsg>(opts: {
   kv: typeof browser.storage.local;
   messages: T[];
+  /** Leading messages (oldest) that exceed MAX_THREAD_MESSAGES: locked unless trusted, never scored or looked up. */
+  overflowCount?: number;
   trustedThisSession: Set<string>;
   dismissed: Set<string>;
   isStale: () => boolean;
@@ -353,6 +371,9 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   unlockMatching: (emails: T[]) => void;
 }) {
   const { kv, messages, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
+  const overflowCount = Math.min(opts.overflowCount ?? 0, messages.length);
+  const untrustedVerdict = (overflow: boolean, sender: SenderInfo, email: T): Verdict =>
+    overflow ? overflowVerdict(overflowCount) : scoreEmail(sender.address, email.body, email.links);
   const [settings, trustedSendersList, trustedEmailsList, prelim] = await Promise.all([
     getSettings(kv, managedStorage()),
     // Storage reads fail after an extension update orphans this script: fail closed (no trust) and keep scanning.
@@ -372,7 +393,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   const threadHashKey = prelim.map((p) => p.hash).join(',');
   const threadUnlocked = trustedThisSession.has(threadHashKey);
 
-  const items = prelim.map(({ email, attNames, attCount, hash }) => {
+  const items = prelim.map(({ email, attNames, attCount, hash }, index) => {
+    const overflow = index < overflowCount;
     const sender = analyzeSender(email.senderName, email.senderAddress, email.links, {
       viaDomain: email.viaDomain,
       unauthenticated: email.unauthenticated,
@@ -385,18 +407,16 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       );
     }
     const trusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash) || allowlistTrusted;
-    const verdict: Verdict = trusted
-      ? { score: 0, level: 'safe', reasons: [] }
-      : scoreEmail(sender.address, email.body, email.links);
+    const verdict: Verdict = trusted ? SAFE_VERDICT : untrustedVerdict(overflow, sender, email);
     const attAnalysis: AttachmentAnalysis | undefined = trusted ? undefined : analyzeAttachments(attNames, attCount);
-    return { email, attNames, attCount, hash, sender, allowlistTrusted, trusted, verdict, attAnalysis };
+    return { email, attNames, attCount, hash, sender, allowlistTrusted, trusted, overflow, verdict, attAnalysis };
   });
   if (isStale()) return;
   onEvaluated?.(items);
 
   const intelByDomain = new Map<string, IntelState>();
   for (const item of items) {
-    if (!item.trusted && item.sender.registrable && !intelByDomain.has(item.sender.registrable)) {
+    if (!item.trusted && !item.overflow && item.sender.registrable && !intelByDomain.has(item.sender.registrable)) {
       intelByDomain.set(item.sender.registrable, settings.strictLocalMode ? 'offline' : 'loading');
     }
   }
@@ -482,7 +502,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           for (const { item } of evaluated) {
             addBounded(trustedThisSession, item.hash);
             item.trusted = true;
-            item.verdict = { score: 0, level: 'safe', reasons: [] };
+            item.verdict = SAFE_VERDICT;
             item.attAnalysis = undefined;
           }
           setAttachmentBlockedHandler(document, null);
@@ -491,7 +511,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           void sendRuntime({
             type: 'verdict',
             payload: {
-              verdict: { score: 0, level: 'safe', reasons: [] },
+              verdict: SAFE_VERDICT,
               sender: primaryEntry.item.sender,
               intel: primaryEntry.intel,
               trusted: true,
@@ -506,9 +526,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           for (const { item } of evaluated) {
             trustedThisSession.delete(item.hash);
             item.trusted = item.allowlistTrusted;
-            item.verdict = item.trusted
-              ? { score: 0, level: 'safe', reasons: [] }
-              : scoreEmail(item.sender.address, item.email.body, item.email.links);
+            item.verdict = item.trusted ? SAFE_VERDICT : untrustedVerdict(item.overflow, item.sender, item.email);
             item.attAnalysis = item.trusted ? undefined : analyzeAttachments(item.attNames, item.attCount);
           }
           await untrustEmails(kv, hashes);
@@ -524,7 +542,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
               if (item.sender.address === addr && canTrustByAllowlist(item.sender)) {
                 item.allowlistTrusted = true;
                 item.trusted = true;
-                item.verdict = { score: 0, level: 'safe', reasons: [] };
+                item.verdict = SAFE_VERDICT;
                 item.attAnalysis = undefined;
                 matched.push(item.email);
               }
@@ -588,7 +606,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       return;
     }
 
-    const messages = emails.slice(-MAX_THREAD_MESSAGES);
+    const messages = emails;
     for (const m of messages) guardDoc(ownerDocOf(m.container));
     const threadKey = messages.map(msgKey).join('\n---\n');
     const nextContainers = messages.map((m) => m.container);
@@ -620,6 +638,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     await evaluateAndRender({
       kv,
       messages,
+      overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
       trustedThisSession,
       dismissed,
       isStale: () => my !== token,
@@ -816,7 +835,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       if (headers.length > 0) void sendRuntime({ type: 'icloudPing' });
     }
 
-    const messages = combineICloudThread(headers, sandboxBodies).slice(-MAX_THREAD_MESSAGES);
+    const messages = combineICloudThread(headers, sandboxBodies);
     if (messages.length === 0) {
       setFramesLocked([...sandboxBodies.keys()], false, false);
       if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
@@ -850,6 +869,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
     await evaluateAndRender({
       kv,
       messages,
+      overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
       trustedThisSession,
       dismissed,
       isStale: () => my !== token,
