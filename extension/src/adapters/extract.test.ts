@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 import { MAX_ATTACHMENTS, inlineAttachmentsIn } from './extract';
+import { outlook } from './outlook';
+import { proton } from './proton';
+import { yahoo } from './yahoo';
 
 const body = (html: string) => {
   document.body.innerHTML = `<div id="m">${html}</div>`;
@@ -32,4 +35,38 @@ describe('inlineAttachmentsIn', () => {
     expect(found).toHaveLength(MAX_ATTACHMENTS + 1);
     expect(found[found.length - 1]!.element).toBe(m);
   });
+});
+
+
+describe('decoy body markers inside the email cannot replace the real body', () => {
+  const PHISH = '<a id="evil" href="http://192.168.4.20/login">https://www.paypal.com/signin</a>';
+  const cases = [
+    {
+      name: 'outlook',
+      adapter: outlook,
+      html: `<div aria-label="Reading Pane"><div role="listitem"><span aria-label="From: X &lt;x@evil.example&gt;">X</span>
+        <div id="UniqueMessageBody_1">Urgent ${PHISH}<div aria-label="Message body">Regards</div></div></div></div>`,
+    },
+    {
+      name: 'yahoo',
+      adapter: yahoo,
+      html: `<div data-test-id="message-card"><span data-test-id="message-from" title="x@evil.example">X</span>
+        <div class="msg-body">Urgent ${PHISH}<div data-test-id="message-view-body-content">Regards</div></div></div>`,
+    },
+    {
+      name: 'proton',
+      adapter: proton,
+      html: `<article><span data-testid="message-header:from" title="x@evil.example">X</span>
+        <div class="message-content">Urgent ${PHISH}<div data-testid="message-content:body">Regards</div></div></article>`,
+    },
+  ];
+  for (const { name, adapter, html } of cases) {
+    it(`${name}: the outermost body is scanned, so the phishing link is seen`, () => {
+      document.body.innerHTML = html;
+      const all = adapter.extractAll!(document);
+      expect(all).toHaveLength(1);
+      expect(all[0]!.container.contains(document.getElementById('evil'))).toBe(true);
+      expect(all[0]!.links.map((l) => l.href)).toContain('http://192.168.4.20/login');
+    });
+  }
 });

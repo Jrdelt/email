@@ -8,6 +8,7 @@ import {
   extractSenderFromElement,
   inlineAttachmentsIn,
   isHidden,
+  isNestedIn,
   isUnsafeNode,
   linksIn,
 } from './extract';
@@ -40,6 +41,7 @@ function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElemen
     const valid: HTMLElement[] = [];
     for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
       if (isEditable(el) || isHidden(el) || !hasContent(el)) continue;
+      if (isNestedIn(el, BODY_SELECTORS)) continue;
       if (valid.some((prev) => prev.contains(el))) continue;
       valid.push(el);
     }

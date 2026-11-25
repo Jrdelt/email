@@ -6,6 +6,7 @@ import {
   extractSenderFromElement,
   inlineAttachmentsIn,
   isHidden,
+  isNestedIn,
   isUnsafeNode,
   linksIn,
 } from './extract';
@@ -49,6 +50,7 @@ function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElemen
     const valid: HTMLElement[] = [];
     for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
       if (isCompose(el) || isHidden(el) || !hasContent(el)) continue;
+      if (isNestedIn(el, DIRECT_BODY_SELECTORS)) continue;
       if (el.querySelector('iframe[data-testid="content-iframe"]')) continue;
       if (valid.some((prev) => prev.contains(el))) continue;
       valid.push(el);

@@ -22,6 +22,16 @@ export const isHidden = (el: Element): boolean => closestEl(el, '[hidden], [aria
  */
 export const isUnsafeNode = (el: Element): boolean => isFormEl(el);
 
+/**
+ * True when `el` sits inside another element matching any of `selectors`. Adapters use it so that an element
+ * in the email HTML carrying a body marker (aria-label="Message body", data-testid=...) cannot replace the real
+ * body as the scanned and locked container: only the outermost body candidate counts.
+ */
+export function isNestedIn(el: Element, selectors: readonly string[]): boolean {
+  const parent = el.parentElement;
+  return parent !== null && closestEl(parent, selectors.join(', ')) !== null;
+}
+
 export const bodyText = (el: HTMLElement) => textOf(el).slice(0, MAX_BODY_CHARS);
 
 /** Parse a header string like `PayPal <a@b.com>`, `PayPal (a@b.com)`, or bare `a@b.com`. */
