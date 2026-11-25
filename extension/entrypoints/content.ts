@@ -71,6 +71,7 @@ interface ScannableMsg {
   unauthenticated?: boolean;
   body: string;
   links: Link[];
+  linksTruncated?: boolean;
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
   attachmentNames?: string[];
@@ -89,6 +90,16 @@ function overflowVerdict(overflowCount: number): Verdict {
     reasons: [
       `This conversation has too many open messages to check; links and attachments in the oldest ${overflowCount} are paused`,
     ],
+  };
+}
+
+/** Not every link could be checked (padding past MAX_LINKS): never let such an email score safe. */
+function withTooManyLinks(v: Verdict): Verdict {
+  const reason = 'This email has too many links to check them all, so its links are paused';
+  return {
+    score: Math.max(v.score, 0.3),
+    level: v.level === 'safe' ? 'suspicious' : v.level,
+    reasons: [...v.reasons, reason],
   };
 }
 
@@ -194,7 +205,7 @@ const arraysEqual = <T>(a: readonly T[], b: readonly T[]): boolean =>
 const msgKey = (e: ScannableMsg) => {
   const names = attachmentNamesOf(e);
   const links = e.links.map((l) => `${l.href}\t${l.text}`).join('\n');
-  return `${e.senderName}\n${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}\nlinks:${links}\natt:${names.join('|')}:${names.length}:${e.attachments?.length ?? 0}:${e.attachmentContainers?.length ?? 0}`;
+  return `${e.senderName}\n${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}\nlinks${e.linksTruncated ? '+' : ''}:${links}\natt:${names.join('|')}:${names.length}:${e.attachments?.length ?? 0}:${e.attachmentContainers?.length ?? 0}`;
 };
 
 
@@ -388,8 +399,11 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
 }) {
   const { kv, messages, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
   const overflowCount = Math.min(opts.overflowCount ?? 0, messages.length);
-  const untrustedVerdict = (overflow: boolean, sender: SenderInfo, email: T): Verdict =>
-    overflow ? overflowVerdict(overflowCount) : scoreEmail(sender.address, email.body, email.links);
+  const untrustedVerdict = (overflow: boolean, sender: SenderInfo, email: T): Verdict => {
+    if (overflow) return overflowVerdict(overflowCount);
+    const v = scoreEmail(sender.address, email.body, email.links);
+    return email.linksTruncated ? withTooManyLinks(v) : v;
+  };
   const [settings, trustedSendersList, trustedEmailsList, prelim] = await Promise.all([
     getSettings(kv, managedStorage()),
     // Storage reads fail after an extension update orphans this script: fail closed (no trust) and keep scanning.
@@ -809,7 +823,7 @@ function runICloudSandbox() {
 
   const report = (force = false) => {
     if (document.hidden) return;
-    const { active, body, links, attachments, container } = extractICloudSandbox(document);
+    const { active, body, links, linksTruncated = false, attachments, container } = extractICloudSandbox(document);
     if (!active || !container) {
       if (document.body) unlockLinks(document.body);
       if (activeInlineAtts.length) {
@@ -825,11 +839,11 @@ function runICloudSandbox() {
       return;
     }
     const attachmentNames = attachments.map((a) => a.name);
-    const sig = JSON.stringify({ active, body, links, attachmentNames });
+    const sig = JSON.stringify({ active, body, links, linksTruncated, attachmentNames });
     if (force || sig !== lastSig) {
       if (sig !== lastSig) awaitingVerdict = true;
       lastSig = sig;
-      void sendRuntime({ type: 'icloudBody', active: true, body, links, attachmentNames });
+      void sendRuntime({ type: 'icloudBody', active: true, body, links, linksTruncated, attachmentNames });
     }
     if (desiredLocked) lockLinks(container);
     syncInlineAttachmentLocks(attachments, desiredAttachmentsLocked);
@@ -1015,7 +1029,15 @@ function runICloudApp(kv: typeof browser.storage.local) {
 
   browser.runtime.onMessage.addListener((msg: unknown) => {
     const m = msg as
-      | { type?: string; frameId?: unknown; active?: unknown; body?: unknown; links?: unknown; attachmentNames?: unknown }
+      | {
+          type?: string;
+          frameId?: unknown;
+          active?: unknown;
+          body?: unknown;
+          links?: unknown;
+          linksTruncated?: unknown;
+          attachmentNames?: unknown;
+        }
       | undefined;
     if (m?.type === 'icloudBlocked') {
       currentReopen?.();
@@ -1029,6 +1051,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       const payload: ICloudSandboxPayload = {
         body: typeof m.body === 'string' ? m.body : '',
         links: Array.isArray(m.links) ? (m.links as Link[]) : [],
+        ...(m.linksTruncated === true ? { linksTruncated: true } : {}),
         ...(attachmentNames.length ? { attachmentNames } : {}),
       };
       sandboxBodies.set(m.frameId, payload);

@@ -12,7 +12,7 @@ import {
   pickFrameBodies,
   sameOriginFrameDocs,
   isUnsafeNode,
-  linksIn,
+  linkFields,
 } from './extract';
 import type { AttachmentRef, WebmailAdapter } from './types';
 
@@ -220,13 +220,13 @@ export const outlook: WebmailAdapter = {
       const { senderName, senderAddress } = findSender(doc, container, hostEl);
       const subject = findSubject(doc, container);
       const body = withSubject(subject, bodyText(container));
-      const links = linksIn(container); // linksIn already unwraps Safe Links and other redirect wrappers
+      const linkInfo = linkFields(container); // unwraps Safe Links and other redirect wrappers
       const { attachments, attachmentContainers } = extractOutlookAttachments(doc, container, hostEl);
       return {
         senderName,
         senderAddress,
         body,
-        links,
+        ...linkInfo,
         ...(attachments.length ? { attachments } : {}),
         ...(attachmentContainers.length ? { attachmentContainers } : {}),
         container,

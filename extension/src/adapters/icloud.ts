@@ -10,6 +10,7 @@ import {
   isHidden,
   isUnsafeNode,
   linksIn,
+  scanLinks,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
@@ -30,6 +31,7 @@ export interface ICloudHeader {
 export interface ICloudSandboxPayload {
   body: string;
   links: Link[];
+  linksTruncated?: boolean;
   attachmentNames?: string[];
 }
 
@@ -38,6 +40,7 @@ export interface ICloudThreadMessage {
   senderAddress: string;
   body: string;
   links: Link[];
+  linksTruncated?: boolean;
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
   attachmentNames?: string[];
@@ -237,7 +240,14 @@ export function extractICloudHeaders(doc: Document): ICloudHeader[] {
 export function extractICloudSandbox(
   doc: Document,
   viewport?: { width: number; height: number },
-): { active: boolean; body: string; links: Link[]; attachments: AttachmentRef[]; container: HTMLElement | null } {
+): {
+  active: boolean;
+  body: string;
+  links: Link[];
+  linksTruncated?: boolean;
+  attachments: AttachmentRef[];
+  container: HTMLElement | null;
+} {
   const bodyEl = doc.body;
   if (!bodyEl) return { active: false, body: '', links: [], attachments: [], container: null };
 
@@ -247,11 +257,11 @@ export function extractICloudSandbox(
   }
 
   const body = bodyText(bodyEl);
-  const links = linksIn(bodyEl);
+  const { links, truncated } = scanLinks(bodyEl);
   const attachments = inlineAttachmentsIn(bodyEl);
   const active = body.trim().length > 0 || links.length > 0 || attachments.length > 0 || bodyEl.querySelector('form') !== null;
   if (!active) return { active: false, body: '', links: [], attachments: [], container: null };
-  return { active: true, body, links, attachments, container: bodyEl };
+  return { active: true, body, links, ...(truncated ? { linksTruncated: true } : {}), attachments, container: bodyEl };
 }
 
 function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: ICloudSandboxPayload | undefined): ICloudThreadMessage {
@@ -262,6 +272,7 @@ function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: IC
     senderAddress: h.senderAddress,
     body,
     links: payload?.links ?? [],
+    ...(payload?.linksTruncated ? { linksTruncated: true } : {}),
     ...(h.attachments.length ? { attachments: h.attachments } : {}),
     ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
     ...(attachmentNames.length ? { attachmentNames } : {}),

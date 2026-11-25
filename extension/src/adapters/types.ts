@@ -12,6 +12,8 @@ export interface ExtractedEmail {
   unauthenticated?: boolean; // true when webmail flags sender verification failure
   body: string;
   links: Link[];
+  /** More distinct links than can be checked: the email is treated as suspicious (fail closed). */
+  linksTruncated?: boolean;
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
   container: HTMLElement; // element holding the message body (used for link locking)

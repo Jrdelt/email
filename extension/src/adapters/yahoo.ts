@@ -11,7 +11,7 @@ import {
   pickFrameBodies,
   sameOriginFrameDocs,
   isUnsafeNode,
-  linksIn,
+  linkFields,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
@@ -151,7 +151,7 @@ export const yahoo: WebmailAdapter = {
         senderName,
         senderAddress,
         body,
-        links: linksIn(container),
+        ...linkFields(container),
         ...(attachments.length ? { attachments } : {}),
         ...(attachmentContainers.length ? { attachmentContainers } : {}),
         container,

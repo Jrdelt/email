@@ -10,7 +10,7 @@ import {
   inlineAttachmentsIn,
   isHidden,
   isUnsafeNode,
-  linksIn,
+  linkFields,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
@@ -212,7 +212,7 @@ export const gmail: WebmailAdapter = {
         ...(viaDomain ? { viaDomain } : {}),
         ...(unauthenticated ? { unauthenticated: true } : {}),
         body,
-        links: linksIn(container),
+        ...linkFields(container),
         ...(attachments.length ? { attachments } : {}),
         ...(attachmentContainers.length ? { attachmentContainers } : {}),
         container,

@@ -217,7 +217,12 @@ export function extractSenderFromElement(
 
 const ANIMATED_HREF = new Set(['href', 'xlink:href']);
 
-export const linksIn = (el: HTMLElement): Link[] => {
+/**
+ * Links, form actions and SMIL link targets inside `el` (de-duplicated). `truncated` is set when there are more
+ * distinct links than MAX_LINKS: the extras cannot be checked, so callers treat the email as suspicious (fail closed)
+ * instead of letting padding links hide the real one.
+ */
+export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean } {
   const base = ownerDocOf(el).baseURI || 'https://invalid.local';
   const out: Link[] = [];
   const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
@@ -229,7 +234,7 @@ export const linksIn = (el: HTMLElement): Link[] => {
       const target = (getAttr(node, 'attributeName') ?? getAttr(node, 'data-ped-anim-attr') ?? '').trim().toLowerCase();
       if (!ANIMATED_HREF.has(target)) continue;
       const anchor = closestEl(node, 'a');
-      const text = anchor ? textOf(anchor) : '';
+      const text = anchor ? textOf(anchor).slice(0, MAX_LINK_TEXT_CHARS) : '';
       const values = [getAttr(node, 'to') ?? '', ...(getAttr(node, 'values') ?? '').split(';')];
       for (const raw of values) {
         const href = resolveAgainstBase(raw, base);
@@ -250,10 +255,11 @@ export const linksIn = (el: HTMLElement): Link[] => {
         getAttr(node, 'data-ped-att-formaction') ??
         '';
       const href = resolveAgainstBase(raw, base);
-      if (href) out.push({ text: (textOf(node) || getAttr(node, 'value') || '').trim(), href });
+      const text = (textOf(node) || getAttr(node, 'value') || '').slice(0, MAX_LINK_TEXT_CHARS).trim();
+      if (href) out.push({ text, href });
     }
   }
-  // Identical links add nothing; past the cap keep the first and last ones so padding cannot hide a link.
+  // Identical links add nothing; past the cap keep the first and last ones for scoring and report the truncation.
   const seen = new Set<string>();
   const unique = out.filter((l) => {
     const key = `${l.href}\t${l.text}`;
@@ -261,8 +267,16 @@ export const linksIn = (el: HTMLElement): Link[] => {
     seen.add(key);
     return true;
   });
-  return headAndTail(unique, MAX_LINKS);
-};
+  return { links: headAndTail(unique, MAX_LINKS), truncated: unique.length > MAX_LINKS };
+}
+
+export const linksIn = (el: HTMLElement): Link[] => scanLinks(el).links;
+
+/** `links` plus `linksTruncated` for ExtractedEmail objects. */
+export function linkFields(el: HTMLElement): { links: Link[]; linksTruncated?: true } {
+  const { links, truncated } = scanLinks(el);
+  return truncated ? { links, linksTruncated: true } : { links };
+}
 
 function filenameFromHref(rawHref: string, base: string): string {
   const lower = rawHref.trim().toLowerCase();

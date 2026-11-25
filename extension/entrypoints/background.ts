@@ -75,6 +75,7 @@ export default defineBackground(() => {
           body?: unknown;
           links?: unknown;
           attachmentNames?: unknown;
+          linksTruncated?: unknown;
           locked?: unknown;
           attachmentsLocked?: unknown;
           frameIds?: unknown;
@@ -184,6 +185,8 @@ export default defineBackground(() => {
           active: Boolean(m.active),
           body: typeof m.body === 'string' ? m.body.slice(0, MAX_BODY_CHARS) : '',
           links,
+          // Over-cap link lists are also truncated here, so report that the extras were not checked.
+          linksTruncated: m.linksTruncated === true || (Array.isArray(m.links) && m.links.length > MAX_LINKS),
           attachmentNames,
         })
         .catch(() => {});

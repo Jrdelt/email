@@ -140,3 +140,15 @@ describe('bodies without text are still scanned', () => {
     expect(proton.extractAll!(document)[0]!.links.map((l) => l.href)).toContain('https://evil.example/steal');
   });
 });
+
+describe('link truncation is reported (fail closed)', () => {
+  it('flags emails with more distinct links than can be checked', async () => {
+    const { scanLinks, MAX_LINKS } = await import('./extract');
+    const pad = (n: number, off: number) =>
+      Array.from({ length: n }, (_, i) => `<a href="https://www.paypal.com/help/${i + off}">help</a>`).join('');
+    const both = scanLinks(body(`${pad(250, 0)}<a href="http://192.168.4.20/">x</a>${pad(250, 1000)}`));
+    expect(both.truncated).toBe(true);
+    expect(both.links.length).toBeLessThanOrEqual(MAX_LINKS);
+    expect(scanLinks(body(`${'<a href="https://a.example/">same</a>'.repeat(500)}`)).truncated).toBe(false); // duplicates collapse
+  });
+});
