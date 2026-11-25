@@ -4,9 +4,9 @@ import { isValidDomain, registrableDomain } from '../domain';
 import {
   ADDRESS_TOKEN_RE,
   MAX_ATTACHMENTS,
-  MAX_BODY_CHARS,
   MAX_HEADER_CHARS,
   bodyText,
+  withSubject,
   inlineAttachmentsIn,
   isHidden,
   isUnsafeNode,
@@ -205,7 +205,7 @@ export const gmail: WebmailAdapter = {
       const viaDomain = scope ? extractViaDomain(scope, container) : undefined;
       const unauthenticated = scope ? isUnauthenticated(scope, container) : false;
       const { attachments, attachmentContainers } = extractGmailAttachments(scope, container);
-      const body = [subject, bodyText(container)].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+      const body = withSubject(subject, bodyText(container));
       return {
         senderName,
         senderAddress,

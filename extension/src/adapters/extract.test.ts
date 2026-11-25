@@ -100,3 +100,23 @@ describe('gmail via relay', () => {
     expect(gmail.extract(document)!.viaDomain).toBe('12.relay.evil.example');
   });
 });
+
+describe('padding cannot push the real message out of scanning range', () => {
+  it('skips CSS/script text and keeps the end of an over-long body', async () => {
+    const { bodyText, MAX_BODY_CHARS } = await import('./extract');
+    const m = body(`<style>.a{color:red}</style><div>${'lorem '.repeat(5000)}</div><p>URGENT verify your password</p><script>x()</script>`);
+    const t = bodyText(m);
+    expect(t).not.toContain('color:red');
+    expect(t).not.toContain('x()');
+    expect(t).toContain('URGENT verify your password');
+    expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+  });
+
+  it('keeps a link that follows hundreds of padding links', async () => {
+    const { linksIn, MAX_LINKS } = await import('./extract');
+    const pad = Array.from({ length: 300 }, (_, i) => `<a href="https://www.paypal.com/help/${i}"></a>`).join('');
+    const links = linksIn(body(`${pad}<a href="http://192.168.4.20/login">https://www.paypal.com/signin</a>`));
+    expect(links.length).toBeLessThanOrEqual(MAX_LINKS);
+    expect(links.map((l) => l.href)).toContain('http://192.168.4.20/login');
+  });
+});

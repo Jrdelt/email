@@ -3,8 +3,8 @@ import type { Link } from '../features';
 import { type ICloudFrameRole, icloudFrameRole } from '../hosts';
 import {
   MAX_ATTACHMENTS,
-  MAX_BODY_CHARS,
   bodyText,
+  withSubject,
   extractSenderFromElement,
   inlineAttachmentsIn,
   isHidden,
@@ -248,7 +248,7 @@ export function extractICloudSandbox(
 }
 
 function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: ICloudSandboxPayload | undefined): ICloudThreadMessage {
-  const body = [h.subject, payload?.body ?? ''].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+  const body = withSubject(h.subject, payload?.body ?? '');
   const attachmentNames = [...h.attachments.map((a) => a.name), ...(payload?.attachmentNames ?? [])];
   return {
     senderName: h.senderName,
@@ -293,7 +293,7 @@ export function combineICloudThread(
     expandedIndices.forEach((hIdx, i) => entryByHeader.set(hIdx, entries[i]));
     return headers.map((h, idx) => {
       const entry = entryByHeader.get(idx);
-      const body = [h.subject, entry?.[1].body ?? ''].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+      const body = withSubject(h.subject, entry?.[1].body ?? '');
       const attachmentNames = [...h.attachments.map((a) => a.name), ...(entry?.[1].attachmentNames ?? [])];
       return {
         senderName: h.senderName,
@@ -313,7 +313,7 @@ export function combineICloudThread(
   for (let i = 0; i < count; i++) {
     const h = headers[Math.min(i, headers.length - 1)];
     const entry = entries[i];
-    const body = [h.subject, entry?.[1].body ?? ''].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+    const body = withSubject(h.subject, entry?.[1].body ?? '');
     const attachmentNames = [...h.attachments.map((a) => a.name), ...(entry?.[1].attachmentNames ?? [])];
     out.push({
       senderName: h.senderName,
@@ -356,7 +356,7 @@ export const icloud: WebmailAdapter = {
       return headers.map((h) => {
         const bodyEl = sameOriginBody(h.container);
         const rawBody = bodyEl ? bodyText(bodyEl) : '';
-        const body = [h.subject, rawBody].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+        const body = withSubject(h.subject, rawBody);
         const links = bodyEl ? linksIn(bodyEl) : [];
         const inlineAtts = bodyEl ? inlineAttachmentsIn(bodyEl) : [];
         const attachments = [...h.attachments, ...inlineAtts];

@@ -5,7 +5,7 @@ import { isSafeHttpUrl } from '../src/linkGuard';
 import { clearLookupCaches, getSettings } from '../src/settings';
 
 const WARN_TTL_MS = 3600_000;
-const MAX_BODY_CHARS = 20_000;
+const MAX_BODY_CHARS = 21_000; // sandbox body (head + tail sample, see adapters/extract.ts bodyText) plus slack
 const MAX_LINKS = 500;
 
 function frameRoleOf(url?: string) {

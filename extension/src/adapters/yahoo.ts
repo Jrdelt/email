@@ -1,8 +1,8 @@
 import { cleanAttachmentName } from '../attachments';
 import {
   MAX_ATTACHMENTS,
-  MAX_BODY_CHARS,
   bodyText,
+  withSubject,
   extractSenderFromElement,
   inlineAttachmentsIn,
   isHidden,
@@ -160,7 +160,7 @@ export const yahoo: WebmailAdapter = {
     return findBodies(doc).map(({ container, hostEl }) => {
       const { senderName, senderAddress } = findSender(doc, container, hostEl);
       const subject = findSubject(doc, container);
-      const body = [subject, bodyText(container)].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+      const body = withSubject(subject, bodyText(container));
       const { attachments, attachmentContainers } = extractYahooAttachments(doc, container, hostEl);
       return {
         senderName,

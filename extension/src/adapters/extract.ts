@@ -7,6 +7,7 @@ import type { AttachmentRef } from './types';
 export const MAX_BODY_CHARS = 20_000; // cap work per email
 export const MAX_LINKS = 200;
 export const MAX_LINK_TEXT_CHARS = 2048; // link text only needs to show a URL or domain
+const MAX_LINK_SCAN = 10 * MAX_LINKS; // bound on links examined before de-duplication and sampling
 /**
  * Safety bound on attachment elements collected per source (inline anchors, or one adapter's chips).
  * This bounds DOM work only: names analysed for the banner are capped separately (attachments.ts), and
@@ -55,7 +56,40 @@ export function sameOriginFrameDocs(doc: Document, selector: string): Document[]
   return out;
 }
 
-export const bodyText = (el: HTMLElement) => textOf(el).slice(0, MAX_BODY_CHARS);
+const NON_TEXT_TAGS = new Set(['style', 'script', 'noscript', 'template']);
+const MAX_SCAN_CHARS = 10 * MAX_BODY_CHARS; // bound on text walked before sampling
+
+/** Keep the start and the end of an over-long list or text, so padding at the top cannot hide what follows. */
+function headAndTail<T>(items: T[], max: number): T[] {
+  return items.length <= max ? items : [...items.slice(0, Math.ceil(max / 2)), ...items.slice(items.length - Math.floor(max / 2))];
+}
+
+/** Prepend the subject (bounded) without cutting the end of the already-sampled body. */
+export const withSubject = (subject: string, body: string): string =>
+  subject ? (body ? `${subject.slice(0, 300)}\n${body}` : subject.slice(0, 300)) : body;
+
+/**
+ * Message text for scoring: skips CSS/script text and, when longer than MAX_BODY_CHARS, keeps the first and last
+ * halves so hidden filler at the top cannot push the real message out of reach.
+ */
+export function bodyText(el: HTMLElement): string {
+  const doc = ownerDocOf(el);
+  const parts: string[] = [];
+  let total = 0;
+  const walker = doc.createTreeWalker(el, 0x1 | 0x4 /* SHOW_ELEMENT | SHOW_TEXT */, {
+    acceptNode: (n) =>
+      n.nodeType === 1 ? (NON_TEXT_TAGS.has(tagOf(n as Element)) ? 2 /* REJECT subtree */ : 3 /* SKIP */) : 1,
+  });
+  for (let n = walker.nextNode(); n && total < MAX_SCAN_CHARS; n = walker.nextNode()) {
+    const t = n.nodeValue ?? '';
+    parts.push(t);
+    total += t.length;
+  }
+  const text = parts.join('');
+  if (text.length <= MAX_BODY_CHARS) return text;
+  const half = Math.floor(MAX_BODY_CHARS / 2);
+  return `${text.slice(0, half)}\n${text.slice(text.length - half)}`;
+}
 
 /** Parse a header string like `PayPal <a@b.com>`, `PayPal (a@b.com)`, or bare `a@b.com`. */
 export function parseSenderHeader(
@@ -129,7 +163,7 @@ export const linksIn = (el: HTMLElement): Link[] => {
   const out: Link[] = [];
   const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
   for (const node of el.querySelectorAll(sel)) {
-    if (out.length >= MAX_LINKS) break;
+    if (out.length >= MAX_LINK_SCAN) break;
     const tag = tagOf(node);
     if (tag === 'set' || tag === 'animate') {
       // SVG SMIL retargeting an <a>: score every value it can navigate to.
@@ -140,7 +174,7 @@ export const linksIn = (el: HTMLElement): Link[] => {
       const values = [getAttr(node, 'to') ?? '', ...(getAttr(node, 'values') ?? '').split(';')];
       for (const raw of values) {
         const href = resolveAgainstBase(raw, base);
-        if (href && out.length < MAX_LINKS) out.push({ text, href });
+        if (href && out.length < MAX_LINK_SCAN) out.push({ text, href });
       }
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
@@ -160,7 +194,15 @@ export const linksIn = (el: HTMLElement): Link[] => {
       if (href) out.push({ text: (textOf(node) || getAttr(node, 'value') || '').trim(), href });
     }
   }
-  return out;
+  // Identical links add nothing; past the cap keep the first and last ones so padding cannot hide a link.
+  const seen = new Set<string>();
+  const unique = out.filter((l) => {
+    const key = `${l.href}\t${l.text}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return headAndTail(unique, MAX_LINKS);
 };
 
 function filenameFromHref(rawHref: string, base: string): string {
