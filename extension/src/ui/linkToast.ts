@@ -196,8 +196,8 @@ export function showPausedAttachmentToast(doc: Document, filename: string, trigg
 /** Shows why a file button in the inbox list (outside any opened email) did not open. */
 export function showListAttachmentToast(doc: Document, filename: string, trigger: HTMLElement | null = null): void {
   const message = filename
-    ? `File not opened (${filename}). Open the email first so its attachments can be checked.`
-    : 'File not opened. Open the email first so its attachments can be checked.';
+    ? `File not opened from the inbox list (${filename}). Open it from inside the email instead.`
+    : 'File not opened from the inbox list. Open it from inside the email instead.';
   presentToast(doc, message, trigger);
 }
 

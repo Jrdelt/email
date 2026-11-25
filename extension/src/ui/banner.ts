@@ -367,7 +367,9 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
       : linksLocked
         ? 'Links are paused. Verify the sender before trusting links or attachments.'
         : attachmentsLocked
-          ? 'Attachments from untrusted emails are blocked until you verify the sender.'
+          ? model.sender?.allowlisted
+            ? 'Attachments stay paused until you choose "I trust this email".'
+            : 'Attachments from untrusted emails are blocked until you verify the sender.'
           : 'Verify the sender before trusting links or attachments.';
 
   copy.append(title, tag, reason);
@@ -486,7 +488,7 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   if (!canAllowlist || model.sender?.allowlisted) {
     trust.disabled = true;
     const reasonWhy = model.sender?.allowlisted
-      ? 'You already trust this sender; use Unlock to open these attachments'
+      ? 'You already trust this sender; use "I trust this email" to open these attachments'
       : !model.sender?.valid
         ? "Sender address couldn't be verified"
         : 'Sender failed authentication or used an unexpected relay';

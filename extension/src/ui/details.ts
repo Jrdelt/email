@@ -55,8 +55,10 @@ export function renderSimpleDetails(doc: Document, s: SenderInfo, intel: IntelSt
       ? 'Checking…'
       : intel === 'offline'
         ? 'Skipped (Strict Local Mode — 0 network lookups)'
-        : intel === 'unavailable' || !intel
-          ? 'Not available right now'
+        : !intel && s.allowlisted
+          ? 'Not checked (trusted sender)'
+          : intel === 'unavailable' || !intel
+            ? 'Not available right now'
           : intel.reputation.status === 'ok'
             ? intel.reputation.listed.length
               ? 'Reported for spam online'

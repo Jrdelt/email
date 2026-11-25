@@ -346,4 +346,16 @@ describe('Gmail inbox-list file buttons', () => {
     expect(at('row')).toBeNull();
     expect(at('inmail')).toBeNull();
   });
+
+  it('matches the chip container itself (icon or padding clicks) and never an opened message rendered as a list item', async () => {
+    const { gmail } = await import('./gmail');
+    document.body.innerHTML = `<table><tbody><tr class="zA" role="row"><td>
+        <div class="brd"><div class="brc" role="link" tabindex="0" id="chip"><img id="icon" alt=""><span class="brg">a.pdf</span></div></div>
+        <a id="dlattr" download="b.pdf" href="https://example.com/b.pdf">b.pdf</a></td></tr></tbody></table>
+      <div role="main"><div role="row"><div role="listitem"><div class="hq"><a id="shelf" href="https://mail.google.com/mail/u/0/?view=att&attid=0.3">c.pdf</a></div></div></div></div>`;
+    const at = (id: string) => gmail.listAttachmentAt!(document.getElementById(id)!);
+    expect(at('icon')?.id).toBe('chip');
+    expect(at('dlattr')?.id).toBe('dlattr');
+    expect(at('shelf')).toBeNull();
+  });
 });

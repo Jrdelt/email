@@ -122,6 +122,7 @@ interface ScannableMsg {
 }
 
 const SAFE_VERDICT: Verdict = { score: 0, level: 'safe', reasons: [] };
+const TRUSTED_SENDER_NOTE = "You trust this sender, but this webmail can't show the extension that the email really came from them.";
 
 /**
  * Verdict for open messages beyond MAX_THREAD_MESSAGES. They are not scored, so fail closed:
@@ -498,7 +499,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   authSignals: boolean;
   isStale: () => boolean;
   onEvaluated?: (items: { email: T; sender: ReturnType<typeof analyzeSender> }[]) => void;
-  applyLocks: (items: { email: T; trusted: boolean; hasAttachments: boolean }[], anyLinksLocked: boolean) => void;
+  /** Per message: lock its links (`linksLocked`), and its attachments when untrusted and it has any. */
+  applyLocks: (items: { email: T; trusted: boolean; hasAttachments: boolean; linksLocked: boolean }[]) => void;
   unlockAll: (emails: T[]) => void;
   unlockMatching: (emails: T[]) => void;
 }) {
@@ -516,6 +518,30 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     const v = scoreEmail(sender.address, email.body, email.links);
     return email.linksTruncated ? withTooManyLinks(v) : v;
   };
+  /**
+   * What an email's trust means for scoring and locks. Where the adapter cannot see the webmail's sender
+   * verification, a forged copy of an allowlisted address looks identical, so sender trust alone leaves the email
+   * `attachmentsOnly`: no warning banner and links open, but its attachments stay locked behind an attachment
+   * notice (risky attachment types also pause links, as for any unverified email). Trusting the email opens them.
+   * Shared by the scan, Undo and "Always trust sender" so they can never disagree.
+   */
+  const trustState = (
+    base: { email: T; attNames: string[]; attCount: number; rawSender: SenderInfo; overflow: boolean; skipped: boolean },
+    emailTrusted: boolean,
+    allowlistTrusted: boolean,
+  ) => {
+    const attachmentsOnly = allowlistTrusted && !opts.authSignals && !emailTrusted && base.attCount > 0;
+    const trusted = emailTrusted || (allowlistTrusted && !attachmentsOnly);
+    const verdict: Verdict =
+      trusted || base.skipped || attachmentsOnly ? SAFE_VERDICT : untrustedVerdict(base.overflow, base.rawSender, base.email);
+    const sender: SenderInfo = attachmentsOnly ? { ...base.rawSender, warnings: [], allowlisted: true } : base.rawSender;
+    const analysis = trusted ? undefined : analyzeAttachments(base.attNames, base.attCount);
+    // Appended, so a real attachment finding (a disguised or risky file) stays the first reason shown.
+    const attAnalysis: AttachmentAnalysis | undefined =
+      analysis && attachmentsOnly ? { ...analysis, reasons: [...analysis.reasons, TRUSTED_SENDER_NOTE] } : analysis;
+    return { attachmentsOnly, trusted, verdict, sender, attAnalysis };
+  };
+
   const [settings, trustedSendersList, trustedEmailsList, prelim] = await Promise.all([
     getSettings(kv, managedStorage()),
     // Storage reads fail after an extension update orphans this script: fail closed (no trust) and keep scanning.
@@ -557,38 +583,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       );
     }
     const emailTrusted = threadUnlocked || trustedThisSession.has(hash) || trustedEmails.has(hash);
-    // Where the adapter cannot see the webmail's sender verification, a forged copy of an allowlisted address looks
-    // identical, so sender trust keeps the email's attachments locked (an attachment banner only; links stay open
-    // unless the attachment type is itself risky, as for any unverified email). Trusting or unlocking it opens them.
-    const attachmentsOnly = allowlistTrusted && !opts.authSignals && !emailTrusted && attCount > 0 && !inOverflow;
-    const trusted = emailTrusted || (allowlistTrusted && !attachmentsOnly);
-    const verdict: Verdict = trusted || skipped || attachmentsOnly ? SAFE_VERDICT : untrustedVerdict(overflow, sender, email);
-    const bannerSender: SenderInfo = attachmentsOnly ? { ...sender, warnings: [], allowlisted: true } : sender;
-    const analysis = trusted ? undefined : analyzeAttachments(attNames, attCount);
-    const attAnalysis: AttachmentAnalysis | undefined =
-      analysis && attachmentsOnly
-        ? {
-            ...analysis,
-            reasons: [
-              "You trust this sender, but this webmail doesn't show the extension whether the email really came from them, so its attachments still need one click to open",
-              ...analysis.reasons,
-            ],
-          }
-        : analysis;
-    return {
-      email,
-      attNames,
-      attCount,
-      hash,
-      sender: bannerSender,
-      allowlistTrusted,
-      attachmentsOnly,
-      trusted,
-      overflow,
-      skipped,
-      verdict,
-      attAnalysis,
-    };
+    const base = { email, attNames, attCount, hash, rawSender: sender, overflow, skipped };
+    return { ...base, emailTrusted, allowlistTrusted, ...trustState(base, emailTrusted, allowlistTrusted) };
   });
   if (isStale()) return;
   onEvaluated?.(items);
@@ -633,9 +629,16 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     let bestRank = -1;
     for (const entry of evaluated) {
       if (!entry.banner) continue;
-      const attBoost = entry.item.attAnalysis?.level === 'warning' ? 0.2 : entry.item.attAnalysis?.count ? 0.1 : 0;
-      // Fail-closed "unchecked" items rank below every real finding so they never hide one.
-      const evidence = entry.item.verdict.unchecked ? -0.5 : entry.item.verdict.score;
+      const attBoost = entry.item.attachmentsOnly
+        ? 0
+        : entry.item.attAnalysis?.level === 'warning'
+          ? 0.2
+          : entry.item.attAnalysis?.count
+            ? 0.1
+            : 0;
+      // Fail-closed "unchecked" items rank below every real finding so they never hide one, and a trusted sender's
+      // attachment notice ranks below everything (it must never hide another message's warning).
+      const evidence = entry.item.attachmentsOnly ? -1 : entry.item.verdict.unchecked ? -0.5 : entry.item.verdict.score;
       const rank = (entry.banner.level === 'danger' ? 10 : 0) + evidence + attBoost;
       if (rank >= bestRank) {
         bestRank = rank;
@@ -646,9 +649,15 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     const anyLinksLocked = evaluated.some((e) => e.banner?.linksLocked);
     const anyAttachmentsLocked = evaluated.some((e) => e.banner?.attachmentsLocked);
     applyLocks(
-      evaluated.map(({ item }) => ({ email: item.email, trusted: item.trusted, hasAttachments: item.attCount > 0 })),
-      anyLinksLocked,
+      evaluated.map(({ item, banner }) => ({
+        email: item.email,
+        trusted: item.trusted,
+        hasAttachments: item.attCount > 0,
+        // A trusted sender's message pauses links only for its own reason (a risky attachment), not the thread's.
+        linksLocked: !item.trusted && (item.attachmentsOnly ? Boolean(banner?.linksLocked) : anyLinksLocked),
+      })),
     );
+
 
     const primaryBanner = primaryEntry.banner;
     sendVerdict({
@@ -688,6 +697,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           addBounded(trustedThisSession, threadHashKey);
           for (const { item } of evaluated) {
             addBounded(trustedThisSession, item.hash);
+            item.emailTrusted = true;
+            item.attachmentsOnly = false;
             item.trusted = true;
             item.verdict = SAFE_VERDICT;
             item.attAnalysis = undefined;
@@ -708,27 +719,23 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           const hashes = evaluated.map((e) => e.item.hash);
           for (const { item } of evaluated) {
             trustedThisSession.delete(item.hash);
-            item.trusted = item.allowlistTrusted;
-            item.verdict =
-              item.trusted || item.skipped ? SAFE_VERDICT : untrustedVerdict(item.overflow, item.sender, item.email);
-            item.attAnalysis = item.trusted ? undefined : analyzeAttachments(item.attNames, item.attCount);
+            item.emailTrusted = false;
+            Object.assign(item, trustState(item, false, item.allowlistTrusted));
           }
           await untrustEmails(kv, hashes);
           render();
         },
         onTrustSender: async () => {
-          if (!canTrustByAllowlist(primaryEntry.item.sender)) return false;
-          const addr = primaryEntry.item.sender.address;
+          if (!canTrustByAllowlist(primaryEntry.item.rawSender)) return false;
+          const addr = primaryEntry.item.rawSender.address;
           const ok = await trustSender(kv, addr);
           if (ok) {
             const matched: T[] = [];
             for (const { item } of evaluated) {
-              if (item.sender.address === addr && canTrustByAllowlist(item.sender)) {
+              if (item.rawSender.address === addr && canTrustByAllowlist(item.rawSender) && !item.email.pairingUncertain) {
                 item.allowlistTrusted = true;
-                item.trusted = true;
-                item.verdict = SAFE_VERDICT;
-                item.attAnalysis = undefined;
-                matched.push(item.email);
+                Object.assign(item, trustState(item, item.emailTrusted, true));
+                if (item.trusted) matched.push(item.email);
               }
             }
             unlockMatching(matched);
@@ -839,9 +846,9 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
           containerSender.set(email.container, { address: sender.address, registrable: sender.registrable });
         }
       },
-      applyLocks: (items, anyLinksLocked) => {
-        for (const { email, trusted, hasAttachments } of items) {
-          if (anyLinksLocked && !trusted) lockLinks(email.container);
+      applyLocks: (items) => {
+        for (const { email, trusted, hasAttachments, linksLocked } of items) {
+          if (linksLocked) lockLinks(email.container);
           else unlockLinks(email.container);
           if (!trusted && hasAttachments) lockMessageAttachments(email);
           else unlockMessageAttachments(email);
@@ -870,19 +877,30 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   // Click-time only, so no idle cost.
   const listAttachmentAt = adapter?.listAttachmentAt?.bind(adapter);
   if (listAttachmentAt) {
+    const TOAST_EVENTS = new Set(['click', 'keydown', 'contextmenu']);
     const onListEvent = (e: Event) => {
-      if (e.type === 'keydown' && (e as KeyboardEvent).key !== 'Enter' && (e as KeyboardEvent).key !== ' ') return;
+      if (e.type === 'keydown' || e.type === 'keyup') {
+        const key = (e as KeyboardEvent).key;
+        if (key !== 'Enter' && key !== ' ') return;
+      }
       const el = eventElement(e);
       const chip = el ? listAttachmentAt(el) : null;
       if (!chip) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      if (e.type === 'click' || e.type === 'keydown' || (e.type === 'auxclick' && (e as MouseEvent).button === 1)) {
-        showListAttachmentToast(document, showable(ellipsizeMiddle(textOf(chip).trim(), 80)), chip);
+      const middle = e.type === 'auxclick' && (e as MouseEvent).button === 1;
+      if ((TOAST_EVENTS.has(e.type) || middle) && !(e as KeyboardEvent).repeat) {
+        const name = getAttr(chip, 'aria-label') || getAttr(chip, 'title') || textOf(chip);
+        showListAttachmentToast(document, showable(ellipsizeMiddle(name.trim(), 80)), chip);
       }
     };
-    for (const type of ['click', 'auxclick', 'dblclick', 'mousedown', 'pointerdown', 'dragstart', 'keydown']) {
-      document.addEventListener(type, onListEvent, true);
+    // Gmail's own controls decide which event opens a file, so every activation path is refused on a file button
+    // (the context menu too: "Open link in new tab" / "Save link as" would open the unscanned file).
+    for (const type of [
+      'click', 'auxclick', 'dblclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
+      'touchstart', 'touchend', 'dragstart', 'keydown', 'keyup',
+    ]) {
+      document.addEventListener(type, onListEvent, { capture: true, passive: false });
     }
   }
 
@@ -1231,9 +1249,9 @@ function runICloudApp(kv: typeof browser.storage.local) {
       authSignals: false, // iCloud shows no per-message sender verification the adapter can read
       dismissed,
       isStale: () => my !== token,
-      applyLocks: (items, anyLinksLocked) => {
+      applyLocks: (items) => {
         const frameLockMap = new Map<number, { links: boolean; atts: boolean; sig?: string }>();
-        for (const { email, trusted, hasAttachments } of items) {
+        for (const { email, trusted, hasAttachments, linksLocked } of items) {
           const lockAtts = !trusted && hasAttachments;
           if (lockAtts) lockMessageAttachments(email);
           else unlockMessageAttachments(email);
@@ -1241,7 +1259,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
           if (typeof email.frameId !== 'number') continue;
           const prev = frameLockMap.get(email.frameId);
           frameLockMap.set(email.frameId, {
-            links: (prev?.links ?? false) || (anyLinksLocked && !trusted),
+            links: (prev?.links ?? false) || linksLocked,
             atts: (prev?.atts ?? false) || lockAtts,
             sig: email.sig,
           });

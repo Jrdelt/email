@@ -163,8 +163,23 @@ function extractGmailAttachments(
 // (attid= / view=att), drag-to-download attributes and the list's chip containers. Matching a non-file button here only
 // asks the user to open the email first; missing one leaves the pre-existing gap, so the selectors err wide.
 const LIST_ROW_SEL = 'tr.zA, [role="main"] [role="row"]';
-const LIST_FILE_SEL = 'a[href*="attid="], a[href*="view=att"], [download_url], .brc [role="link"], .brc a, .brg';
-const OPENED_EMAIL_SEL = 'div.adn, div.a3s, [role="dialog"]';
+const LIST_FILE_SEL = [
+  'a[href*="attid="]',
+  'a[href*="view=att"]',
+  'a[href*="mail-attachment.googleusercontent.com"]',
+  'a[download]',
+  'a[href^="blob:"]',
+  'a[href^="data:"]',
+  '[download_url]',
+  // The chip strip and chips themselves (icon and padding included), not only their inner labels.
+  '.brd',
+  '.brc',
+  '.brg',
+  '.brd [role="link"]',
+  '.brd [role="button"]',
+].join(', ');
+// Anything the adapter treats as an opened message (and its attachment shelf) is handled by the normal locks.
+const OPENED_EMAIL_SEL = 'div.adn, div.a3s, [role="listitem"], div.hq, div.aQH, [role="dialog"]';
 
 export const gmail: WebmailAdapter = {
   name: 'gmail',
