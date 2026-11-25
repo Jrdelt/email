@@ -1,5 +1,5 @@
 import { cleanAttachmentName } from '../attachments';
-import { getAttr, hasAttr, resolveAgainstBase, resolveAnchorHref } from '../dom';
+import { closestEl, getAttr, hasAttr, isFormEl, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
 import { safePercentDecode, type Link } from '../features';
 import type { AttachmentRef } from './types';
 
@@ -7,10 +7,17 @@ export const MAX_BODY_CHARS = 20_000; // cap work per email
 export const MAX_LINKS = 200;
 export const MAX_ATTACHMENTS = 50;
 
-export const isHidden = (el: HTMLElement): boolean =>
-  el.hidden || getAttr(el, 'aria-hidden') === 'true' || el.closest('[hidden], [aria-hidden="true"]') !== null;
+/** True when the element or an ancestor is `[hidden]` or `[aria-hidden="true"]`. */
+export const isHidden = (el: Element): boolean => closestEl(el, '[hidden], [aria-hidden="true"]') !== null;
 
-export const bodyText = (el: HTMLElement) => (el.textContent ?? '').slice(0, MAX_BODY_CHARS);
+/**
+ * True for elements adapters must not use as a message, header or attachment node. `<form>` elements in
+ * email HTML can override built-in properties (`<input name="contains">`), which would otherwise throw
+ * mid-scan and leave the email unscanned and unlocked.
+ */
+export const isUnsafeNode = (el: Element): boolean => isFormEl(el);
+
+export const bodyText = (el: HTMLElement) => textOf(el).slice(0, MAX_BODY_CHARS);
 
 /** Parse a header string like `PayPal <a@b.com>`, `PayPal (a@b.com)`, or bare `a@b.com`. */
 export function parseSenderHeader(
@@ -47,9 +54,10 @@ export function extractSenderFromElement(
   el: Element,
   fallbackName = '',
 ): { senderName: string; senderAddress: string } | null {
-  const text = (el.textContent ?? '').trim();
+  if (isUnsafeNode(el)) return null;
+  const text = textOf(el).trim();
   const fb = (text.length <= 120 && !text.includes('@') ? text : '') || fallbackName;
-  if (el.tagName.toLowerCase() === 'a') {
+  if (tagOf(el) === 'a') {
     const href = getAttr(el, 'href') ?? '';
     if (href.toLowerCase().startsWith('mailto:')) {
       const addr = href.slice(7).split('?')[0].trim();
@@ -69,14 +77,14 @@ export function extractSenderFromElement(
 }
 
 export const linksIn = (el: HTMLElement): Link[] => {
-  const base = el.ownerDocument.baseURI || 'https://invalid.local';
+  const base = ownerDocOf(el).baseURI || 'https://invalid.local';
   const out: Link[] = [];
   for (const node of el.querySelectorAll('a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction]')) {
     if (out.length >= MAX_LINKS) break;
-    const tag = node.tagName.toLowerCase();
+    const tag = tagOf(node);
     if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
-      if (href) out.push({ text: node.textContent ?? '', href });
+      if (href) out.push({ text: textOf(node), href });
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? '';
       const href = resolveAgainstBase(raw, base);
@@ -88,7 +96,7 @@ export const linksIn = (el: HTMLElement): Link[] => {
         getAttr(node, 'data-ped-att-formaction') ??
         '';
       const href = resolveAgainstBase(raw, base);
-      if (href) out.push({ text: (node.textContent || getAttr(node, 'value') || '').trim(), href });
+      if (href) out.push({ text: (textOf(node) || getAttr(node, 'value') || '').trim(), href });
     }
   }
   return out;
@@ -107,7 +115,7 @@ function filenameFromHref(rawHref: string, base: string): string {
 
 /** Extract inline download/data/blob anchor attachments inside an email body container. */
 export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
-  const base = container.ownerDocument.baseURI || 'https://invalid.local';
+  const base = ownerDocOf(container).baseURI || 'https://invalid.local';
   const out: AttachmentRef[] = [];
   const seen = new Set<HTMLElement>();
   const sel =
@@ -124,7 +132,7 @@ export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
         filenameFromHref(href, base) ||
         getAttr(el, 'aria-label') ||
         getAttr(el, 'title') ||
-        el.textContent ||
+        textOf(el) ||
         '',
     );
     out.push({ name, element: el });

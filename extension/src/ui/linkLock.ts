@@ -1,10 +1,12 @@
 import {
   SVG_NS,
   XLINK_NS,
+  closestEl,
   eventElement,
   getAttr,
   getAttrNS,
   hasAttr,
+  ownerDocOf,
   resolveAgainstBase,
   rmAttr,
   rmAttrNS,
@@ -37,18 +39,19 @@ export function setLinkBlockedHandler(doc: Document, handler: (() => void) | nul
 
 function matchesLockedTarget(el: Element): boolean {
   if (
-    el.closest(
+    closestEl(
+      el,
       `a[href], a[${HREF_ATTR}], a[${XLINK_ATTR}], area[href], area[${HREF_ATTR}], [formaction], [${FORMACTION_ATTR}], form button:not([type="button"]), form input[type="submit"], form input[type="image"]`,
     )
   ) {
     return true;
   }
-  const a = el.closest('a');
+  const a = closestEl(el, 'a');
   return Boolean(a && (getAttrNS(a, XLINK_NS, 'href') !== null || hasAttr(a, 'xlink:href')));
 }
 
 function targetHostOf(el: Element): string {
-  const node = el.closest(`a, area, [formaction], [${FORMACTION_ATTR}], form`);
+  const node = closestEl(el, `a, area, [formaction], [${FORMACTION_ATTR}], form`);
   if (!node) return '';
   const raw =
     getAttr(node, HREF_ATTR) ??
@@ -62,18 +65,23 @@ function targetHostOf(el: Element): string {
     getAttr(node, 'action') ??
     '';
   if (!raw) return '';
-  return hostOf(resolveAgainstBase(raw, el.ownerDocument.baseURI || 'https://invalid.local'));
+  return hostOf(resolveAgainstBase(raw, ownerDocOf(el).baseURI || 'https://invalid.local'));
+}
+
+function notifyBlocked(el: Element) {
+  const doc = ownerDocOf(el);
+  showPausedLinkToast(doc, targetHostOf(el), el instanceof HTMLElement ? el : null);
+  blockedHandlers.get(doc)?.();
 }
 
 function block(e: Event) {
   const el = eventElement(e);
-  if (!el?.closest?.(`[${LOCK_ATTR}]`)) return;
+  if (!el || !closestEl(el, `[${LOCK_ATTR}]`)) return;
   if (e.type === 'submit') {
-    if (el.closest('form')) {
+    if (closestEl(el, 'form')) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      showPausedLinkToast(el.ownerDocument, targetHostOf(el), el instanceof HTMLElement ? el : null);
-      blockedHandlers.get(el.ownerDocument)?.();
+      notifyBlocked(el);
     }
     return;
   }
@@ -88,10 +96,7 @@ function block(e: Event) {
       e.type === 'click' ||
       e.type === 'keydown' ||
       (e.type === 'auxclick' && (e as MouseEvent).button === 1);
-    if (shouldToast) {
-      showPausedLinkToast(el.ownerDocument, targetHostOf(el), el instanceof HTMLElement ? el : null);
-      blockedHandlers.get(el.ownerDocument)?.();
-    }
+    if (shouldToast) notifyBlocked(el);
   }
 }
 
@@ -147,7 +152,7 @@ function stashInside(container: HTMLElement): void {
 }
 
 export function lockLinks(container: HTMLElement): void {
-  install(container.ownerDocument);
+  install(ownerDocOf(container));
   setAttr(container, LOCK_ATTR, '');
   stashInside(container);
   if (!watchers.has(container) && typeof MutationObserver !== 'undefined') {
@@ -164,7 +169,7 @@ export function unlockLinks(container: HTMLElement): void {
   watchers.get(container)?.disconnect();
   watchers.delete(container);
   rmAttr(container, LOCK_ATTR);
-  removePausedLinkToast(container.ownerDocument);
+  removePausedLinkToast(ownerDocOf(container));
   for (const el of container.querySelectorAll<Element>(`[${HREF_ATTR}]`)) {
     setAttr(el, 'href', getAttr(el, HREF_ATTR)!);
     rmAttr(el, HREF_ATTR);

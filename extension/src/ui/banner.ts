@@ -22,7 +22,7 @@ export interface BannerActions {
   onUnlock(): void | Promise<void>; // "I trust this email" — unlock links/attachments for this email
   onUndoUnlock?(): void | Promise<void>; // revert persistent email trust and re-lock
   onTrustSender(): Promise<boolean>; // false if sender cannot be trusted
-  onReport(): Promise<void>; // local false-positive report
+  onReport(): Promise<boolean | void>; // local false-positive report; false when reports are disabled by policy
   onDismiss(): void;
 }
 
@@ -450,8 +450,8 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
 
   const report = button('Not phishing', async (b) => {
     b.disabled = true;
-    await actions.onReport();
-    b.textContent = 'Reported (saved)';
+    const saved = await actions.onReport();
+    b.textContent = saved === false ? 'Reports turned off by IT' : 'Reported (saved)';
   });
   report.title = 'Save a redacted false-alarm note on this device (does not unlock links)';
 

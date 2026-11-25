@@ -91,7 +91,7 @@
 
 ## Pre-Submission Technical Checks (`extension/`)
 
-1. Unpacked size budget: Chrome `~210 kB`, Edge `~210 kB`, Firefox `~210 kB` (limit: `<500 KB`).
+1. Unpacked size budget: Chrome `~176 kB`, Edge `~176 kB`, Firefox `~176 kB` (limit: `<500 KB`).
 2. `npm run typecheck`, `npm test`, `npm run build:all`, `npm run zip:all` all green.
 3. `npx addons-linter .output/firefox-mv3 --warnings-as-errors` → **0 errors, 0 warnings**.
 4. Store copy and privacy forms match `CHROMEWEBSTORE.md` and `docs/privacy.md` with zero unused `host_permissions`.

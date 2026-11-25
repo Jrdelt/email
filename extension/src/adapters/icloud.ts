@@ -8,6 +8,7 @@ import {
   extractSenderFromElement,
   inlineAttachmentsIn,
   isHidden,
+  isUnsafeNode,
   linksIn,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
@@ -57,7 +58,7 @@ function isRecipientNode(el: Element): boolean {
 }
 
 function extractHeaderSender(card: HTMLElement): { senderName: string; senderAddress: string } {
-  const skip = (el: Element): boolean => el.closest('iframe, h2') !== null || isRecipientNode(el);
+  const skip = (el: Element): boolean => isUnsafeNode(el) || el.closest('iframe, h2') !== null || isRecipientNode(el);
 
   let fallbackName = '';
 
@@ -130,7 +131,7 @@ function extractICloudCardAttachments(card: HTMLElement): {
   const childSel = '[aria-label*="Download" i], [title*="Download" i], a[download], a[data-ped-att-download], [role="button"], button, a';
 
   const skip = (el: HTMLElement): boolean => {
-    if (isHidden(el)) return true;
+    if (isUnsafeNode(el) || isHidden(el)) return true;
     if (el.closest('iframe, h2, span.contact-token, .allow-select, [contenteditable="true"]') !== null) return true;
     if (el.querySelector('iframe, h2, .allow-select') !== null) return true;
     const lbl = (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? '').trim();

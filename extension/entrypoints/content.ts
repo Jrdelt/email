@@ -9,7 +9,7 @@ import {
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from '../src/adapters/types';
 import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender, untrustEmails } from '../src/allowlist';
 import { type AttachmentAnalysis, analyzeAttachments } from '../src/attachments';
-import { eventElement, getAttr, getAttrNS, resolveAnchorHref, XLINK_NS } from '../src/dom';
+import { closestEl, eventElement, getAttr, getAttrNS, ownerDocOf, resolveAnchorHref, XLINK_NS } from '../src/dom';
 import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
@@ -170,7 +170,7 @@ function installClickGuard(opts: {
     if (!el) return;
 
     if (e.type === 'submit') {
-      const form = el.closest('form');
+      const form = closestEl(el, 'form');
       if (!form) return;
       const hit = opts.findTarget(form);
       if (!hit || isLocked(hit.container) || !opts.isPending()) return;
@@ -197,7 +197,7 @@ function installClickGuard(opts: {
       void (async () => {
         await opts.flushScan();
         const post = opts.findAttachment?.(el) ?? attHit;
-        if (isAttachmentLocked(post.element) || post.element.closest('[data-ped-att-locked]')) {
+        if (isAttachmentLocked(post.element) || closestEl(post.element, '[data-ped-att-locked]')) {
           showPausedAttachmentToast(
             document,
             getAttr(post.element, 'data-ped-att-name') ?? post.name,
@@ -210,7 +210,7 @@ function installClickGuard(opts: {
 
     if (e.type !== 'click' && e.type !== 'auxclick') return;
 
-    const a = el.closest('a, area');
+    const a = closestEl(el, 'a, area');
     if (!a) return;
     const rawAttr = (getAttr(a, 'href') ?? getAttrNS(a, XLINK_NS, 'href') ?? getAttr(a, 'xlink:href') ?? '').trim();
     if (!rawAttr || rawAttr.startsWith('#')) return;
@@ -506,8 +506,9 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           return ok;
         },
         onReport: async () => {
-          if (settings.disableLocalReports) return;
+          if (settings.disableLocalReports) return false;
           await recordFalsePositive(kv, { ...primaryEntry.item.verdict, reasons: primaryBanner.reasons });
+          return true;
         },
         onDismiss: () => {
           showingUndoPill = false;
@@ -566,7 +567,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     }
 
     const messages = emails.slice(-MAX_THREAD_MESSAGES);
-    for (const m of messages) guardDoc(m.container.ownerDocument);
+    for (const m of messages) guardDoc(ownerDocOf(m.container));
     const threadKey = messages.map(msgKey).join('\n---\n');
     const nextContainers = messages.map((m) => m.container);
     const nextAttachmentEls = [...new Set(messages.flatMap(attachmentElementsOf))];

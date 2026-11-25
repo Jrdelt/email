@@ -273,6 +273,31 @@ describe('banner', () => {
     expect(document.getElementById('ped-banner-host')).toBeNull();
   });
 
+  it('says reports are off instead of "saved" when IT policy disables local reports', async () => {
+    document.body.innerHTML = '';
+    const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
+    const roots: ShadowRoot[] = [];
+    const origAttach = HTMLElement.prototype.attachShadow;
+    const spy = vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      const r = origAttach.call(this, init);
+      roots.push(r);
+      return r;
+    });
+    try {
+      for (const [result, label] of [[false, 'Reports turned off by IT'], [true, 'Reported (saved)']] as const) {
+        const act = { ...actions(), onReport: vi.fn(async () => result) };
+        showBanner({ level: 'warning', title: 'Check this sender.', reasons: sender.warnings, linksLocked: false, sender }, act);
+        const root = roots[roots.length - 1]!;
+        const btn = [...root.querySelectorAll('button')].find((b) => b.textContent === 'Not phishing')!;
+        btn.click();
+        await vi.waitFor(() => expect(btn.textContent).toBe(label));
+      }
+    } finally {
+      spy.mockRestore();
+      removeBanner();
+    }
+  });
+
   it('calls onTrustSender without calling onUnlock, collapses warning unlock to Undo pill, and requires 2-step confirmation for danger', async () => {
     document.body.innerHTML = '';
     const sender = analyzeSender('PayPal Support', 'help@gmail.com', [{ text: 'Verify', href: 'https://evil.example/login' }]);

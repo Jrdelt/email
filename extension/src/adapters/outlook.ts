@@ -1,4 +1,5 @@
 import { cleanAttachmentName } from '../attachments';
+import { textOf } from '../dom';
 import { unwrapRedirectUrl } from '../linkGuard';
 import {
   MAX_ATTACHMENTS,
@@ -7,6 +8,7 @@ import {
   extractSenderFromElement,
   inlineAttachmentsIn,
   isHidden,
+  isUnsafeNode,
   linksIn,
 } from './extract';
 import type { AttachmentRef, WebmailAdapter } from './types';
@@ -23,6 +25,7 @@ const BODY_SELECTORS = [
 ];
 
 const isEditable = (el: HTMLElement): boolean =>
+  isUnsafeNode(el) ||
   el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.closest('[contenteditable="true"]') !== null;
 
 const hasContent = (el: HTMLElement): boolean =>
@@ -67,6 +70,7 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
   if (!scope) return { senderName: '', senderAddress: '' };
 
   const skip = (el: Element): boolean =>
+    isUnsafeNode(el) ||
     container === el ||
     container.contains(el) ||
     el.closest('[role="banner"], nav, [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i], [data-testid*="recipient" i]') !== null ||
@@ -100,7 +104,7 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
     if (!text.includes('@') || text.length > 200) continue;
     const hit = extractSenderFromElement(el);
     if (!hit) continue;
-    const hasChildAt = [...el.children].some((c) => (c.textContent ?? '').includes('@'));
+    const hasChildAt = [...el.children].some((c) => textOf(c).includes('@'));
     if (!hasChildAt) {
       if (hit.senderName) return hit;
       bareLeafHit ??= hit;
@@ -117,7 +121,7 @@ function findSubject(doc: Document, container: HTMLElement): string {
   );
   if (!pane) return '';
   for (const h of pane.querySelectorAll<HTMLElement>('[role="heading"], h1, h2')) {
-    if (container.contains(h) || isHidden(h)) continue;
+    if (isUnsafeNode(h) || container.contains(h) || isHidden(h)) continue;
     const text = (h.textContent ?? '').trim();
     if (text && text.length <= 300) return text;
   }
@@ -159,7 +163,7 @@ function extractOutlookAttachments(
   if (!scope) return { attachments, attachmentContainers };
 
   const shouldSkip = (el: Element): boolean => {
-    if (el === container || el.contains(container)) return true;
+    if (isUnsafeNode(el) || el === container || el.contains(container)) return true;
     if (el instanceof HTMLElement && isHidden(el)) return true;
     if (el.closest('[role="banner"], nav, [contenteditable="true"], [aria-label*="Compose" i]') !== null) return true;
     const lbl = (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? '').trim();

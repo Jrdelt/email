@@ -1,4 +1,5 @@
 {
   "extends": "./.wxt/tsconfig.json",
-  "compilerOptions": { "strict": true }
+  // WXT >= 0.20 turns on noUncheckedIndexedAccess by default; keep the project's existing strictness level.
+  "compilerOptions": { "strict": true, "noUncheckedIndexedAccess": false }
 }

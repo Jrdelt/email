@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
 URGENCY = (
@@ -246,7 +246,3 @@ def extract_features(sender: str, body: str, links: list[Link]) -> dict[str, flo
 
 
 FEATURE_NAMES = list(extract_features("", "", []).keys())
-
-
-def as_dict(f: dict[str, float]) -> dict[str, float]:
-    return asdict(f) if hasattr(f, "__dataclass_fields__") else dict(f)

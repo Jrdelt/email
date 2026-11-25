@@ -29,10 +29,34 @@ export const setAttrNS = (el: Element, ns: string, qn: string, value: string): v
 export const rmAttrNS = (el: Element, ns: string, local: string): void =>
   (protoRmAttrNS ?? Element.prototype.removeAttributeNS).call(el, ns, local);
 
-/** Resolve event.target to an Element even when dispatched on a Text node. */
+/**
+ * Read a built-in DOM property from the object's prototype chain. `<form>` elements expose their named
+ * controls as properties that override built-ins (`<input name="closest">` makes `form.closest` an
+ * <input>), so `form.tagName`, `form.closest(...)`, `form.textContent` etc. cannot be trusted.
+ * Reading through the prototype skips those named-property shadows.
+ */
+function builtin<T>(obj: object, prop: string): T {
+  const v = Reflect.get(Object.getPrototypeOf(obj) as object, prop, obj) as T | undefined;
+  return v === undefined ? (Reflect.get(obj, prop) as T) : v;
+}
+
+/** Lowercase local tag name ('a', 'form', ...) that email-controlled `<form>` named controls cannot clobber. */
+export const tagOf = (el: Element): string => String(builtin<string>(el, 'localName') ?? '').toLowerCase();
+/** True for `<form>` elements: the only elements whose built-in properties email HTML can clobber. */
+export const isFormEl = (el: Element): boolean => tagOf(el) === 'form';
+export const closestEl = (el: Element, selector: string): Element | null =>
+  builtin<Element['closest']>(el, 'closest').call(el, selector);
+export const containsNode = (parent: Node, child: Node | null): boolean =>
+  builtin<Node['contains']>(parent, 'contains').call(parent, child);
+export const textOf = (node: Node): string => builtin<string | null>(node, 'textContent') ?? '';
+export const ownerDocOf = (node: Node): Document => builtin<Document>(node, 'ownerDocument');
+const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;
+
+/** Resolve event.target to an Element even when dispatched on a Text node (clobbering-safe). */
 export function eventElement(e: Event): Element | null {
   const node = e.target as Node | null;
-  return node && node.nodeType === 1 ? (node as Element) : (node?.parentElement ?? null);
+  if (!node || typeof node !== 'object') return null;
+  return builtin<number>(node, 'nodeType') === 1 ? (node as Element) : parentElementOf(node);
 }
 
 export function resolveAgainstBase(raw: string, base: string): string {
@@ -47,7 +71,7 @@ export function resolveAgainstBase(raw: string, base: string): string {
 
 /** Resolve href or SVG xlink:href (plus optional stashed attributes) on an <a> or <area> element. */
 export function resolveAnchorHref(el: Element, includeStashed = false): string {
-  const base = el.ownerDocument.baseURI || 'https://invalid.local';
+  const base = ownerDocOf(el).baseURI || 'https://invalid.local';
   if (hasAttr(el, 'href')) {
     const prop = (el as HTMLAnchorElement).href;
     if (typeof prop === 'string' && prop) return prop;

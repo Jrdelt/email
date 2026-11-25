@@ -6,6 +6,7 @@ import {
   extractSenderFromElement,
   inlineAttachmentsIn,
   isHidden,
+  isUnsafeNode,
   linksIn,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
@@ -17,6 +18,7 @@ const BODY_SELECTORS = [
 ];
 
 const isCompose = (el: HTMLElement): boolean =>
+  isUnsafeNode(el) ||
   el.isContentEditable ||
   el.getAttribute('contenteditable') === 'true' ||
   el.closest('[contenteditable="true"], [data-test-id="compose-editor"], [data-test-id="rte"]') !== null;
@@ -61,6 +63,7 @@ function findScope(doc: Document, hostEl: HTMLElement): HTMLElement {
 function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
   const scope = findScope(doc, hostEl);
   const skip = (el: Element): boolean =>
+    isUnsafeNode(el) ||
     el === container ||
     container.contains(el) ||
     el.closest('[data-test-id="recipient-list"], [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i]') !== null;
@@ -84,7 +87,7 @@ function findSubject(doc: Document, container: HTMLElement): string {
   for (const el of doc.querySelectorAll<HTMLElement>(
     '[data-test-id="message-group-subject-text"], [data-test-id="message-subject"], main h1, [role="main"] h1',
   )) {
-    if (container.contains(el) || isHidden(el)) continue;
+    if (isUnsafeNode(el) || container.contains(el) || isHidden(el)) continue;
     const t = (el.textContent ?? '').trim();
     if (t && t.length <= 300) return t;
   }
@@ -115,6 +118,7 @@ function extractYahooAttachments(
   const scope = findScope(doc, hostEl);
 
   const shouldSkip = (el: Element): boolean =>
+    isUnsafeNode(el) ||
     el === container ||
     el.contains(container) ||
     (el instanceof HTMLElement && (isHidden(el) || isCompose(el)));

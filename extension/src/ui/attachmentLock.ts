@@ -1,4 +1,4 @@
-import { eventElement, getAttr, hasAttr, rmAttr, setAttr } from '../dom';
+import { closestEl, eventElement, getAttr, hasAttr, ownerDocOf, rmAttr, setAttr } from '../dom';
 import { removePausedLinkToast, showPausedAttachmentToast } from './linkToast';
 
 const ATT_LOCK_ATTR = 'data-ped-att-locked';
@@ -28,8 +28,8 @@ export function setAttachmentBlockedHandler(doc: Document, handler: (() => void)
 
 function blockAttachmentEvent(e: Event): void {
   const el = eventElement(e);
-  const lockedRoot = el?.closest?.(`[${ATT_LOCK_ATTR}]`);
-  if (!lockedRoot) return;
+  const lockedRoot = el ? closestEl(el, `[${ATT_LOCK_ATTR}]`) : null;
+  if (!el || !lockedRoot) return;
 
   if (e.type === 'keydown') {
     const key = (e as KeyboardEvent).key;
@@ -45,10 +45,11 @@ function blockAttachmentEvent(e: Event): void {
     e.type === 'keydown' ||
     (e.type === 'auxclick' && (e as MouseEvent).button === 1);
   if (shouldToast) {
-    const namedEl = el?.closest?.(`[${ATT_NAME_ATTR}]`);
+    const namedEl = closestEl(el, `[${ATT_NAME_ATTR}]`);
     const name = (namedEl ? getAttr(namedEl, ATT_NAME_ATTR) : null) ?? getAttr(lockedRoot, ATT_NAME_ATTR) ?? '';
-    showPausedAttachmentToast(lockedRoot.ownerDocument, name, el instanceof HTMLElement ? el : null);
-    blockedHandlers.get(lockedRoot.ownerDocument)?.();
+    const doc = ownerDocOf(lockedRoot);
+    showPausedAttachmentToast(doc, name, el instanceof HTMLElement ? el : null);
+    blockedHandlers.get(doc)?.();
   }
 }
 
@@ -86,7 +87,7 @@ function stashTarget(root: HTMLElement): void {
 /** Lock attachment cards/shelves/links so untrusted email attachments cannot be opened or downloaded. */
 export function lockAttachments(elements: readonly HTMLElement[], names?: ReadonlyMap<HTMLElement, string>): void {
   for (const el of elements) {
-    install(el.ownerDocument);
+    install(ownerDocOf(el));
     setAttr(el, ATT_LOCK_ATTR, '');
     const name = names?.get(el);
     if (name) setAttr(el, ATT_NAME_ATTR, name);
@@ -134,7 +135,7 @@ export function unlockAttachments(elements: readonly HTMLElement[]): void {
         rmAttr(node, 'aria-disabled');
       }
     }
-    docs.add(el.ownerDocument);
+    docs.add(ownerDocOf(el));
   }
   for (const doc of docs) removePausedLinkToast(doc);
 }

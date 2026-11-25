@@ -1,6 +1,6 @@
 import { cleanAttachmentName } from '../attachments';
 import { isValidDomain } from '../domain';
-import { MAX_ATTACHMENTS, MAX_BODY_CHARS, bodyText, inlineAttachmentsIn, isHidden, linksIn } from './extract';
+import { MAX_ATTACHMENTS, MAX_BODY_CHARS, bodyText, inlineAttachmentsIn, isHidden, isUnsafeNode, linksIn } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
 const extractEmailText = (raw: string): string =>
@@ -91,6 +91,7 @@ function extractGmailAttachments(
   if (!scope) return { attachments, attachmentContainers };
 
   const shouldSkip = (el: Element): boolean =>
+    isUnsafeNode(el) ||
     el === container ||
     el.contains(container) ||
     (el instanceof HTMLElement && isHidden(el)) ||

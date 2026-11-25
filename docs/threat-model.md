@@ -12,12 +12,12 @@ An adversary can send arbitrary HTML emails to the user's inbox and may attempt 
 - Impersonate trusted brands via display names (including compact/camelCase forms), lookalike/homoglyph domains, punycode (`xn--`), or forged `From` headers sent through third-party relays.
 - Disguise malicious links via mismatched anchor text, `@` userinfo authority tricks, multi-hop open/tracking redirects, URL shorteners, raw cloud object storage HTML pages, SVG `href`/`xlink:href` anchors, or HTML `<form action>` / `[formaction]` submissions.
 - Smuggle credentials stealers or malware via attachments (`.html`, `.svg`, `.hta`, `.lnk`, `.iso`, `.exe`, double extensions like `invoice.pdf.exe`, or inline `data:`/`blob:` downloads).
-- Clobber DOM properties (`<form><input name="getAttribute"><input name="hasAttribute"></form>`), spoof webmail header CSS classes inside the message body, or override page styles to hide/restyle security UI.
+- Clobber DOM properties (`<form><input name="getAttribute"><input name="tagName"><input name="closest"></form>`) to crash the scanner or slip past the locks, spoof webmail header CSS classes inside the message body, or override page styles to hide/restyle security UI.
 
 ## Defense Layers & Residual Limits
 
 ### 1. Link & Form Locking
-Flagged emails pause links (`a`, `area`, SVG `href` & `xlink:href`), `<a ping>` beacons, embedded image links, `<form>` submissions, and `[formaction]` controls by stashing attributes (`data-ped-*`) via `Element.prototype`-bound helpers (`src/dom.ts`, immune to `<form>` DOM clobbering) and intercepting `click`, `auxclick`, `dragstart`, `submit`, and `keydown` (`Enter`/`Space`) in capture phase, with instant `MutationObserver` re-locking of dynamically inserted nodes.
+Flagged emails pause links (`a`, `area`, SVG `href` & `xlink:href`), `<a ping>` beacons, embedded image links, `<form>` submissions, and `[formaction]` controls by stashing attributes (`data-ped-*`) via prototype-bound helpers (`src/dom.ts`: attributes, `closest`, `contains`, `localName`, `textContent`, `nodeType`, `ownerDocument`, immune to `<form>` DOM clobbering; adapters also skip `<form>` elements as header/attachment candidates, see `isUnsafeNode` in `src/adapters/extract.ts`) and intercepting `click`, `auxclick`, `dragstart`, `submit`, and `keydown` (`Enter`/`Space`) in capture phase, with instant `MutationObserver` re-locking of dynamically inserted nodes.
 - *Residual limit:* Users manually copying and pasting plain-text URLs into the address bar.
 
 ### 2. Always-On Attachment Locking for Untrusted Mail
