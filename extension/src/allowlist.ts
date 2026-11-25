@@ -51,12 +51,18 @@ export async function untrustSender(kv: KV, sender: string): Promise<void> {
   await kv.set({ [KEY]: (await listTrusted(kv)).filter((s) => s !== addr) });
 }
 
-/** One-way SHA-256 fingerprint of an email (never stores body, URLs, or sender address). */
+/**
+ * One-way SHA-256 fingerprint of an email (never stores body, URLs, or sender address). Webmail's
+ * authentication flags are part of it, so a spoofed copy of a trusted email that webmail marks as unverified
+ * (or that arrives through a different relay) does not inherit the original's trust. Emails without those
+ * flags hash exactly as before, so existing trusted fingerprints stay valid.
+ */
 export async function hashEmail(
   senderAddress: string,
   body: string,
   links: readonly { href: string }[],
   attachmentNames?: readonly string[],
+  auth: { unauthenticated?: boolean; viaDomain?: string } = {},
 ): Promise<string> {
   const normSender = senderAddress.trim().toLowerCase();
   const normBody = body.replace(/\s+/g, ' ').trim();
@@ -64,7 +70,9 @@ export async function hashEmail(
   const normAtts = attachmentNames?.length
     ? `\0att:${attachmentNames.map((n) => n.trim().toLowerCase()).filter(Boolean).sort().join('\n')}`
     : '';
-  const bytes = new TextEncoder().encode(`v1\0${normSender}\0${normBody}\0${normLinks}${normAtts}`);
+  const via = auth.viaDomain?.trim().toLowerCase() ?? '';
+  const normAuth = `${auth.unauthenticated ? '\0auth:unverified' : ''}${via ? `\0via:${via}` : ''}`;
+  const bytes = new TextEncoder().encode(`v1\0${normSender}\0${normBody}\0${normLinks}${normAtts}${normAuth}`);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

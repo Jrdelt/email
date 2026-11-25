@@ -384,7 +384,10 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       messages.map(async (email) => {
         const attNames = attachmentNamesOf(email);
         const attCount = Math.max(attNames.length, email.attachments?.length ?? 0);
-        const hash = await hashEmail(email.senderAddress, email.body, email.links, attNames);
+        const hash = await hashEmail(email.senderAddress, email.body, email.links, attNames, {
+          unauthenticated: email.unauthenticated,
+          viaDomain: email.viaDomain,
+        });
         return { email, attNames, attCount, hash };
       }),
     ),

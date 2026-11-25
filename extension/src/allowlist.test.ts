@@ -132,3 +132,13 @@ describe('trustedEmails', () => {
     expect(await isEmailTrusted(kv, 'not-a-hash')).toBe(false);
   });
 });
+
+describe('hashEmail authentication flags', () => {
+  it('keeps old fingerprints for normal emails but separates unverified or relayed copies', async () => {
+    const args = ['billing@vendor.example', 'Your statement', [{ href: 'https://vendor.example/s' }], ['statement.html']] as const;
+    const plain = await hashEmail(...args);
+    expect(await hashEmail(...args, {})).toBe(plain);
+    expect(await hashEmail(...args, { unauthenticated: true })).not.toBe(plain);
+    expect(await hashEmail(...args, { viaDomain: '12.relay.evil.example' })).not.toBe(plain);
+  });
+});
