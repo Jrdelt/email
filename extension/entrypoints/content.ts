@@ -47,6 +47,18 @@ function extensionAlive(): boolean {
   }
 }
 
+/** Short, stable hash (FNV-1a) used to tie iCloud lock decisions to the body they were made for. */
+function shortHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16);
+}
+
+const PAIR_NONCE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /** runtime.sendMessage that never throws: an orphaned content script's APIs throw synchronously. */
 function sendRuntime<T = unknown>(message: unknown): Promise<T | undefined> {
   try {
@@ -72,6 +84,8 @@ interface ScannableMsg {
   body: string;
   links: Link[];
   linksTruncated?: boolean;
+  /** iCloud: body not tied to its card for certain, so the card's sender is not trusted for it. */
+  pairingUncertain?: boolean;
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
   attachmentNames?: string[];
@@ -434,7 +448,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       unauthenticated: email.unauthenticated,
     });
     const allowlisted = sender.valid && trustedSenders.has(sender.address);
-    const allowlistTrusted = allowlisted && canTrustByAllowlist(sender);
+    const allowlistTrusted = allowlisted && canTrustByAllowlist(sender) && !email.pairingUncertain;
     if (allowlisted && !allowlistTrusted) {
       sender.warnings.unshift(
         `Claims to be a trusted sender (${sender.address}), but failed authentication or used an unexpected relay`,
@@ -785,6 +799,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
 
 function runICloudSandbox() {
   let lastSig = '';
+  let lastSigHash = '';
   let desiredLocked = false;
   let desiredAttachmentsLocked = false;
   let activeInlineAtts: HTMLElement[] = [];
@@ -834,6 +849,7 @@ function runICloudSandbox() {
       desiredAttachmentsLocked = false;
       if (force || lastSig !== 'inactive') {
         lastSig = 'inactive';
+        lastSigHash = '';
         void sendRuntime({ type: 'icloudBody', active: false, body: '', links: [], attachmentNames: [] });
       }
       return;
@@ -843,13 +859,29 @@ function runICloudSandbox() {
     if (force || sig !== lastSig) {
       if (sig !== lastSig) awaitingVerdict = true;
       lastSig = sig;
-      void sendRuntime({ type: 'icloudBody', active: true, body, links, linksTruncated, attachmentNames });
+      lastSigHash = shortHash(sig);
+      void sendRuntime({
+        type: 'icloudBody',
+        active: true,
+        body,
+        links,
+        linksTruncated,
+        attachmentNames,
+        sig: lastSigHash,
+      });
     }
     if (desiredLocked) lockLinks(container);
     syncInlineAttachmentLocks(attachments, desiredAttachmentsLocked);
   };
 
   const scheduler = createScheduler(async () => report(false));
+  // Pairing: the app frame posts a random token to this frame's window; reporting it back through the background
+  // (which adds the verified frame id) lets the app tie this body to its card in every browser.
+  window.addEventListener('message', (e) => {
+    if (e.source !== window.parent) return;
+    const nonce = (e.data as { __pedPair?: unknown } | null)?.__pedPair;
+    if (typeof nonce === 'string' && PAIR_NONCE_RE.test(nonce)) void sendRuntime({ type: 'icloudPair', nonce });
+  });
   // The banner lives in the app frame: a paused click here asks it (via the background relay) to reopen it.
   const askAppToReopen = () => void sendRuntime({ type: 'icloudBlocked' });
   setLinkBlockedHandler(document, askAppToReopen);
@@ -869,8 +901,10 @@ function runICloudSandbox() {
   });
 
   browser.runtime.onMessage.addListener((msg: unknown) => {
-    const m = msg as { type?: string; locked?: unknown; attachmentsLocked?: unknown } | undefined;
+    const m = msg as { type?: string; locked?: unknown; attachmentsLocked?: unknown; sig?: unknown } | undefined;
     if (m?.type === 'icloudLock') {
+      // A decision made for an earlier body of this (pooled) frame must not unlock or release the current one.
+      if (typeof m.sig === 'string' && m.sig !== lastSigHash) return;
       desiredLocked = Boolean(m.locked);
       desiredAttachmentsLocked = Boolean(m.attachmentsLocked);
       awaitingVerdict = false;
@@ -917,18 +951,25 @@ function runICloudApp(kv: typeof browser.storage.local) {
   let activeAttachmentEls: HTMLElement[] = [];
   let token = 0;
 
-  // Last decision sent to each sandbox frame and the body it was made for. When a frame re-reports that same
-  // body (e.g. after reloading) the thread key is unchanged and nothing is re-evaluated, so re-send it.
-  const frameLocks = new Map<number, { locked: boolean; attachmentsLocked: boolean; payload: string }>();
-  const setFramesLocked = (frameIds: number[], locked: boolean, attachmentsLocked: boolean) => {
-    for (const id of frameIds) {
-      frameLocks.set(id, { locked, attachmentsLocked, payload: JSON.stringify(sandboxBodies.get(id) ?? null) });
-    }
-    if (frameIds.length > 0) {
-      void sendRuntime({ type: 'icloudLock', locked, attachmentsLocked, frameIds });
-    }
+  // Last decision sent to each sandbox frame, keyed by the body signature it was made for. When a frame re-reports
+  // that same body (e.g. after reloading) the thread key is unchanged and nothing is re-evaluated, so re-send it.
+  const MAX_FRAME_LOCKS = 100;
+  const frameLocks = new Map<number, { locked: boolean; attachmentsLocked: boolean; sig?: string }>();
+  const setFrameLocked = (frameId: number, locked: boolean, attachmentsLocked: boolean, sig?: string) => {
+    frameLocks.delete(frameId);
+    frameLocks.set(frameId, { locked, attachmentsLocked, sig });
+    while (frameLocks.size > MAX_FRAME_LOCKS) frameLocks.delete(frameLocks.keys().next().value!);
+    void sendRuntime({ type: 'icloudLock', locked, attachmentsLocked, frameIds: [frameId], ...(sig ? { sig } : {}) });
   };
-  const frameIdOf = (iframe: HTMLIFrameElement): number | undefined => {
+  const unlockFrames = (list: { frameId?: number; sig?: string }[]) => {
+    for (const m of list) if (typeof m.frameId === 'number') setFrameLocked(m.frameId, false, false, m.sig);
+  };
+
+  // Card <-> frame pairing. Firefox has runtime.getFrameId; elsewhere each card's iframe is sent a random token
+  // (postMessage) that its sandbox reports back with the browser-verified frame id.
+  const pairedFrameIds = new WeakMap<HTMLIFrameElement, number>();
+  const pendingPairs = new Map<string, WeakRef<HTMLIFrameElement>>();
+  const nativeFrameIdOf = (iframe: HTMLIFrameElement): number | undefined => {
     try {
       const getFrameId = (browser.runtime as { getFrameId?: (target: Element) => number }).getFrameId;
       const id = getFrameId?.(iframe);
@@ -937,8 +978,20 @@ function runICloudApp(kv: typeof browser.storage.local) {
       return undefined;
     }
   };
-  const frameIdsOf = (list: { frameId?: number }[]) =>
-    list.map((m) => m.frameId).filter((id): id is number => typeof id === 'number');
+  const frameIdOf = (iframe: HTMLIFrameElement): number | undefined => nativeFrameIdOf(iframe) ?? pairedFrameIds.get(iframe);
+  const requestPairing = (headers: { iframes?: HTMLIFrameElement[] }[]) => {
+    for (const iframe of headers.flatMap((h) => h.iframes ?? [])) {
+      if (frameIdOf(iframe) !== undefined) continue;
+      const nonce = crypto.randomUUID();
+      pendingPairs.set(nonce, new WeakRef(iframe));
+      while (pendingPairs.size > 200) pendingPairs.delete(pendingPairs.keys().next().value!);
+      try {
+        iframe.contentWindow?.postMessage({ __pedPair: nonce }, '*');
+      } catch {
+        /* frame not ready */
+      }
+    }
+  };
 
   const scan = async () => {
     if (document.hidden) return;
@@ -948,10 +1001,11 @@ function runICloudApp(kv: typeof browser.storage.local) {
       lastHeaderIds = headerIds;
       if (headers.length > 0) void sendRuntime({ type: 'icloudPing' });
     }
+    requestPairing(headers);
 
     const messages = combineICloudThread(headers, sandboxBodies, frameIdOf);
     if (messages.length === 0) {
-      setFramesLocked([...sandboxBodies.keys()], false, false);
+      for (const [frameId, payload] of sandboxBodies) setFrameLocked(frameId, false, false, payload.sig);
       if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
       setBlockedHandlers(null);
       activeMessages = [];
@@ -987,7 +1041,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       dismissed,
       isStale: () => my !== token,
       applyLocks: (items, anyLinksLocked) => {
-        const frameLockMap = new Map<number, { links: boolean; atts: boolean }>();
+        const frameLockMap = new Map<number, { links: boolean; atts: boolean; sig?: string }>();
         for (const { email, trusted, hasAttachments } of items) {
           const lockAtts = !trusted && hasAttachments;
           if (lockAtts) lockMessageAttachments(email);
@@ -998,20 +1052,19 @@ function runICloudApp(kv: typeof browser.storage.local) {
           frameLockMap.set(email.frameId, {
             links: (prev?.links ?? false) || (anyLinksLocked && !trusted),
             atts: (prev?.atts ?? false) || lockAtts,
+            sig: email.sig,
           });
         }
-        for (const [frameId, state] of frameLockMap) {
-          setFramesLocked([frameId], state.links, state.atts);
-        }
+        for (const [frameId, state] of frameLockMap) setFrameLocked(frameId, state.links, state.atts, state.sig);
       },
       unlockAll: (all) => {
         for (const m of all) unlockMessageAttachments(m);
         if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
-        setFramesLocked(frameIdsOf(all), false, false);
+        unlockFrames(all);
       },
       unlockMatching: (matched) => {
         for (const m of matched) unlockMessageAttachments(m);
-        setFramesLocked(frameIdsOf(matched), false, false);
+        unlockFrames(matched);
       },
     });
   };
@@ -1037,10 +1090,21 @@ function runICloudApp(kv: typeof browser.storage.local) {
           links?: unknown;
           linksTruncated?: unknown;
           attachmentNames?: unknown;
+          sig?: unknown;
+          nonce?: unknown;
         }
       | undefined;
     if (m?.type === 'icloudBlocked') {
       currentReopen?.();
+      return;
+    }
+    if (m?.type === 'icloudPair' && typeof m.nonce === 'string' && typeof m.frameId === 'number') {
+      const iframe = pendingPairs.get(m.nonce)?.deref();
+      pendingPairs.delete(m.nonce);
+      if (iframe) {
+        pairedFrameIds.set(iframe, m.frameId);
+        scheduler.schedule();
+      }
       return;
     }
     if (m?.type !== 'icloudBody' || typeof m.frameId !== 'number') return;
@@ -1053,10 +1117,13 @@ function runICloudApp(kv: typeof browser.storage.local) {
         links: Array.isArray(m.links) ? (m.links as Link[]) : [],
         ...(m.linksTruncated === true ? { linksTruncated: true } : {}),
         ...(attachmentNames.length ? { attachmentNames } : {}),
+        ...(typeof m.sig === 'string' ? { sig: m.sig.slice(0, 16) } : {}),
       };
       sandboxBodies.set(m.frameId, payload);
       const last = frameLocks.get(m.frameId);
-      if (last && last.payload === JSON.stringify(payload)) setFramesLocked([m.frameId], last.locked, last.attachmentsLocked);
+      if (last && payload.sig && last.sig === payload.sig) {
+        setFrameLocked(m.frameId, last.locked, last.attachmentsLocked, last.sig);
+      }
       scheduler.schedule();
     } else if (sandboxBodies.delete(m.frameId)) {
       scheduler.schedule();

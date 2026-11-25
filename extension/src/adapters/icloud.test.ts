@@ -195,7 +195,7 @@ describe('combineICloudThread', () => {
     expect(combineICloudThread([], bodies)).toEqual([]);
   });
 
-  it('pairs single and multi-message headers with sandbox payloads in order', () => {
+  it('pairs multi-message headers with sandbox payloads in order, flagged as uncertain (no frame ids)', () => {
     document.body.innerHTML = `
       <div id="message-iframe-INBOX/1"><div class="conversation-list-item">
         <span class="contact-token" title="a@evil.example">A</span><h2>First</h2>
@@ -216,6 +216,7 @@ describe('combineICloudThread', () => {
         body: 'First\nTop body',
         links: [{ text: 'Top', href: 'https://evil.example/1' }],
         frameId: 101,
+        pairingUncertain: true,
       },
       {
         senderName: 'B',
@@ -223,6 +224,7 @@ describe('combineICloudThread', () => {
         body: 'Second\nBottom body',
         links: [{ text: 'Bot', href: 'https://bank.com/2' }],
         frameId: 102,
+        pairingUncertain: true,
       },
     ]);
   });
@@ -309,6 +311,23 @@ describe('combineICloudThread pairs by frame id when available', () => {
     expect(msgs.map((m) => [m.senderAddress, m.frameId, m.body.includes('phishing')])).toEqual([
       ['colleague@corp.example', 7, false],
       ['phish@evil.example', 9, true],
+    ]);
+  });
+});
+
+describe('iCloud pairing safety', () => {
+  it('scans bodies no card claims, with no sender to trust', () => {
+    document.body.innerHTML = `
+      <div id="message-iframe-1"><div class="conversation-list-item"><span class="contact-token" title="colleague@corp.example">C</span><h2>Hi</h2><iframe id="f1"></iframe></div></div>`;
+    const headers = extractICloudHeaders(document);
+    const bodies = new Map([
+      [7, { body: 'colleague body', links: [] }],
+      [9, { body: 'phishing body', links: [{ text: 'x', href: 'http://192.168.4.20/' }] }],
+    ]);
+    const msgs = combineICloudThread(headers, bodies, (el) => (el.id === 'f1' ? 7 : undefined));
+    expect(msgs.map((m) => [m.senderAddress, m.frameId, Boolean(m.pairingUncertain)])).toEqual([
+      ['colleague@corp.example', 7, false],
+      ['', 9, true],
     ]);
   });
 });

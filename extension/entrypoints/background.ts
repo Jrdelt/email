@@ -6,8 +6,10 @@ import { MAX_LINK_TEXT_CHARS, MAX_LINKS } from '../src/adapters/extract';
 import { WARN_TTL_MS, isSafeHttpUrl } from '../src/linkGuard';
 import { clearLookupCaches, getSettings } from '../src/settings';
 
-const MAX_BODY_CHARS = 21_000;
-const MAX_RELAY_FRAMES = 200; // every open message frame of a long thread must still receive its lock decision // sandbox body (head + tail sample, see adapters/extract.ts bodyText) plus slack
+const MAX_BODY_CHARS = 21_000; // sandbox body (head + tail sample, see adapters/extract.ts bodyText) plus slack
+const MAX_RELAY_FRAMES = 200; // every open message frame of a long thread must still receive its lock decision
+const SIG_RE = /^[0-9a-f]{1,8}$/; // FNV-1a body signature from the iCloud sandbox
+const PAIR_NONCE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/; // iCloud card/frame pairing token
 
 function frameRoleOf(url?: string) {
   if (!url) return null;
@@ -76,6 +78,8 @@ export default defineBackground(() => {
           links?: unknown;
           attachmentNames?: unknown;
           linksTruncated?: unknown;
+          sig?: unknown;
+          nonce?: unknown;
           locked?: unknown;
           attachmentsLocked?: unknown;
           frameIds?: unknown;
@@ -188,6 +192,7 @@ export default defineBackground(() => {
           // Over-cap link lists are also truncated here, so report that the extras were not checked.
           linksTruncated: m.linksTruncated === true || (Array.isArray(m.links) && m.links.length > MAX_LINKS),
           attachmentNames,
+          ...(typeof m.sig === 'string' && SIG_RE.test(m.sig) ? { sig: m.sig } : {}),
         })
         .catch(() => {});
       return undefined;
@@ -198,11 +203,24 @@ export default defineBackground(() => {
         : [];
       const locked = Boolean(m.locked);
       const attachmentsLocked = Boolean(m.attachmentsLocked);
+      const sig = typeof m.sig === 'string' && SIG_RE.test(m.sig) ? { sig: m.sig } : {};
       for (const frameId of frameIds) {
         void browser.tabs
-          .sendMessage(sender.tab.id, { type: 'icloudLock', locked, attachmentsLocked }, { frameId })
+          .sendMessage(sender.tab.id, { type: 'icloudLock', locked, attachmentsLocked, ...sig }, { frameId })
           .catch(() => {});
       }
+      return undefined;
+    }
+    if (
+      m?.type === 'icloudPair' &&
+      sender.tab?.id !== undefined &&
+      sender.frameId !== undefined &&
+      frameRoleOf(sender.url) === 'sandbox' &&
+      typeof m.nonce === 'string' &&
+      PAIR_NONCE_RE.test(m.nonce)
+    ) {
+      // Stateless relay: the app frame ties its card's iframe (which it sent the nonce to) to this verified frame id.
+      void browser.tabs.sendMessage(sender.tab.id, { type: 'icloudPair', nonce: m.nonce, frameId: sender.frameId }).catch(() => {});
       return undefined;
     }
     if (m?.type === 'icloudBlocked' && sender.tab?.id !== undefined && frameRoleOf(sender.url) === 'sandbox') {

@@ -33,6 +33,8 @@ export interface ICloudSandboxPayload {
   links: Link[];
   linksTruncated?: boolean;
   attachmentNames?: string[];
+  /** Short hash of the sandbox's body signature: lock decisions echo it so stale ones can be ignored. */
+  sig?: string;
 }
 
 export interface ICloudThreadMessage {
@@ -45,6 +47,9 @@ export interface ICloudThreadMessage {
   attachmentContainers?: HTMLElement[];
   attachmentNames?: string[];
   frameId?: number;
+  sig?: string;
+  /** The body could not be tied to its card for certain: the card's sender must not be trusted for it. */
+  pairingUncertain?: boolean;
 }
 
 function isRecipientNode(el: Element): boolean {
@@ -277,8 +282,20 @@ function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: IC
     ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
     ...(attachmentNames.length ? { attachmentNames } : {}),
     frameId,
+    ...(payload?.sig ? { sig: payload.sig } : {}),
   };
 }
+
+const UNKNOWN_CARD: ICloudHeader = {
+  id: '',
+  senderName: '',
+  senderAddress: '',
+  subject: '',
+  iframeCount: 0,
+  attachments: [],
+  attachmentContainers: [],
+  container: undefined as unknown as HTMLElement,
+};
 
 /**
  * Pair header cards from mail2 with sandboxed body payloads. With `frameIdOf` (runtime.getFrameId on each card's
@@ -296,10 +313,19 @@ export function combineICloudThread(
       (h.iframes ?? []).map(frameIdOf).find((id): id is number => typeof id === 'number' && id >= 0),
     );
     if (ids.some((id) => id !== undefined)) {
-      return headers.map((h, i) => threadMessage(h, ids[i], ids[i] === undefined ? undefined : bodies.get(ids[i]!)));
+      const out = headers.map((h, i) => threadMessage(h, ids[i], ids[i] === undefined ? undefined : bodies.get(ids[i]!)));
+      // A body whose frame no card claims is still scanned and locked, with no sender to trust.
+      const claimed = new Set(ids);
+      for (const [frameId, payload] of bodies) {
+        if (!claimed.has(frameId)) out.push({ ...threadMessage(UNKNOWN_CARD, frameId, payload), pairingUncertain: true });
+      }
+      return out;
     }
   }
   const entries = [...bodies.entries()];
+  // Positional pairing is only certain for one body and one expanded card.
+  const uncertain = entries.length > 1 || headers.filter((h) => h.iframeCount > 0).length > 1;
+  const mark = (m: ICloudThreadMessage): ICloudThreadMessage => (uncertain ? { ...m, pairingUncertain: true } : m);
   const expandedIndices = headers
     .map((h, idx) => (h.iframeCount > 0 ? idx : -1))
     .filter((idx) => idx !== -1);
@@ -311,7 +337,7 @@ export function combineICloudThread(
     expandedIndices.forEach((hIdx, i) => entryByHeader.set(hIdx, entries[i]));
     return headers.map((h, idx) => {
       const entry = entryByHeader.get(idx);
-      return threadMessage(h, entry?.[0], entry?.[1]);
+      return mark(threadMessage(h, entry?.[0], entry?.[1]));
     });
   }
 
@@ -320,7 +346,7 @@ export function combineICloudThread(
   for (let i = 0; i < count; i++) {
     const h = headers[Math.min(i, headers.length - 1)];
     const entry = entries[i];
-    out.push(threadMessage(h, entry?.[0], entry?.[1]));
+    out.push(mark(threadMessage(h, entry?.[0], entry?.[1])));
   }
   return out;
 }
