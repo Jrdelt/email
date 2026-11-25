@@ -344,7 +344,14 @@ export const icloud: WebmailAdapter = {
   name: 'icloud',
   matches: (url) => icloudFrameRole(url) !== null,
   extractAll(doc): ExtractedEmail[] {
-    const headers = extractICloudHeaders(doc);
+    // A sandbox document is email HTML: never read header cards (sender, subject) from it.
+    let role: ICloudFrameRole = null;
+    try {
+      role = icloudFrameRole(new URL(doc.URL));
+    } catch {
+      role = null;
+    }
+    const headers = role === 'sandbox' ? [] : extractICloudHeaders(doc);
     if (headers.length > 0) {
       return headers.map((h) => {
         const bodyEl = sameOriginBody(h.container);
