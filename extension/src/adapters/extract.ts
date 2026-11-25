@@ -5,7 +5,12 @@ import type { AttachmentRef } from './types';
 
 export const MAX_BODY_CHARS = 20_000; // cap work per email
 export const MAX_LINKS = 200;
-export const MAX_ATTACHMENTS = 50;
+/**
+ * Safety bound on attachment elements collected per source (inline anchors, or one adapter's chips).
+ * This bounds DOM work only: names analysed for the banner are capped separately (attachments.ts), and
+ * when inline downloads exceed it the whole body is locked as an attachment instead of leaving extras live.
+ */
+export const MAX_ATTACHMENTS = 500;
 
 /** True when the element or an ancestor is `[hidden]` or `[aria-hidden="true"]`. */
 export const isHidden = (el: Element): boolean => closestEl(el, '[hidden], [aria-hidden="true"]') !== null;
@@ -113,20 +118,26 @@ function filenameFromHref(rawHref: string, base: string): string {
   }
 }
 
-/** Extract inline download/data/blob anchor attachments inside an email body container. */
+/**
+ * Extract inline download/data:/blob: links inside an email body container: `<a>` and `<area>`, SVG `<a>`
+ * with `xlink:href`, and stashed (locked) attributes. The scheme is read from the parsed URL, so case,
+ * leading spaces and embedded tabs/newlines (` data:`, `da&#10;ta:`) are normalised the way the browser does.
+ * If there are more than MAX_ATTACHMENTS, the container itself is returned as the last entry so the whole
+ * body is attachment-locked rather than leaving the extra downloads live.
+ */
 export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
   const base = ownerDocOf(container).baseURI || 'https://invalid.local';
   const out: AttachmentRef[] = [];
-  const seen = new Set<HTMLElement>();
-  const sel =
-    'a[download], a[data-ped-att-download], a[href^="data:" i], a[data-ped-href^="data:" i], a[data-ped-att-href^="data:" i], a[href^="blob:" i], a[data-ped-href^="blob:" i], a[data-ped-att-href^="blob:" i]';
 
-  for (const el of container.querySelectorAll<HTMLElement>(sel)) {
-    if (out.length >= MAX_ATTACHMENTS) break;
-    if (seen.has(el)) continue;
-    seen.add(el);
-    const dlAttr = getAttr(el, 'download') ?? getAttr(el, 'data-ped-att-download') ?? '';
-    const href = getAttr(el, 'href') ?? getAttr(el, 'data-ped-href') ?? getAttr(el, 'data-ped-att-href') ?? '';
+  for (const el of container.querySelectorAll<HTMLElement>('a, area')) {
+    const dl = getAttr(el, 'download') ?? getAttr(el, 'data-ped-att-download');
+    const href = resolveAnchorHref(el, true);
+    if (dl === null && !href.startsWith('data:') && !href.startsWith('blob:')) continue;
+    if (out.length >= MAX_ATTACHMENTS) {
+      out.push({ name: '', element: container });
+      break;
+    }
+    const dlAttr = dl ?? '';
     const name = cleanAttachmentName(
       dlAttr ||
         filenameFromHref(href, base) ||

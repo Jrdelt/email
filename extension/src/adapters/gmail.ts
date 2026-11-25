@@ -85,6 +85,7 @@ function extractGmailAttachments(
   container: HTMLElement,
 ): { attachments: AttachmentRef[]; attachmentContainers: HTMLElement[] } {
   const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
+  const inlineCount = attachments.length; // the chip cap below counts this adapter's own chips only
   const shelves: HTMLElement[] = [];
   const attachmentContainers: HTMLElement[] = [];
 
@@ -116,7 +117,7 @@ function extractGmailAttachments(
   ].join(', ');
 
   for (const chip of scope.querySelectorAll<HTMLElement>(chipSel)) {
-    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (shouldSkip(chip) || isGmailBulkAction(chip)) continue;
     if (attachments.some((prev) => prev.element === chip || prev.element.contains(chip))) continue;
     attachments.push({ name: gmailChipName(chip), element: chip });
@@ -130,7 +131,7 @@ function extractGmailAttachments(
   }
 
   for (const shelf of shelves) {
-    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (!attachments.some((a) => shelf.contains(a.element) || a.element === shelf)) {
       attachments.push({ name: '', element: shelf });
     }

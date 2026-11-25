@@ -114,6 +114,7 @@ function extractYahooAttachments(
   hostEl: HTMLElement,
 ): { attachments: AttachmentRef[]; attachmentContainers: HTMLElement[] } {
   const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
+  const inlineCount = attachments.length; // the chip cap below counts this adapter's own chips only
   const attachmentContainers: HTMLElement[] = [];
   const scope = findScope(doc, hostEl);
 
@@ -132,14 +133,14 @@ function extractYahooAttachments(
   const tileSel =
     '[data-test-id="attachment-tile"], [data-test-id="attachment-download-btn"], a[download], a[data-ped-att-download]';
   for (const tile of scope.querySelectorAll<HTMLElement>(tileSel)) {
-    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (shouldSkip(tile)) continue;
     if (attachments.some((p) => p.element === tile || p.element.contains(tile))) continue;
     attachments.push({ name: yahooItemName(tile), element: tile });
   }
 
   for (const list of attachmentContainers) {
-    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (!attachments.some((a) => list.contains(a.element) || a.element === list)) {
       attachments.push({ name: '', element: list });
     }

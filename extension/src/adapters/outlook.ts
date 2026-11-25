@@ -153,6 +153,7 @@ function extractOutlookAttachments(
   hostEl: HTMLElement,
 ): { attachments: AttachmentRef[]; attachmentContainers: HTMLElement[] } {
   const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
+  const inlineCount = attachments.length; // the chip cap below counts this adapter's own chips only
   const wells: HTMLElement[] = [];
   const attachmentContainers: HTMLElement[] = [];
 
@@ -196,7 +197,7 @@ function extractOutlookAttachments(
   ].join(', ');
 
   const addCard = (el: HTMLElement) => {
-    if (attachments.length >= MAX_ATTACHMENTS) return;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) return;
     if (shouldSkip(el) || isOutlookBulkLabel(el)) return;
     if (attachments.some((prev) => prev.element === el || prev.element.contains(el))) return;
     attachments.push({ name: outlookItemName(el), element: el });
@@ -213,7 +214,7 @@ function extractOutlookAttachments(
   }
 
   for (const well of wells) {
-    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (!attachments.some((a) => well.contains(a.element) || a.element === well)) {
       attachments.push({ name: '', element: well });
     }

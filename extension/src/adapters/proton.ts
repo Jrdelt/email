@@ -128,6 +128,7 @@ function extractProtonAttachments(
   hostEl: HTMLElement,
 ): { attachments: AttachmentRef[]; attachmentContainers: HTMLElement[] } {
   const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
+  const inlineCount = attachments.length; // the chip cap below counts this adapter's own chips only
   const attachmentContainers: HTMLElement[] = [];
   const scope = findScope(doc, hostEl);
 
@@ -145,7 +146,7 @@ function extractProtonAttachments(
   for (const item of scope.querySelectorAll<HTMLElement>(
     '[data-testid^="attachment-item"]:not([data-testid="attachment-item:name"]), a[download], a[data-ped-att-download]',
   )) {
-    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (shouldSkip(item)) continue;
     if (attachments.some((p) => p.element === item || p.element.contains(item))) continue;
     attachments.push({ name: protonItemName(item), element: item });
@@ -157,7 +158,7 @@ function extractProtonAttachments(
   }
 
   for (const list of attachmentContainers) {
-    if (attachments.length >= MAX_ATTACHMENTS) break;
+    if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (!attachments.some((a) => list.contains(a.element) || a.element === list)) {
       attachments.push({ name: '', element: list });
     }
