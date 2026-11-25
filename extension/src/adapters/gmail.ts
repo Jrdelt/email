@@ -174,13 +174,15 @@ export const gmail: WebmailAdapter = {
 
       let senderAddress = emailChip?.getAttribute('email')?.trim() ?? '';
       if (!senderAddress && scope) {
-        for (const el of scope.querySelectorAll<HTMLElement>('span.go.gD, span.go, span.gD, h3.iw')) {
-          if (container.contains(el)) continue;
-          const found = extractEmailText(el.textContent ?? '');
-          if (found) {
-            senderAddress = found;
-            break;
+        // Gmail's own address chips only, in priority order: never h3.iw or the display-name chip, whose text
+        // the sender controls ("service@paypal.com via sendgrid.net").
+        for (const sel of ['span.go.gD', 'span.go']) {
+          for (const el of scope.querySelectorAll<HTMLElement>(sel)) {
+            if (container.contains(el) || el.closest(DISPLAY_NAME_SEL)) continue;
+            senderAddress = extractEmailText(el.textContent ?? '');
+            if (senderAddress) break;
           }
+          if (senderAddress) break;
         }
       }
 

@@ -47,12 +47,17 @@ function isRecipientNode(el: Element): boolean {
   if (el.closest('[aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i], [data-testid*="recipient" i]')) {
     return true;
   }
+  // A contact token's text is the sender's display name ("Cc: Bank Alerts"), so text that starts with the
+  // token's own text is not a recipient label.
+  const token = el.closest('span.contact-token');
+  const tokenText = token ? (token.textContent ?? '').trim() : '';
   for (let cur: Element | null = el; cur; cur = cur.parentElement) {
     if (cur.matches('.conversation-list-item, .allow-select')) break;
     const label = cur.getAttribute('aria-label') ?? '';
     if (/^(to|cc|bcc|reply-to)\b/i.test(label)) return true;
     const text = (cur.textContent ?? '').trim();
-    if (/^(to|cc|bcc|reply-to)\s*:/i.test(text) && !/\bfrom\s*:/i.test(text)) return true;
+    const fromToken = tokenText !== '' && text.startsWith(tokenText);
+    if (!fromToken && /^(to|cc|bcc|reply-to)\s*:/i.test(text) && !/\bfrom\s*:/i.test(text)) return true;
   }
   return false;
 }
@@ -67,9 +72,10 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
     if (isHidden(token) || skip(token)) continue;
     const text = (token.textContent ?? '').trim();
     if (!fallbackName && text && !text.includes('@')) fallbackName = text;
-    const hit = extractSenderFromElement(token, fallbackName);
+    // The token's text is the display name: only its structured attributes may supply the address.
+    const hit = extractSenderFromElement(token, fallbackName, { text: false });
     if (hit) return hit;
-    if (!fallbackName && text) fallbackName = text;
+    if (!fallbackName && text && !text.includes('@')) fallbackName = text;
     break;
   }
 

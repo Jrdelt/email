@@ -64,7 +64,9 @@ export function parseSenderHeader(
   if (paren) {
     return { senderName: paren[1].trim().replace(/^["']|["']$/g, '') || fallback, senderAddress: paren[2].trim() };
   }
-  const bare = cleaned.match(ADDRESS_TOKEN_RE);
+  // Bare "Name addr" text: the attacker-controlled display name comes first, so use the LAST address token.
+  const tokens = [...cleaned.matchAll(new RegExp(ADDRESS_TOKEN_RE.source, 'g'))];
+  const bare = tokens[tokens.length - 1];
   if (bare && bare.index !== undefined) {
     const before = cleaned.slice(0, bare.index).replace(/^[\s,:;\-"']+|[\s,:;\-"'<]+$/g, '').trim();
     return { senderName: before || fallback, senderAddress: bare[0].trim() };
@@ -72,10 +74,15 @@ export function parseSenderHeader(
   return null;
 }
 
-/** Extract sender name and email address from a webmail header DOM node (`mailto:`, `data-email`, `aria-label`, `title`, or text). */
+/**
+ * Extract sender name and email address from a webmail header DOM node (`mailto:`, `data-email`, `aria-label`,
+ * `title`, or text). Pass `{ text: false }` for nodes whose text is only the sender's display name: the sender
+ * controls that text, so an address written there must not be taken as the real address.
+ */
 export function extractSenderFromElement(
   el: Element,
   fallbackName = '',
+  opts: { text?: boolean } = {},
 ): { senderName: string; senderAddress: string } | null {
   if (isUnsafeNode(el)) return null;
   const text = textOf(el).trim();
@@ -95,7 +102,7 @@ export function extractSenderFromElement(
   return (
     parseSenderHeader(getAttr(el, 'aria-label') ?? '', fb) ??
     parseSenderHeader(getAttr(el, 'title') ?? '', fb) ??
-    parseSenderHeader(text, fb)
+    (opts.text === false ? null : parseSenderHeader(text, fb))
   );
 }
 

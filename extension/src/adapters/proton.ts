@@ -68,6 +68,12 @@ function findScope(doc: Document, hostEl: HTMLElement): HTMLElement {
   );
 }
 
+const FROM_BLOCK_SELECTORS = [
+  '[data-testid="message-header:from"]',
+  '[data-testid="message-header-expanded"]',
+  '[data-testid="message-header"]',
+];
+
 function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
   const scope = findScope(doc, hostEl);
   const skip = (el: Element): boolean =>
@@ -76,15 +82,15 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
     container.contains(el) ||
     el.closest('[data-testid*="recipients:to"], [data-testid*="recipients:cc"], [data-testid*="recipients:bcc"]') !== null;
 
-  const fromBlock = scope.querySelector<HTMLElement>(
-    '[data-testid="message-header:from"], [data-testid="message-header-expanded"], [data-testid="message-header"]',
-  );
-  const searchRoot = fromBlock && !skip(fromBlock) ? fromBlock : scope;
+  // Most specific first: the outer header also contains the display name and the recipients.
+  const fromBlock =
+    FROM_BLOCK_SELECTORS.map((sel) => scope.querySelector<HTMLElement>(sel)).find((el) => el && !skip(el)) ?? null;
+  const searchRoot = fromBlock ?? scope;
   const fallbackName =
     (searchRoot.querySelector<HTMLElement>('[data-testid="recipient-name"], [data-testid="message-header:from-name"]')?.textContent ?? '')
       .trim();
 
-  if (fromBlock && !skip(fromBlock)) {
+  if (fromBlock) {
     const direct = extractSenderFromElement(fromBlock, fallbackName);
     if (direct) return direct;
   }
