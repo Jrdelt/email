@@ -96,7 +96,7 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 ### Data Collection & Off-Device Transmission
 - **Does the extension transmit any data off-device?**
   - **Email content, sender email addresses, attachment files/names, and full URLs:** **No** — processed strictly in memory on the user's device and never transmitted anywhere.
-  - **Registrable website domains (`Web history` / `Website content` minimal disclosure):** When an untrusted email is opened or an external link inside an email is clicked, **only the bare registrable domain name** (e.g., `example.com`, never URL paths/queries or email addresses) is queried over HTTPS against public IANA/registry RDAP (`data.iana.org`, registry RDAP / `rdap.org`) and public DNS-over-HTTPS (`cloudflare-dns.com`, `dns.google` fallback) to check domain age, mail setup, and URIBL spam status. No developer backend, analytics, or user tracking exists.
+  - **Registrable website domains (disclosed as `Personal communications`, `Web history` and `Website content`, domain names only):** When an untrusted email is opened or an external link inside an email is clicked, **only the bare registrable domain name** (e.g., `example.com`, never URL paths/queries or email addresses) is queried over HTTPS against public IANA/registry RDAP (`data.iana.org`, registry RDAP / `rdap.org`) and public DNS-over-HTTPS (`cloudflare-dns.com`, `dns.google` fallback) to check domain age, mail setup, and URIBL spam status. No developer backend, analytics, or user tracking exists.
 
 | Data Type | Collected / Stored Externally by Developer? | Transmitted Off-Device? | Purpose | Shared with Third Parties? |
 |-----------|---------------------------------------------|------------------------|---------|---------------------------|
@@ -104,9 +104,9 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 | Health info | No | No | N/A | No |
 | Financial info | No | No | N/A | No |
 | Authentication info | No | No | N/A | No |
-| Personal communications | No (analyzed locally in browser memory only) | No | Local phishing & attachment inspection | No |
+| Personal communications | No (emails analyzed locally in browser memory only) | Yes — only the registrable domain of the sender of an opened untrusted email (never the address, content, links or attachments) to public RDAP & DNS resolvers | Check the sender domain's registration age, email records and spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
 | Location | No | No | N/A | No |
-| Web history | No | No | N/A | No |
+| Web history | No | Yes — only the registrable domain of an external link the user clicks in an email (never the URL path, query or the user's other browsing) to public RDAP & DNS resolvers | Check a clicked destination before it opens | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
 | User activity | No | No | N/A | No |
 | Website content | Domain name only (sender / clicked external link registrable domain) | Yes — bare domain name only to public RDAP & DNS resolvers (24 h cached) | Check domain registration age, DNS email records, and URIBL spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
 

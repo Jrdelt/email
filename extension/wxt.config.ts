@@ -60,8 +60,10 @@ export default defineConfig({
             gecko: {
               id: 'phishing-email-detector@jrdelt.github.io',
               strict_min_version: '142.0',
+              // Declared conservatively: the sender's domain (from an email) and clicked links' domains (browsing
+              // activity) go to public RDAP/DNS unless Strict Local Mode is on. See docs/browser-support-and-stores.md.
               data_collection_permissions: {
-                required: ['websiteContent'],
+                required: ['websiteContent', 'browsingActivity', 'personalCommunications'],
               },
             },
           },
