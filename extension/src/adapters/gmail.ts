@@ -5,6 +5,7 @@ import {
   ADDRESS_TOKEN_RE,
   MAX_ATTACHMENTS,
   MAX_HEADER_CHARS,
+  capText,
   bodyText,
   withSubject,
   inlineAttachmentsIn,
@@ -14,7 +15,7 @@ import {
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
-const extractEmailText = (raw: string): string => raw.slice(0, MAX_HEADER_CHARS).match(ADDRESS_TOKEN_RE)?.[0]?.trim() ?? '';
+const extractEmailText = (raw: string): string => capText(raw, MAX_HEADER_CHARS).match(ADDRESS_TOKEN_RE)?.[0]?.trim() ?? '';
 
 const cleanHost = (raw: string): string =>
   raw.trim().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '').toLowerCase();

@@ -1,7 +1,17 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
 import { analyzeSender } from '../sender';
-import { MAX_ATTACHMENTS, inlineAttachmentsIn, parseSenderHeader } from './extract';
+import {
+  MAX_ATTACHMENTS,
+  MAX_BODY_CHARS,
+  MAX_LINK_TEXT_CHARS,
+  MAX_LINKS,
+  bodyText,
+  capText,
+  inlineAttachmentsIn,
+  parseSenderHeader,
+  scanLinks,
+} from './extract';
 import { outlook } from './outlook';
 import { proton } from './proton';
 import { yahoo } from './yahoo';
@@ -150,5 +160,51 @@ describe('link truncation is reported (fail closed)', () => {
     expect(both.truncated).toBe(true);
     expect(both.links.length).toBeLessThanOrEqual(MAX_LINKS);
     expect(scanLinks(body(`${'<a href="https://a.example/">same</a>'.repeat(500)}`)).truncated).toBe(false); // duplicates collapse
+  });
+});
+
+describe('filler cannot hide content past the work caps', () => {
+  it('examines the last links when thousands of identical filler links come first, and reports truncation', () => {
+    const pad = '<a href="https://www.paypal.com/">PayPal</a>'.repeat(2100);
+    const { links, truncated } = scanLinks(body(`${pad}<a href="http://192.168.4.20/login">https://www.paypal.com/signin</a>`));
+    expect(links.map((l) => l.href)).toContain('http://192.168.4.20/login');
+    expect(truncated).toBe(true);
+  });
+
+  it('collapses repeated SMIL values so they cannot exhaust the link budget', () => {
+    const vals = Array.from({ length: 2500 }, () => 'https://www.paypal.com/').join(';');
+    const { links, truncated } = scanLinks(
+      body(`<svg><a><set attributeName="href" values="${vals}"/><text>x</text></a></svg><a href="http://192.168.4.20/x">y</a>`),
+    );
+    expect(links.map((l) => l.href)).toEqual(['https://www.paypal.com/', 'http://192.168.4.20/x']);
+    expect(truncated).toBe(false);
+  });
+
+  it('keeps the end of the body however much hidden filler precedes it', () => {
+    const t = bodyText(body(`<div style="display:none">${'a '.repeat(150_000)}</div><p>URGENT verify your password</p>`));
+    expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+    expect(t).toContain('URGENT verify your password');
+    expect(t.startsWith('a a a')).toBe(true);
+  });
+
+  it('returns short bodies whole and joins head and tail without a gap when they meet', () => {
+    expect(bodyText(body('<p>Hello</p><style>.x{}</style><noscript>n</noscript><template>t</template> world'))).toBe('Hello world');
+    const half = MAX_BODY_CHARS / 2;
+    const t = bodyText(body(`<p>${'h'.repeat(MAX_BODY_CHARS)}</p><p>${'m'.repeat(100)}</p><p>${'t'.repeat(half)}</p>`));
+    expect(t).toBe(`${'h'.repeat(half)}\n${'t'.repeat(half)}`);
+  });
+
+  it('caps long link text to exactly the limit, keeping the end after invisible filler', () => {
+    const { links } = scanLinks(body(`<a href="https://paypal-signin-verify.com/">${'​'.repeat(5000)}https://www.paypal.com/signin</a>`));
+    expect(links[0]!.text).toBe('https://www.paypal.com/signin');
+    const visible = capText(`${'x'.repeat(5000)} https://www.paypal.com/signin`, MAX_LINK_TEXT_CHARS);
+    expect(visible.length).toBe(MAX_LINK_TEXT_CHARS);
+    expect(visible.endsWith('https://www.paypal.com/signin')).toBe(true);
+  });
+
+  it('finds the address after a very long display name', () => {
+    const parsed = parseSenderHeader(`PayPal Service${'​'.repeat(3000)}${' '.repeat(3000)}<service@paypa1-alerts.com>`);
+    expect(parsed?.senderAddress).toBe('service@paypa1-alerts.com');
+    expect(analyzeSender(parsed!.senderName, parsed!.senderAddress, []).warnings.join(' ')).toMatch(/PayPal/);
   });
 });

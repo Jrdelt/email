@@ -1,6 +1,6 @@
 import { cleanAttachmentName } from '../attachments';
 import { closestEl, getAttr, hasAttr, isFormEl, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
-import { safePercentDecode, type Link } from '../features';
+import { INVISIBLE_RE, safePercentDecode, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
@@ -116,37 +116,70 @@ export function sameOriginFrameDocs(doc: Document, selector: string): Document[]
 }
 
 const NON_TEXT_TAGS = new Set(['style', 'script', 'noscript', 'template']);
-const MAX_SCAN_CHARS = 10 * MAX_BODY_CHARS; // bound on text walked before sampling
 
 /** Keep the start and the end of an over-long list or text, so padding at the top cannot hide what follows. */
 function headAndTail<T>(items: T[], max: number): T[] {
   return items.length <= max ? items : [...items.slice(0, Math.ceil(max / 2)), ...items.slice(items.length - Math.floor(max / 2))];
 }
 
+/**
+ * Bound attacker-controlled text (link text, header labels) without letting filler hide what matters: over `max`,
+ * drop characters that render as nothing, collapse whitespace runs, then keep the first and last halves.
+ */
+export function capText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const visible = text.replace(INVISIBLE_RE, '').replace(/\s+/g, ' ');
+  if (visible.length <= max) return visible;
+  const half = Math.floor(max / 2);
+  return `${visible.slice(0, half)} ${visible.slice(visible.length - (max - half - 1))}`; // exactly max chars
+}
+
 /** Prepend the subject (bounded) without cutting the end of the already-sampled body. */
 export const withSubject = (subject: string, body: string): string =>
   subject ? (body ? `${subject.slice(0, 300)}\n${body}` : subject.slice(0, 300)) : body;
 
+const textFilter: NodeFilter = {
+  acceptNode: (n) => (n.nodeType === 1 ? (NON_TEXT_TAGS.has(tagOf(n as Element)) ? 2 /* REJECT subtree */ : 3 /* SKIP */) : 1),
+};
+
 /**
  * Message text for scoring: skips CSS/script text and, when longer than MAX_BODY_CHARS, keeps the first and last
- * halves so hidden filler at the top cannot push the real message out of reach.
+ * halves so filler at the top cannot push the real message out of reach. Work stays bounded however long the body
+ * is: the start is read forwards and the end backwards, and the middle is never visited.
  */
 export function bodyText(el: HTMLElement): string {
   const doc = ownerDocOf(el);
-  const parts: string[] = [];
-  let total = 0;
-  const walker = doc.createTreeWalker(el, 0x1 | 0x4 /* SHOW_ELEMENT | SHOW_TEXT */, {
-    acceptNode: (n) =>
-      n.nodeType === 1 ? (NON_TEXT_TAGS.has(tagOf(n as Element)) ? 2 /* REJECT subtree */ : 3 /* SKIP */) : 1,
-  });
-  for (let n = walker.nextNode(); n && total < MAX_SCAN_CHARS; n = walker.nextNode()) {
-    const t = n.nodeValue ?? '';
-    parts.push(t);
-    total += t.length;
-  }
-  const text = parts.join('');
-  if (text.length <= MAX_BODY_CHARS) return text;
   const half = Math.floor(MAX_BODY_CHARS / 2);
+  const head: string[] = [];
+  const headNodes = new Set<Node>();
+  let headLen = 0;
+  const forward = doc.createTreeWalker(el, 0x1 | 0x4 /* SHOW_ELEMENT | SHOW_TEXT */, textFilter);
+  let n = forward.nextNode();
+  for (; n && headLen < MAX_BODY_CHARS; n = forward.nextNode()) {
+    const t = n.nodeValue ?? '';
+    head.push(t);
+    headNodes.add(n);
+    headLen += t.length;
+  }
+  let text = head.join('');
+  if (n) {
+    // More text follows: read the end backwards until half a body is collected or the head is reached.
+    const tail: string[] = [];
+    let tailLen = 0;
+    let joined = false;
+    const backward = doc.createTreeWalker(el, 0x1 | 0x4, textFilter);
+    for (let m = backward.lastChild(); m && tailLen < half; m = backward.previousNode()) {
+      if (headNodes.has(m)) {
+        joined = true;
+        break;
+      }
+      const t = m.nodeValue ?? '';
+      tail.push(t);
+      tailLen += t.length;
+    }
+    text = `${text}${joined ? '' : '\n'}${tail.reverse().join('')}`;
+  }
+  if (text.length <= MAX_BODY_CHARS) return text;
   return `${text.slice(0, half)}\n${text.slice(text.length - half)}`;
 }
 
@@ -155,8 +188,8 @@ export function parseSenderHeader(
   raw: string,
   fallbackName = '',
 ): { senderName: string; senderAddress: string } | null {
-  const cleaned = raw
-    .slice(0, MAX_HEADER_CHARS)
+  // The address comes last ("Name <addr>"): a long display name must not push it past the cap.
+  const cleaned = capText(raw, MAX_HEADER_CHARS)
     .trim()
     .replace(/^(?:from|sender)\s*:\s*/i, '')
     .replace(/^opens card for\s+/i, '')
@@ -226,24 +259,36 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
   const base = ownerDocOf(el).baseURI || 'https://invalid.local';
   const out: Link[] = [];
   const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
-  for (const node of el.querySelectorAll(sel)) {
-    if (out.length >= MAX_LINK_SCAN) break;
+  const nodes = [...el.querySelectorAll(sel)];
+  // Past the examination bound, look at the first and last nodes and report truncation (fail closed): thousands
+  // of identical filler links must not keep the real one from being examined.
+  let truncated = nodes.length > MAX_LINK_SCAN;
+  for (const node of headAndTail(nodes, MAX_LINK_SCAN)) {
+    if (out.length >= MAX_LINK_SCAN) {
+      truncated = true;
+      break;
+    }
     const tag = tagOf(node);
     if (tag === 'set' || tag === 'animate') {
-      // SVG SMIL retargeting an <a>: score every value it can navigate to.
+      // SVG SMIL retargeting an <a>: score every distinct value it can navigate to.
       const target = (getAttr(node, 'attributeName') ?? getAttr(node, 'data-ped-anim-attr') ?? '').trim().toLowerCase();
       if (!ANIMATED_HREF.has(target)) continue;
       const anchor = closestEl(node, 'a');
-      const text = anchor ? textOf(anchor).slice(0, MAX_LINK_TEXT_CHARS) : '';
-      const values = [getAttr(node, 'to') ?? '', ...(getAttr(node, 'values') ?? '').split(';')];
+      const text = anchor ? capText(textOf(anchor), MAX_LINK_TEXT_CHARS) : '';
+      const values = new Set([getAttr(node, 'to') ?? '', ...(getAttr(node, 'values') ?? '').split(';')]);
       for (const raw of values) {
         const href = resolveAgainstBase(raw, base);
-        if (href && out.length < MAX_LINK_SCAN) out.push({ text, href });
+        if (!href) continue;
+        if (out.length >= MAX_LINK_SCAN) {
+          truncated = true;
+          break;
+        }
+        out.push({ text, href });
       }
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
       // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
-      if (href) out.push({ text: textOf(node).slice(0, MAX_LINK_TEXT_CHARS), href: unwrapRedirectUrl(href) });
+      if (href) out.push({ text: capText(textOf(node), MAX_LINK_TEXT_CHARS), href: unwrapRedirectUrl(href) });
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? '';
       const href = resolveAgainstBase(raw, base);
@@ -255,7 +300,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
         getAttr(node, 'data-ped-att-formaction') ??
         '';
       const href = resolveAgainstBase(raw, base);
-      const text = (textOf(node) || getAttr(node, 'value') || '').slice(0, MAX_LINK_TEXT_CHARS).trim();
+      const text = capText(textOf(node) || getAttr(node, 'value') || '', MAX_LINK_TEXT_CHARS).trim();
       if (href) out.push({ text, href });
     }
   }
@@ -267,7 +312,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     seen.add(key);
     return true;
   });
-  return { links: headAndTail(unique, MAX_LINKS), truncated: unique.length > MAX_LINKS };
+  return { links: headAndTail(unique, MAX_LINKS), truncated: truncated || unique.length > MAX_LINKS };
 }
 
 export const linksIn = (el: HTMLElement): Link[] => scanLinks(el).links;

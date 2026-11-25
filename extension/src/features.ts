@@ -117,7 +117,7 @@ function trimTrailingPunct(s: string): string {
 
 // Characters that render as nothing (soft hyphen, zero-width space/joiners, word joiner, BOM, bidi marks) and
 // look-alike dots. Link text "www.pay&shy;pal.com" or "paypal\uff0ecom" still shows a domain to the reader.
-const INVISIBLE_RE = /[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g;
+export const INVISIBLE_RE = /[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g;
 const DOT_LOOKALIKE_RE = /[\u3002\uff0e\uff61]/g;
 
 /** Normalise link text the way a reader sees it (mirror of features.py _normalize_shown_text). */
