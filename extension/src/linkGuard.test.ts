@@ -182,6 +182,25 @@ describe('redirect wrappers', () => {
     expect(unwrapRedirectUrl('https://linkprotect.cudasvc.com/url?a=https%3A%2F%2Fevil.example%2Fx&c=E')).toBe('https://evil.example/x');
     expect(unwrapRedirectUrl('https://secure-web.cisco.com/1AbC/https%3A%2F%2Fevil.example%2Fy')).toBe('https://evil.example/y');
   });
+
+  it("decodes Proofpoint v3 '*' and '**X' tokens instead of cutting the URL at the first '*'", () => {
+    const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    // 'é' and '+' moved into the token; '**B' is a run of 3 characters.
+    const href = `https://urldefense.com/v3/__https://caf*.example/a*b/**Bx__;${b64('é+xyz')}!!sig$`;
+    expect(unwrapRedirectUrl(href)).toBe('https://café.example/a+b/xyzx');
+    const r = analyzeLinkDestination(href, 'shop.example');
+    expect(r.host).toBe('xn--caf-dma.example');
+    // A token that cannot supply the characters keeps the wrapper and marks the link ambiguous (a warning).
+    const bad = analyzeLinkDestination('https://urldefense.com/v3/__https://pay*al.example/__;!!sig$', 'shop.example');
+    expect(bad.level).not.toBe('safe');
+  });
+
+  it('never treats a wrapper as the destination when nesting exceeds the unwrap depth', () => {
+    let href = 'http://192.168.4.20/login';
+    for (let i = 0; i < 6; i++) href = `https://www.google.com/url?q=${encodeURIComponent(href)}`;
+    const r = analyzeLinkDestination(href, 'shop.example');
+    expect(r.level).not.toBe('safe');
+  });
 });
 
 describe('click-time risky download list', () => {

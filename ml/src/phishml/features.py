@@ -57,8 +57,22 @@ CLOUD_STORAGE_SUFFIXES = (
 )
 REGIONAL_S3_HOST = re.compile(r"^s3[.-][a-z0-9-]+\.amazonaws\.com\Z", re.ASCII)
 VIRTUAL_REGIONAL_S3_HOST = re.compile(r"\.s3[.-](?:website[.-])?(?:dualstack\.)?[a-z0-9-]+\.amazonaws\.com\Z", re.ASCII)
-INVISIBLE_RE = re.compile("[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]")
-DOT_LOOKALIKE_RE = re.compile("[\u3002\uff0e\uff61]")
+# Every Default_Ignorable_Code_Point plus interlinear annotation controls (mirror of features.ts INVISIBLE_RE;
+# spelled out so it cannot drift with the Unicode version of the runtime).
+INVISIBLE_RE = re.compile(
+    "[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f"
+    "\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
+)
+DOT_LOOKALIKE_RE = re.compile("[\u0660\u06f0\u0701\u0702\u3002\ua4f8\uff0e\uff61]")
+# Quotes/parentheses around a bare domain and sentence punctuation after it (mirror of WRAP_OPEN/WRAP_CLOSE).
+WRAP_OPEN = "\"'(<{\u00ab\u201c\u2018"  # not "[": bracketed IPv6 literals
+WRAP_CLOSE = "\"')>}\u00bb\u201d\u2019.,;:!?"
+MAX_SHOWN_AUTHORITY = 300  # longer than any real host plus port; never sent through IDNA
+
+
+def _js_len(s: str) -> int:
+    """String length in UTF-16 code units, as JavaScript's .length counts it."""
+    return len(s.encode("utf-16-le", "surrogatepass")) // 2
 HTML_EXT_RE = re.compile(r"\.(?:html?|shtml|xhtml)\Z", re.IGNORECASE | re.ASCII)
 
 MULTI_SUFFIXES = frozenset({
@@ -113,11 +127,22 @@ def _is_valid_domain(domain: str) -> bool:
     return len(domain) <= 253 and bool(DOMAIN_RE.match(domain))
 
 
+_HTTP_SCHEME_RE = re.compile(r"(https?):", re.IGNORECASE)
+
+
 def _normalize_http_url(url: str) -> str:
-    s = url.strip(C0_OR_SPACE)
-    if len(s) >= 7 and s[:8].lower().startswith(("http://", "https://")):
-        q = min((i for i in (s.find("?"), s.find("#")) if i != -1), default=len(s))
-        s = s[:q].replace("\\", "/") + s[q:]
+    """Rewrite an http(s) URL the way WHATWG parses it, so urlsplit sees the same host as `new URL()`.
+
+    WHATWG removes tabs/newlines anywhere, ignores any mix of '/' and '\\' (or none) after a special scheme
+    ("http:evil.com", "https:\\\\evil.com", "http:///evil.com" all have host evil.com) and treats '\\' as '/'
+    before the query or fragment.
+    """
+    s = url.strip(C0_OR_SPACE).replace("\t", "").replace("\n", "").replace("\r", "")
+    m = _HTTP_SCHEME_RE.match(s)
+    if m:
+        rest = s[m.end() :].lstrip("/\\")
+        q = min((i for i in (rest.find("?"), rest.find("#")) if i != -1), default=len(rest))
+        s = f"{m.group(1).lower()}://{rest[:q].replace(chr(92), '/')}{rest[q:]}"
     return s
 
 
@@ -303,11 +328,16 @@ def shown_host(text: str) -> str:
     m = EXPLICIT_URL.search(t)
     if m:
         candidate = m.group(0).rstrip(".,;:!?")  # linear; same result as the TS trimTrailingPunct
+        if _js_len(re.split(r"[/?#\\]", candidate[candidate.index("://") + 3 :], maxsplit=1)[0]) > MAX_SHOWN_AUTHORITY:
+            return ""
         h = _host(candidate)
         return h if (_is_valid_domain(h) or is_ip_host(h)) else ""
-    if JS_WS_RE.search(t):
+    bare = t.lstrip(WRAP_OPEN).rstrip(WRAP_CLOSE)
+    if not bare or JS_WS_RE.search(bare):
         return ""
-    authority = re.split(r"[/?#]", t, maxsplit=1)[0]
+    authority = re.split(r"[/?#]", bare, maxsplit=1)[0]
+    if _js_len(authority) > MAX_SHOWN_AUTHORITY:
+        return ""
     if "@" in authority or "://" in authority or authority.endswith("."):
         return ""
     ipv6_m = BRACKETED_IPV6_RE.match(authority)

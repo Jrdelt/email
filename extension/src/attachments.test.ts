@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeAttachments, cleanAttachmentName } from './attachments';
+import { ellipsizeMiddle } from './text';
 
 describe('cleanAttachmentName', () => {
   it('strips webmail action prefixes and trailing file sizes', () => {
@@ -94,5 +95,22 @@ describe('attachment classification hardening', () => {
     const a = analyzeAttachments(['invoice‮fdp.exe']);
     expect(a.level).toBe('danger');
     expect(a.reasons.join(' ')).not.toMatch(/[‪-‮⁦-⁩]/);
+  });
+});
+
+describe('bidi marks in ordinary right-to-left filenames', () => {
+  it('classifies by the real extension when a name has only direction marks, but flags reordering controls', () => {
+    const rtl = analyzeAttachments(['דוח‏.pdf', 'تقرير؜.docx', 'report‎.pdf']);
+    expect(rtl.level).not.toBe('danger');
+    expect(analyzeAttachments(['invoice‮fdp.exe']).level).toBe('danger');
+    expect(analyzeAttachments(['invoice⁧fdp.exe']).level).toBe('danger');
+  });
+});
+
+describe('ellipsizeMiddle', () => {
+  it('never splits a surrogate pair', () => {
+    const s = `${'a'.repeat(79)}\u{1d400}${'b'.repeat(200)}\u{1f600}${'c'.repeat(78)}`;
+    const out = ellipsizeMiddle(s, 160);
+    expect(out).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
   });
 });

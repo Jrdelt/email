@@ -85,3 +85,26 @@ describe('country-code second-level domains', () => {
     expect(canTrustByAllowlist(analyzeSender('My Bank', 'alerts@mybank.com.pl', [], { viaDomain: 'mta.mybank.com.pl' }))).toBe(true);
   });
 });
+
+describe('brand claims as the reader sees them', () => {
+  it('catches soft hyphen, zero-width and fullwidth spellings of a brand in the display name', () => {
+    for (const name of ['Pay­Pal Support', 'Pay​Pal Security', 'Pay⁠Pal', 'ＰａｙＰａｌ Service']) {
+      const w = analyzeSender(name, 'alerts@secure-mail.example', []).warnings.join(' ');
+      expect(w, name).toMatch(/Claims to be PayPal/);
+    }
+  });
+
+  it("does not flag a brand's real regional sending domains as copies", () => {
+    for (const [name, addr] of [
+      ['PayPal', 'service@paypal.de'],
+      ['PayPal Service', 'service@paypal.co.uk'],
+      ['Amazon.fr', 'commande@amazon.fr'],
+      ['Amazon', 'order@amazon.com.be'],
+      ['DHL Paket', 'noreply@dhl.de'],
+      ['DHL', 'info@dhl.co.il'],
+    ]) {
+      expect(analyzeSender(name!, addr!, []).warnings, addr).toEqual([]);
+    }
+    expect(analyzeSender('Service', 'alerts@paypal.xyz', []).warnings.join(' ')).toMatch(/looks like a copy of paypal\.com/);
+  });
+});

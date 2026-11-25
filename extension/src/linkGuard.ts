@@ -67,20 +67,59 @@ function unwrapOnce(current: string): { next: string | null; ambiguous: boolean 
     const decoded = p.value === null ? null : safeDecode(p.value.replace(/_/g, '/').replace(/-([0-9a-f]{2})/gi, '%$1'));
     return { next: decoded, ambiguous: p.ambiguous };
   }
-  if (host === 'urldefense.com' && path.startsWith('/v3/__')) {
-    // Proofpoint v3: https://urldefense.com/v3/__<url>__;<token>$  ('*' marks characters moved into the token)
-    const inner = current.slice(current.indexOf('/v3/__') + 6);
-    const end = inner.indexOf('__;');
-    if (end <= 0) return { next: null, ambiguous: false };
-    const url = inner.slice(0, end);
-    return { next: url.includes('*') ? url.slice(0, url.indexOf('*')) : url, ambiguous: false };
-  }
+  if (host === 'urldefense.com' && path.startsWith('/v3/__')) return decodeProofpointV3(current);
   if (host === 'secure-web.cisco.com') {
     // Cisco Secure Email: the original URL is the percent-encoded last path segment.
     const seg = path.slice(path.lastIndexOf('/') + 1);
     return { next: seg ? safeDecode(seg) : null, ambiguous: false };
   }
   return { next: null, ambiguous: false };
+}
+
+// Proofpoint v3 run lengths: '**X' stands for (index of X here) + 2 characters from the token.
+const V3_RUN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/**
+ * Proofpoint URL Defense v3: https://urldefense.com/v3/__<url>__;<token>!<signature>$. Each '*' in the (percent-
+ * decoded) URL stands for the next character of the base64url UTF-8 token and '**X' for a run of them, so a host or
+ * path is never cut short at the first '*'. A token that cannot supply every character makes the link ambiguous.
+ */
+function decodeProofpointV3(current: string): { next: string | null; ambiguous: boolean } {
+  const fail = { next: null, ambiguous: true };
+  const inner = current.slice(current.indexOf('/v3/__') + 6);
+  const end = inner.indexOf('__;');
+  if (end <= 0) return fail;
+  const url = safeDecode(inner.slice(0, end));
+  if (!url.includes('*')) return { next: url, ambiguous: false };
+  const rest = inner.slice(end + 3);
+  const token = rest.slice(0, rest.includes('!') ? rest.indexOf('!') : rest.length);
+  let chars: string[];
+  try {
+    const b64 = token.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+    chars = Array.from(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+  } catch {
+    return fail;
+  }
+  let used = 0;
+  let out = '';
+  for (let i = 0; i < url.length; i++) {
+    if (url[i] !== '*') {
+      out += url[i];
+      continue;
+    }
+    let len = 1;
+    if (url[i + 1] === '*') {
+      const run = V3_RUN_ALPHABET.indexOf(url[i + 2] ?? '');
+      if (run < 0) return fail;
+      len = run + 2;
+      i += 2;
+    }
+    if (used + len > chars.length) return fail;
+    out += chars.slice(used, used + len).join('');
+    used += len;
+  }
+  return { next: out, ambiguous: false };
 }
 
 function toNext(p: { value: string | null; ambiguous: boolean }): { next: string | null; ambiguous: boolean } {
@@ -101,10 +140,17 @@ export function unwrapRedirect(href: string): { href: string; ambiguous: boolean
     } catch {
       break;
     }
+    ambiguous ||= step.ambiguous; // includes a wrapper whose target could not be decoded
     const next = step.next?.trim() ?? null;
-    if (!next || next === current || !isSafeHttpUrl(next)) break;
-    ambiguous ||= step.ambiguous;
+    if (!next || next === current || !isSafeHttpUrl(next)) return { href: current, ambiguous };
     current = next;
+  }
+  // Out of hops while still inside a known wrapper: the real target is unchecked, so never treat it as the wrapper.
+  try {
+    const more = unwrapOnce(current).next?.trim();
+    if (more && more !== current && isSafeHttpUrl(more)) ambiguous = true;
+  } catch {
+    /* not a wrapper */
   }
   return { href: current, ambiguous };
 }

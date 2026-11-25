@@ -1,6 +1,6 @@
 import { cleanAttachmentName } from '../attachments';
 import { XLINK_NS, closestEl, getAttr, getAttrNS, hasAttr, isFormEl, rawLinkTarget, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
-import { EXPLICIT_URL, safePercentDecode, type Link } from '../features';
+import { EXPLICIT_URL, INVISIBLE_RE, safePercentDecode, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
@@ -132,12 +132,8 @@ function headAndTail<T>(items: T[], max: number): T[] {
   return items.length <= max ? items : [...items.slice(0, Math.ceil(max / 2)), ...items.slice(items.length - Math.floor(max / 2))];
 }
 
-// Code points that render as nothing (zero-width and format characters, variation selectors, tag characters,
-// Hangul fillers...): filler made of them costs an attacker nothing on screen.
-const IGNORABLE_RE = /\p{Default_Ignorable_Code_Point}/gu;
-
 /** Drop characters that render as nothing and collapse whitespace runs, the way a reader sees the text. */
-const visibleText = (text: string): string => text.replace(IGNORABLE_RE, '').replace(/\s+/g, ' ');
+const visibleText = (text: string): string => text.replace(INVISIBLE_RE, '').replace(/\s+/g, ' ');
 
 /**
  * Bound attacker-controlled text (header labels, link text) without letting filler hide what matters: over `max`,

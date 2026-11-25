@@ -1,7 +1,7 @@
 import { normalizeSender } from './allowlist';
 import { BRANDS, FREEMAIL, KNOWN_ESP_DOMAINS, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
 import { hostOf, isInternational, isMultiPartSuffix, isValidDomain, registrableDomain } from './domain';
-import type { Link } from './features';
+import { INVISIBLE_RE, type Link } from './features';
 import { ellipsizeMiddle, showable } from './text';
 
 export interface SenderInfo {
@@ -96,7 +96,10 @@ export function analyzeSender(
 
   // '@' is excluded from the repeated classes and the input is capped so attacker display names cannot cause
   // catastrophic regex backtracking.
-  const shownAddr = displayName
+  // Match on what the reader sees: fullwidth letters fold to ASCII (NFKC) and characters that render as nothing
+  // ("Pay\u00adPal", "Pay\u200bPal") are dropped. The original name is still what warnings display.
+  const seenName = displayName.slice(0, 1000).normalize('NFKC').replace(INVISIBLE_RE, '');
+  const shownAddr = seenName
     .slice(0, 1000)
     .match(/[^\s<>"'()@]+@[^\s<>"'()@]+\.[a-z]{2,}/i)?.[0]
     ?.toLowerCase();
@@ -114,11 +117,11 @@ export function analyzeSender(
       .replace(/\s+/g, ' ')
       .trim();
 
-  const normalizedName = splitDisplayName(displayName);
+  const normalizedName = splitDisplayName(seenName);
   // Without camelCase splitting too: "PayPal" / "Your PayPal Account" must match /\bPayPal\b/, which the split
   // form "Pay Pal" does not.
-  const plainName = displayName.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
-  const compactName = displayName.toLowerCase().replace(/[\s_.-]+/g, '');
+  const plainName = seenName.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const compactName = seenName.toLowerCase().replace(/[\s_.-]+/g, '');
   for (const brand of BRANDS) {
     const brandCompact = brand.name.toLowerCase().replace(/\s+/g, '');
     const names = [normalizedName, plainName];
@@ -136,8 +139,11 @@ export function analyzeSender(
   const label = registrable.split('.')[0] ?? '';
   outer: for (const brand of BRANDS) {
     if (brand.domains.includes(registrable)) break;
+    const seenLabels = new Set<string>();
     for (const d of brand.domains) {
-      const dl = d.split('.')[0];
+      const dl = d.split('.')[0]!;
+      if (seenLabels.has(dl)) continue; // regional domains share the label; the first (primary) domain is named
+      seenLabels.add(dl);
       const lookalike = (label !== dl && skeleton(label) === skeleton(dl)) || (dl.length >= 5 && levenshtein(label, dl) === 1) || label === dl;
       if (label && lookalike) {
         warnings.push(`The sender's website (${registrable}) looks like a copy of ${d}`);

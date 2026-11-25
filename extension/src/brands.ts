@@ -4,7 +4,12 @@ export interface Brand { name: string; pattern: RegExp; domains: string[] }
 const b = (name: string, domains: string[], pattern = new RegExp(`\\b${name.replace(/ /g, '\\s*')}\\b`, 'i')): Brand => ({ name, pattern, domains });
 
 export const BRANDS: Brand[] = [
-  b('PayPal', ['paypal.com']),
+  // Regional domains the brands really send from: their shared label must not read as a copy of the .com.
+  b('PayPal', [
+    'paypal.com', 'paypal.de', 'paypal.co.uk', 'paypal.fr', 'paypal.it', 'paypal.es', 'paypal.nl', 'paypal.at',
+    'paypal.ch', 'paypal.be', 'paypal.pl', 'paypal.se', 'paypal.dk', 'paypal.no', 'paypal.ie', 'paypal.ca',
+    'paypal.com.au', 'paypal.jp', 'paypal.com.br', 'paypal.com.mx',
+  ]),
   b('Apple', ['apple.com', 'icloud.com']),
   b('iCloud', ['apple.com', 'icloud.com', 'me.com'], /\bi\s*cloud\b/i),
   b('Microsoft', ['microsoft.com', 'outlook.com', 'live.com', 'office.com', 'microsoftonline.com']),
@@ -13,12 +18,19 @@ export const BRANDS: Brand[] = [
   b('Office 365', ['microsoft.com', 'office.com', 'microsoftonline.com']),
   b('Google', ['google.com', 'gmail.com', 'youtube.com']),
   b('Gmail', ['google.com', 'gmail.com']),
-  b('Amazon', ['amazon.com', 'amazon.co.uk', 'amazon.ca', 'amazon.de', 'amazon.com.au']),
+  b('Amazon', [
+    'amazon.com', 'amazon.co.uk', 'amazon.ca', 'amazon.de', 'amazon.com.au', 'amazon.fr', 'amazon.it', 'amazon.es',
+    'amazon.nl', 'amazon.se', 'amazon.pl', 'amazon.com.be', 'amazon.co.jp', 'amazon.in', 'amazon.com.mx',
+    'amazon.com.br', 'amazon.com.tr', 'amazon.sa', 'amazon.ae', 'amazon.eg', 'amazon.sg', 'amazon.cn',
+  ]),
   b('Netflix', ['netflix.com']),
   b('Chase', ['chase.com', 'jpmorgan.com']),
   b('Bank of America', ['bankofamerica.com', 'bofa.com']),
   b('Wells Fargo', ['wellsfargo.com']),
-  b('DHL', ['dhl.com']),
+  b('DHL', [
+    'dhl.com', 'dhl.de', 'dhl.co.uk', 'dhl.fr', 'dhl.it', 'dhl.es', 'dhl.nl', 'dhl.at', 'dhl.ch', 'dhl.be',
+    'dhl.com.pl', 'dhl.co.il',
+  ]),
   b('FedEx', ['fedex.com']),
   b('UPS', ['ups.com']),
   b('USPS', ['usps.com']),

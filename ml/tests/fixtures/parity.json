@@ -943,5 +943,243 @@
       "urgency_hits": 0,
       "body_len": 1
     }
+  },
+  {
+    "name": "bidi_and_isolate_controls_inside_shown_domain",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "www.pay\u202epal\u2066.com",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "tag_chars_variation_selectors_hangul_filler_inside_shown_domain",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "www.pay\udb40\udc20pal\ufe0f\u3164.com",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "more_dot_lookalikes_in_shown_domain",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "www\ua4f8paypal\u0660com",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "shown_domain_wrapped_in_parentheses_and_sentence_punctuation",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "(www.paypal.com).",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "shown_domain_in_curly_quotes",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "\u201cpaypal.com\u201d",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "bracketed_ipv6_still_parsed_after_wrap_stripping",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "[2001:db8::1]/login",
+        "href": "http://[2001:db8::2]/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 1,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "overlong_bare_authority_is_not_a_domain",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316\u3316.com",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "overlong_explicit_url_authority_is_not_a_domain",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "https://\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.example/login",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "astral_authority_length_counted_in_utf16_units",
+    "sender": "alerts@shop.example",
+    "body": "Please review your account.",
+    "links": [
+      {
+        "text": "https://\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a\ud835\udc1a.example/",
+        "href": "https://paypal-verify.example/login"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 27
+    }
+  },
+  {
+    "name": "slashless_and_backslashed_http_scheme_hrefs",
+    "sender": "a@paypal.com",
+    "body": "x",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "http:evil.com/login"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "HTTPS:\\\\\\\\evil.com\\\\x"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "http:///1.2.3.4/"
+      }
+    ],
+    "expected": {
+      "n_links": 3,
+      "n_text_href_mismatch": 3,
+      "n_ip_links": 1,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 3,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
   }
 ]

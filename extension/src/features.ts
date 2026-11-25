@@ -116,10 +116,27 @@ function trimTrailingPunct(s: string): string {
   return s.slice(0, end);
 }
 
-// Characters that render as nothing (soft hyphen, zero-width space/joiners, word joiner, BOM, bidi marks) and
-// look-alike dots. Link text "www.pay&shy;pal.com" or "paypal\uff0ecom" still shows a domain to the reader.
-const INVISIBLE_RE = /[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g;
-const DOT_LOOKALIKE_RE = /[\u3002\uff0e\uff61]/g;
+// Characters that render as nothing (every Default_Ignorable_Code_Point: soft hyphen, zero-width characters, bidi
+// marks/embeddings/isolates, variation selectors, Hangul fillers, tag characters... plus interlinear annotation
+// controls) and look-alike dots. Link text "www.pay&shy;pal.com" or "paypal\uff0ecom" still shows a domain to the
+// reader. The class is spelled out (not \p{...}) so it cannot drift with the Unicode version of the runtime.
+export const INVISIBLE_RE =
+  /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb\u{1bca0}-\u{1bca3}\u{1d173}-\u{1d17a}\u{e0000}-\u{e0fff}]/gu;
+const DOT_LOOKALIKE_RE = /[\u0660\u06f0\u0701\u0702\u3002\ua4f8\uff0e\uff61]/g;
+// Quotes and parentheses around a bare domain, and sentence punctuation after it: "(www.paypal.com)." shows paypal.com.
+const WRAP_OPEN = '"\'(<{\u00ab\u201c\u2018'; // not '[': bracketed IPv6 literals
+const WRAP_CLOSE = '"\')>}\u00bb\u201d\u2019.,;:!?';
+// Longer than any real host (253) plus a port: never shown as a domain, and never sent through the IDNA parser.
+const MAX_SHOWN_AUTHORITY = 300;
+
+/** Strip WRAP_OPEN characters from the start and WRAP_CLOSE ones from the end (linear; mirrors Python strip). */
+function stripWrapping(t: string): string {
+  let a = 0;
+  let b = t.length;
+  while (a < b && WRAP_OPEN.includes(t[a]!)) a++;
+  while (b > a && WRAP_CLOSE.includes(t[b - 1]!)) b--;
+  return t.slice(a, b);
+}
 
 /** Normalise link text the way a reader sees it (mirror of features.py _normalize_shown_text). */
 function normalizeShownText(text: string): string {
@@ -146,11 +163,14 @@ export function shownHost(text: string): string {
   const m = t.match(EXPLICIT_URL);
   if (m) {
     const candidate = trimTrailingPunct(m[0]);
+    if (candidate.slice(candidate.indexOf('://') + 3).split(/[/?#\\]/)[0]!.length > MAX_SHOWN_AUTHORITY) return '';
     const h = hostOf(candidate);
     return isValidDomain(h) || isIpHost(h) ? h : '';
   }
-  if (/\s/.test(t)) return '';
-  const authority = t.split(/[/?#]/)[0];
+  const bare = stripWrapping(t);
+  if (!bare || /\s/.test(bare)) return '';
+  const authority = bare.split(/[/?#]/)[0]!;
+  if (authority.length > MAX_SHOWN_AUTHORITY) return '';
   if (authority.includes('@') || authority.includes('://') || authority.endsWith('.')) return '';
   const bracketedIpv6 = authority.match(/^\[([0-9a-f:.]+)\](?::\d{1,5})?$/i)?.[1]?.toLowerCase();
   if (bracketedIpv6 && isIpHost(bracketedIpv6)) return bracketedIpv6;
