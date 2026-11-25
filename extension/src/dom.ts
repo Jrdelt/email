@@ -69,9 +69,17 @@ export function resolveAgainstBase(raw: string, base: string): string {
   }
 }
 
-/** Resolve href or SVG xlink:href (plus optional stashed attributes) on an <a> or <area> element. */
+/**
+ * Resolve the navigation target of an <a> or <area>: href, SVG xlink:href, the SMIL-animated value of an SVG
+ * <a> (<set>/<animate attributeName="href"> can retarget it, even with no href attribute), and optionally the
+ * attributes stashed by the link/attachment locks.
+ */
 export function resolveAnchorHref(el: Element, includeStashed = false): string {
   const base = ownerDocOf(el).baseURI || 'https://invalid.local';
+  if (el.namespaceURI === SVG_NS) {
+    const anim = (el as unknown as { href?: { animVal?: unknown } }).href?.animVal;
+    if (typeof anim === 'string' && anim.trim()) return resolveAgainstBase(anim, base);
+  }
   if (hasAttr(el, 'href')) {
     const prop = (el as HTMLAnchorElement).href;
     if (typeof prop === 'string' && prop) return prop;
@@ -81,7 +89,10 @@ export function resolveAnchorHref(el: Element, includeStashed = false): string {
   if (xhref !== null) return resolveAgainstBase(xhref, base);
   if (includeStashed) {
     const stashed =
-      getAttr(el, 'data-ped-href') ?? getAttr(el, 'data-ped-att-href') ?? getAttr(el, 'data-ped-xlink-href');
+      getAttr(el, 'data-ped-href') ??
+      getAttr(el, 'data-ped-att-href') ??
+      getAttr(el, 'data-ped-xlink-href') ??
+      getAttr(el, 'data-ped-att-xlink-href');
     if (stashed !== null) return resolveAgainstBase(stashed, base);
   }
   return '';

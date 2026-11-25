@@ -91,13 +91,27 @@ export function extractSenderFromElement(
   );
 }
 
+const ANIMATED_HREF = new Set(['href', 'xlink:href']);
+
 export const linksIn = (el: HTMLElement): Link[] => {
   const base = ownerDocOf(el).baseURI || 'https://invalid.local';
   const out: Link[] = [];
-  for (const node of el.querySelectorAll('a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction]')) {
+  const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
+  for (const node of el.querySelectorAll(sel)) {
     if (out.length >= MAX_LINKS) break;
     const tag = tagOf(node);
-    if (tag === 'a' || tag === 'area') {
+    if (tag === 'set' || tag === 'animate') {
+      // SVG SMIL retargeting an <a>: score every value it can navigate to.
+      const target = (getAttr(node, 'attributeName') ?? getAttr(node, 'data-ped-anim-attr') ?? '').trim().toLowerCase();
+      if (!ANIMATED_HREF.has(target)) continue;
+      const anchor = closestEl(node, 'a');
+      const text = anchor ? textOf(anchor) : '';
+      const values = [getAttr(node, 'to') ?? '', ...(getAttr(node, 'values') ?? '').split(';')];
+      for (const raw of values) {
+        const href = resolveAgainstBase(raw, base);
+        if (href && out.length < MAX_LINKS) out.push({ text, href });
+      }
+    } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
       if (href) out.push({ text: textOf(node), href });
     } else if (tag === 'form') {

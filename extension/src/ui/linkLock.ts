@@ -14,6 +14,7 @@ import {
   setAttrNS,
 } from '../dom';
 import { hostOf } from '../domain';
+import { holdDisabled, releaseDisabled } from './ariaDisabled';
 import { removePausedLinkToast, showPausedLinkToast } from './linkToast';
 
 // Disables links (including SVG href/xlink:href, ping beacons, and keyboard activation),
@@ -25,7 +26,6 @@ const XLINK_ATTR = 'data-ped-xlink-href';
 const PING_ATTR = 'data-ped-ping';
 const ACTION_ATTR = 'data-ped-action';
 const FORMACTION_ATTR = 'data-ped-formaction';
-const FORM_ATTR = 'data-ped-form-locked';
 const STYLE_ID = 'ped-lock-style';
 
 const installed = new WeakSet<Document>();
@@ -46,8 +46,9 @@ function matchesLockedTarget(el: Element): boolean {
   ) {
     return true;
   }
+  // Any SVG <a> is a navigation target, even without href: SMIL <set>/<animate> can supply one.
   const a = closestEl(el, 'a');
-  return Boolean(a && (getAttrNS(a, XLINK_NS, 'href') !== null || hasAttr(a, 'xlink:href')));
+  return Boolean(a && (a.namespaceURI === SVG_NS || getAttrNS(a, XLINK_NS, 'href') !== null || hasAttr(a, 'xlink:href')));
 }
 
 function targetHostOf(el: Element): string {
@@ -116,39 +117,86 @@ function install(doc: Document) {
   (doc.head ?? doc.documentElement).appendChild(style);
 }
 
+// What this lock removed, recorded in the isolated world: email HTML can pre-seed or edit the page-visible
+// data-ped-* copies, but cannot change what gets restored or stop a live attribute from being stashed.
+type Stash = Map<string, string>; // attribute key -> original value
+const stashes = new WeakMap<Element, Stash>();
+const stashedIn = new WeakMap<HTMLElement, Set<Element>>(); // container -> elements it stashed
+const ARIA_HOLDER = 'links';
+// SVG SMIL can retarget an <a> without any href attribute: <set|animate attributeName="href" to=...>.
+const ANIM_ATTR = 'data-ped-anim-attr';
+const ANIMATED_LINK_ATTRS = new Set(['href', 'xlink:href']);
+const WATCHED_ATTRS = ['href', 'xlink:href', 'ping', 'action', 'formaction', 'attributeName'];
+
+function record(container: HTMLElement, el: Element, key: string, value: string): void {
+  let st = stashes.get(el);
+  if (!st) stashes.set(el, (st = new Map()));
+  st.set(key, value);
+  let set = stashedIn.get(container);
+  if (!set) stashedIn.set(container, (set = new Set()));
+  set.add(el);
+}
+
 function stashInside(container: HTMLElement): void {
   for (const el of container.querySelectorAll<Element>('a, area')) {
-    if (hasAttr(el, 'href') && !hasAttr(el, HREF_ATTR)) {
-      setAttr(el, HREF_ATTR, getAttr(el, 'href')!);
+    const href = getAttr(el, 'href');
+    if (href !== null) {
+      record(container, el, 'href', href);
+      setAttr(el, HREF_ATTR, href);
       rmAttr(el, 'href');
-      setAttr(el, 'aria-disabled', 'true');
+      holdDisabled(el, ARIA_HOLDER);
     }
     const xhref = getAttrNS(el, XLINK_NS, 'href') ?? getAttr(el, 'xlink:href');
-    if (xhref !== null && !hasAttr(el, XLINK_ATTR)) {
+    if (xhref !== null) {
+      record(container, el, 'xlink:href', xhref);
       setAttr(el, XLINK_ATTR, xhref);
       rmAttrNS(el, XLINK_NS, 'href');
       rmAttr(el, 'xlink:href');
-      setAttr(el, 'aria-disabled', 'true');
+      holdDisabled(el, ARIA_HOLDER);
     }
-    if (hasAttr(el, 'ping') && !hasAttr(el, PING_ATTR)) {
-      setAttr(el, PING_ATTR, getAttr(el, 'ping')!);
+    const ping = getAttr(el, 'ping');
+    if (ping !== null) {
+      record(container, el, 'ping', ping);
+      setAttr(el, PING_ATTR, ping);
       rmAttr(el, 'ping');
     }
   }
   for (const form of container.querySelectorAll<HTMLFormElement>('form')) {
-    if (hasAttr(form, 'action') && !hasAttr(form, ACTION_ATTR)) {
-      setAttr(form, ACTION_ATTR, getAttr(form, 'action')!);
+    const action = getAttr(form, 'action');
+    if (action !== null) {
+      record(container, form, 'action', action);
+      setAttr(form, ACTION_ATTR, action);
       rmAttr(form, 'action');
     }
-    if (!hasAttr(form, FORM_ATTR)) setAttr(form, FORM_ATTR, '');
   }
   for (const el of container.querySelectorAll<Element>('[formaction]')) {
-    if (!hasAttr(el, FORMACTION_ATTR)) {
-      setAttr(el, FORMACTION_ATTR, getAttr(el, 'formaction')!);
-      rmAttr(el, 'formaction');
-      setAttr(el, 'aria-disabled', 'true');
+    const fa = getAttr(el, 'formaction')!;
+    record(container, el, 'formaction', fa);
+    setAttr(el, FORMACTION_ATTR, fa);
+    rmAttr(el, 'formaction');
+    holdDisabled(el, ARIA_HOLDER);
+  }
+  for (const anim of container.querySelectorAll<Element>('set, animate')) {
+    const target = getAttr(anim, 'attributeName');
+    if (target !== null && ANIMATED_LINK_ATTRS.has(target.trim().toLowerCase())) {
+      record(container, anim, 'attributeName', target);
+      setAttr(anim, ANIM_ATTR, target);
+      rmAttr(anim, 'attributeName');
     }
   }
+}
+
+function restore(el: Element, st: Stash): void {
+  for (const [key, value] of st) {
+    if (key === 'xlink:href') {
+      if (el.namespaceURI === SVG_NS) setAttrNS(el, XLINK_NS, 'xlink:href', value);
+      else setAttr(el, 'xlink:href', value);
+    } else {
+      setAttr(el, key, value);
+    }
+  }
+  for (const attr of [HREF_ATTR, XLINK_ATTR, PING_ATTR, ACTION_ATTR, FORMACTION_ATTR, ANIM_ATTR]) rmAttr(el, attr);
+  releaseDisabled(el, ARIA_HOLDER);
 }
 
 export function lockLinks(container: HTMLElement): void {
@@ -156,11 +204,11 @@ export function lockLinks(container: HTMLElement): void {
   setAttr(container, LOCK_ATTR, '');
   stashInside(container);
   if (!watchers.has(container) && typeof MutationObserver !== 'undefined') {
-    const obs = new MutationObserver((muts) => {
-      if (!hasAttr(container, LOCK_ATTR)) return;
-      if (muts.some((m) => m.addedNodes.length > 0)) stashInside(container);
+    const obs = new MutationObserver(() => {
+      if (hasAttr(container, LOCK_ATTR)) stashInside(container);
     });
-    obs.observe(container, { childList: true, subtree: true });
+    // Also watch link attributes: the webmail (or a lock being lifted elsewhere) may set href after we locked.
+    obs.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: WATCHED_ATTRS });
     watchers.set(container, obs);
   }
 }
@@ -170,34 +218,12 @@ export function unlockLinks(container: HTMLElement): void {
   watchers.delete(container);
   rmAttr(container, LOCK_ATTR);
   removePausedLinkToast(ownerDocOf(container));
-  for (const el of container.querySelectorAll<Element>(`[${HREF_ATTR}]`)) {
-    setAttr(el, 'href', getAttr(el, HREF_ATTR)!);
-    rmAttr(el, HREF_ATTR);
-    if (!hasAttr(el, 'data-ped-att-locked')) rmAttr(el, 'aria-disabled');
+  for (const el of stashedIn.get(container) ?? []) {
+    const st = stashes.get(el);
+    stashes.delete(el);
+    if (st) restore(el, st);
   }
-  for (const el of container.querySelectorAll<Element>(`[${XLINK_ATTR}]`)) {
-    const val = getAttr(el, XLINK_ATTR)!;
-    if (el.namespaceURI === SVG_NS) setAttrNS(el, XLINK_NS, 'xlink:href', val);
-    else setAttr(el, 'xlink:href', val);
-    rmAttr(el, XLINK_ATTR);
-    if (!hasAttr(el, 'data-ped-att-locked')) rmAttr(el, 'aria-disabled');
-  }
-  for (const el of container.querySelectorAll<Element>(`[${PING_ATTR}]`)) {
-    setAttr(el, 'ping', getAttr(el, PING_ATTR)!);
-    rmAttr(el, PING_ATTR);
-  }
-  for (const form of container.querySelectorAll<HTMLFormElement>(`[${ACTION_ATTR}]`)) {
-    setAttr(form, 'action', getAttr(form, ACTION_ATTR)!);
-    rmAttr(form, ACTION_ATTR);
-  }
-  for (const form of container.querySelectorAll<HTMLFormElement>(`[${FORM_ATTR}]`)) {
-    rmAttr(form, FORM_ATTR);
-  }
-  for (const el of container.querySelectorAll<Element>(`[${FORMACTION_ATTR}]`)) {
-    setAttr(el, 'formaction', getAttr(el, FORMACTION_ATTR)!);
-    rmAttr(el, FORMACTION_ATTR);
-    if (!hasAttr(el, 'data-ped-att-locked')) rmAttr(el, 'aria-disabled');
-  }
+  stashedIn.delete(container);
 }
 
 export const isLocked = (container: HTMLElement) => hasAttr(container, LOCK_ATTR);

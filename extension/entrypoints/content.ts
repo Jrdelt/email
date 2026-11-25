@@ -258,13 +258,14 @@ function installClickGuard(opts: {
     const a = closestEl(el, 'a, area');
     if (!a) return;
     const rawAttr = (getAttr(a, 'href') ?? getAttrNS(a, XLINK_NS, 'href') ?? getAttr(a, 'xlink:href') ?? '').trim();
-    if (!rawAttr || rawAttr.startsWith('#')) return;
+    if (rawAttr.startsWith('#')) return;
 
     const hit = opts.findTarget(a);
     if (!hit || isLocked(hit.container)) return;
 
+    // Includes the SMIL-animated target of an SVG <a>, which can navigate with no href attribute at all.
     const rawHref = resolveAnchorHref(a);
-    if (!isSafeHttpUrl(rawHref)) return;
+    if (!rawHref || !isSafeHttpUrl(rawHref)) return;
 
     const me = e as MouseEvent;
     const pending = opts.isPending();
