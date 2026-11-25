@@ -1,12 +1,24 @@
 import { cleanAttachmentName } from '../attachments';
-import { XLINK_NS, closestEl, getAttr, getAttrNS, hasAttr, isFormEl, rawLinkTarget, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
+import {
+  animationTarget,
+  closestEl,
+  getAttr,
+  hasAttr,
+  isFormEl,
+  ownerDocOf,
+  rawLinkTarget,
+  resolveAgainstBase,
+  resolveAnchorHref,
+  tagOf,
+  textOf,
+} from '../dom';
 import { EXPLICIT_URL, INVISIBLE_RE, safePercentDecode, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
 export const MAX_BODY_CHARS = 20_000; // cap work per email
-// Distinct links scored per email (scoring 500 links takes ~2 ms); past this the email fails closed as unchecked.
-export const MAX_LINKS = 500;
+// Distinct links scored per email (scoring 1,000 links takes ~4 ms); past this the email fails closed as unchecked.
+export const MAX_LINKS = 1000;
 export const MAX_LINK_TEXT_CHARS = 2048; // link text only needs to show a URL or domain
 const MAX_LINK_SCAN = 2000; // bound on link nodes examined before de-duplication and sampling
 /**
@@ -196,7 +208,8 @@ export function bodyText(el: HTMLElement): string {
     return n.nodeValue ?? '';
   };
 
-  // Forwards from the start until MAX_BODY_CHARS visible characters are collected.
+  // Forwards from the start until MAX_BODY_CHARS visible characters are collected. Long text nodes are read in
+  // TEXT_CHUNK slices, so one huge filler node costs a few slices, not a pass over all of it.
   const head: string[] = [];
   let headLen = 0;
   let headRaw = 0;
@@ -211,26 +224,32 @@ export function bodyText(el: HTMLElement): string {
   };
   const forward = doc.createTreeWalker(el, 0x4 /* SHOW_TEXT */);
   let lastHead: Node | null = null;
-  let n = forward.nextNode();
-  for (; n; n = forward.nextNode()) {
+  let lastHeadUsed = 0; // raw characters of lastHead already read
+  let stopped = false;
+  read: for (let n = forward.nextNode(); n; n = forward.nextNode()) {
     const t = raw(n);
     lastHead = n;
-    chunk.push(t);
-    chunkLen += t.length;
-    headRaw += t.length;
-    if (chunkLen >= TEXT_CHUNK) {
-      flushHead();
-      if (headLen >= MAX_BODY_CHARS || headRaw >= RAW_SCAN_LIMIT) {
-        n = forward.nextNode();
-        break;
+    lastHeadUsed = 0;
+    for (let i = 0; i < t.length; i += TEXT_CHUNK) {
+      const part = t.slice(i, i + TEXT_CHUNK);
+      chunk.push(part);
+      chunkLen += part.length;
+      headRaw += part.length;
+      lastHeadUsed = i + part.length;
+      if (chunkLen >= TEXT_CHUNK) {
+        flushHead();
+        if (headLen >= MAX_BODY_CHARS || headRaw >= RAW_SCAN_LIMIT) {
+          stopped = true;
+          break read;
+        }
       }
     }
   }
   flushHead();
   let text = head.join('');
 
-  if (n) {
-    // More text follows: read the end backwards until half a body is collected or the head is reached.
+  if (stopped && lastHead) {
+    // More text may follow: read the end backwards until half a body is collected or the head is reached.
     const tail: string[] = [];
     let tailLen = 0;
     let tailRaw = 0;
@@ -245,18 +264,22 @@ export function bodyText(el: HTMLElement): string {
       backLen = 0;
     };
     const backward = doc.createTreeWalker(el, 0x4);
-    for (let m = backward.lastChild(); m; m = backward.previousNode()) {
+    tailRead: for (let m = backward.lastChild(); m; m = backward.previousNode()) {
+      const t = raw(m);
+      const stopAt = m === lastHead ? lastHeadUsed : 0;
+      for (let end = t.length; end > stopAt; end -= TEXT_CHUNK) {
+        const part = t.slice(Math.max(stopAt, end - TEXT_CHUNK), end);
+        back.push(part);
+        backLen += part.length;
+        tailRaw += part.length;
+        if (backLen >= TEXT_CHUNK) {
+          flushTail();
+          if (tailLen >= half || tailRaw >= RAW_SCAN_LIMIT) break tailRead;
+        }
+      }
       if (m === lastHead) {
         joined = true;
         break;
-      }
-      const t = raw(m);
-      back.push(t);
-      backLen += t.length;
-      tailRaw += t.length;
-      if (backLen >= TEXT_CHUNK) {
-        flushTail();
-        if (tailLen >= half || tailRaw >= RAW_SCAN_LIMIT) break;
       }
     }
     flushTail();
@@ -379,7 +402,9 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     if (tag === 'set' || tag === 'animate') {
       // SVG SMIL retargeting an <a>: score every distinct value it can navigate to.
       if (!animatesHref(node)) continue;
-      const anchor = closestEl(node, 'a');
+      // The animated link: the element the animation aims at with its own href, or the <a> around it.
+      const { target } = animationTarget(node);
+      const anchor = target ? closestEl(target, 'a') : null;
       const text = anchor ? capLinkText(textOf(anchor)) : '';
       for (const raw of animValues(node)) {
         const href = resolveAgainstBase(raw, base);
@@ -417,7 +442,27 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     seen.add(key);
     return true;
   });
-  return { links: headAndTail(unique, MAX_LINKS), truncated: truncated || unique.length > MAX_LINKS };
+  return { links: sampleLinks(unique), truncated: truncated || unique.length > MAX_LINKS };
+}
+
+// Cheap string checks (no URL parsing) for links that could carry a finding: shown text with a host or URL in it
+// (a mismatch candidate), or a numeric, bracketed, IDN, user-info or percent-encoded host.
+const NOTABLE_TEXT_RE = /:\/\/|\.[a-z]|[^\x00-\x7f]/i;
+const NOTABLE_HOST_RE = /xn--|[^\x00-\x7f]|^\[|@|%|^[\d.]+(?::\d+)?$|^0x/i;
+const HREF_HOST_RE = /^[a-z][a-z0-9+.-]*:\/*([^/?#\\]*)/i;
+const isNotableLink = (l: Link): boolean =>
+  NOTABLE_TEXT_RE.test(l.text) || NOTABLE_HOST_RE.test(HREF_HOST_RE.exec(l.href)?.[1] ?? '');
+
+/**
+ * The links that get scored when there are more than MAX_LINKS: risk-first, so that hundreds of plain filler
+ * links cannot push the one real finding out of the sample (and turn an alert into a neutral 'not fully checked').
+ */
+function sampleLinks(unique: Link[]): Link[] {
+  if (unique.length <= MAX_LINKS) return unique;
+  const notable = unique.filter(isNotableLink);
+  if (notable.length >= MAX_LINKS) return headAndTail(notable, MAX_LINKS);
+  const plain = unique.filter((l) => !isNotableLink(l));
+  return [...notable, ...headAndTail(plain, MAX_LINKS - notable.length)];
 }
 
 export const linksIn = (el: HTMLElement): Link[] => scanLinks(el).links;
@@ -503,9 +548,10 @@ export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
   for (const anim of container.querySelectorAll<Element>('set, animate')) {
     if (!animatesHref(anim)) continue;
     if (![...animValues(anim)].some((v) => isDownloadUrl(resolveAgainstBase(v, base)))) continue;
-    const aimed = hasAttr(anim, 'href') || hasAttr(anim, 'xlink:href') || getAttrNS(anim, XLINK_NS, 'href') !== null;
-    const parent = anim.parentElement;
-    const el = aimed ? container : parent && tagOf(parent) === 'a' ? (parent as HTMLElement) : null;
+    // Aimed at another element (also once a lock has stashed that href, so the lock does not switch itself off):
+    // only locking the whole body stops the animation itself.
+    const { target, aimed } = animationTarget(anim);
+    const el = aimed ? container : target && tagOf(target) === 'a' ? (target as HTMLElement) : null;
     if (el && !add(el, cleanAttachmentName(getAttr(el, 'download') ?? getAttr(el, 'data-ped-att-download') ?? ''))) return out;
   }
   return out;

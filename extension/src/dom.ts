@@ -104,9 +104,10 @@ export function useLinks(use: Element): Element[] {
     seen.add(u);
     const ref = useReference(u);
     if (!ref) return;
-    const owning = closestEl(ref, 'a, area');
-    if (owning) {
-      out.add(owning);
+    // The instance clones the referenced element and its descendants only, never an <a> around it.
+    const tag = tagOf(ref);
+    if (tag === 'a' || tag === 'area') {
+      out.add(ref);
       return;
     }
     for (const el of queryAll(ref, 'a, area, use')) {
@@ -121,8 +122,27 @@ export function useLinks(use: Element): Element[] {
 
 /** The same-document element a `<use>` points at (`href`, SMIL-animated href, or xlink:href), if any. */
 function useReference(use: Element): Element | null {
-  const raw = animatedHref(use) || getAttr(use, 'href') || getAttrNS(use, XLINK_NS, 'href') || getAttr(use, 'xlink:href') || '';
-  const doc = ownerDocOf(use);
+  return sameDocumentTarget(use, animatedHref(use) || getAttr(use, 'href') || getAttrNS(use, XLINK_NS, 'href') || getAttr(use, 'xlink:href') || '');
+}
+
+/**
+ * The element a SMIL `<set>`/`<animate>` changes: the one its own href/xlink:href points at in this document
+ * (`aimed`, also when a lock has stashed that href), otherwise its parent element.
+ */
+export function animationTarget(anim: Element): { target: Element | null; aimed: boolean } {
+  const ref =
+    getAttr(anim, 'href') ??
+    getAttrNS(anim, XLINK_NS, 'href') ??
+    getAttr(anim, 'xlink:href') ??
+    getAttr(anim, 'data-ped-att-href') ??
+    getAttr(anim, 'data-ped-att-xlink-href');
+  if (ref === null) return { target: parentElementOf(anim), aimed: false };
+  return { target: sameDocumentTarget(anim, ref), aimed: true };
+}
+
+/** Resolve a `#id` (or same-document `page#id`) reference made from `from` to an element of its document. */
+function sameDocumentTarget(from: Element, raw: string): Element | null {
+  const doc = ownerDocOf(from);
   const hash = raw.indexOf('#');
   if (hash < 0) return null;
   const before = raw.slice(0, hash).trim();

@@ -276,14 +276,14 @@ function matchAttachmentInMessages(
  * retargeted to the <use>). `at` is where the click landed, for finding its message. 'ambiguous' when a <use>
  * renders several different links and the clicked one cannot be told apart.
  */
-function clickedLink(el: Element): { anchor: Element; at: Element } | 'ambiguous' | null {
+function clickedLink(el: Element): { anchor: Element; at: Element } | { ambiguous: string[] } | null {
   const a = closestEl(el, 'a, area');
   if (a) return { anchor: a, at: a };
   const use = closestEl(el, 'use');
   const links = use ? useLinks(use) : [];
   if (!use || links.length === 0) return null;
-  const targets = new Set(links.map((l) => resolveAnchorHref(l)).filter(Boolean));
-  return targets.size > 1 ? 'ambiguous' : { anchor: links[0]!, at: use };
+  const targets = [...new Set(links.map((l) => resolveAnchorHref(l)).filter(Boolean))];
+  return targets.length > 1 ? { ambiguous: targets } : { anchor: links[0]!, at: use };
 }
 
 /** Navigate as the click itself would have (used once a held click is cleared by a local-only check). */
@@ -349,9 +349,17 @@ function installClickGuard(opts: {
 
     const clicked = clickedLink(el);
     if (!clicked) return;
-    if (clicked === 'ambiguous') {
-      // Several links behind one <use>: which one was clicked is unknowable, so pause rather than guess.
-      if (!opts.findTarget(el)) return;
+    if ('ambiguous' in clicked) {
+      // Several links behind one <use>: which one was clicked is unknowable. Let it through only when every one of
+      // them would pass unchecked anyway; otherwise pause rather than guess (a locked message is the lock's job).
+      const amb = opts.findTarget(el);
+      if (!amb || isLocked(amb.container)) return;
+      const allSafe = clicked.ambiguous.every((href) => {
+        if (!isSafeHttpUrl(href)) return true;
+        const r = analyzeLinkDestination(href, amb.senderRegistrable, location.origin);
+        return r.level === 'safe' && !r.needsDomainCheck;
+      });
+      if (allSafe && !opts.isPending()) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       showPausedLinkToast(ownerDocOf(el), '', el instanceof HTMLElement ? el : null);
@@ -538,7 +546,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     });
     const allowlisted = sender.valid && trustedSenders.has(sender.address);
     const allowlistTrusted = allowlisted && canTrustByAllowlist(sender) && !email.pairingUncertain;
-    if (allowlisted && !allowlistTrusted) {
+    // An uncertain iCloud pairing is not an authentication failure: the email is simply checked like any other.
+    if (allowlisted && !canTrustByAllowlist(sender)) {
       sender.warnings.unshift(
         `Claims to be a trusted sender (${sender.address}), but failed authentication or used an unexpected relay`,
       );
@@ -1140,7 +1149,8 @@ function runICloudApp(kv: typeof browser.storage.local) {
 
     const nextAttEls = [...new Set(messages.flatMap(attachmentElementsOf))];
     const trustKey = messages.map(msgKey).join('\n---\n');
-    const frameKey = messages.map((m) => m.frameId ?? '').join(',');
+    // Pairing certainty is part of the key: when nonce pairing completes, trust must be re-evaluated.
+    const frameKey = messages.map((m) => `${m.frameId ?? ''}${m.pairingUncertain ? '?' : ''}`).join(',');
     const fullKey = `${trustKey}\n@@\n${frameKey}`;
     if (fullKey === lastKey && arraysEqual(nextAttEls, activeAttachmentEls)) {
       resendVerdictIfNavigated();

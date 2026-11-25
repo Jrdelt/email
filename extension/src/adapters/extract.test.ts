@@ -157,7 +157,8 @@ describe('link truncation is reported (fail closed)', () => {
     const { scanLinks, MAX_LINKS } = await import('./extract');
     const pad = (n: number, off: number) =>
       Array.from({ length: n }, (_, i) => `<a href="https://www.paypal.com/help/${i + off}">help</a>`).join('');
-    const both = scanLinks(body(`${pad(250, 0)}<a href="http://192.168.4.20/">x</a>${pad(250, 1000)}`));
+    const half = MAX_LINKS / 2 + 10;
+    const both = scanLinks(body(`${pad(half, 0)}<a href="http://192.168.4.20/">x</a>${pad(half, 5000)}`));
     expect(both.truncated).toBe(true);
     expect(both.links.length).toBeLessThanOrEqual(MAX_LINKS);
     expect(scanLinks(body(`${'<a href="https://a.example/">same</a>'.repeat(500)}`)).truncated).toBe(false); // duplicates collapse
@@ -285,5 +286,45 @@ describe('filler on both sides (sandwich)', () => {
     const links = Array.from({ length: 300 }, (_, i) => `<a href="https://click.news.example.com/c/${i}">Item ${i}</a>`).join(' ');
     expect(scanLinks(body(links)).truncated).toBe(false);
     expect(MAX_LINKS).toBeGreaterThanOrEqual(300);
+  });
+});
+
+describe('review of the newest fixes', () => {
+  it('scores the one risky link hidden among more distinct filler links than are scored', () => {
+    const filler = (from: number) => Array.from({ length: 600 }, (_, i) => `<a href="https://shop.example/p/${from + i}"></a>`).join('');
+    const { links, truncated } = scanLinks(body(`${filler(0)}<a href="http://192.168.4.20/login">https://www.paypal.com/signin</a>${filler(600)}`));
+    expect(truncated).toBe(true);
+    expect(links.length).toBeLessThanOrEqual(MAX_LINKS);
+    expect(links.map((l) => l.href)).toContain('http://192.168.4.20/login');
+  });
+
+  it('keeps an aimed SMIL download detected after the attachment lock stashes the animation', async () => {
+    const { lockAttachments, unlockAttachments } = await import('../ui/attachmentLock');
+    const m = body('<svg><a id="dl"><rect/></a><set href="#dl" attributeName="href" to="data:application/octet-stream;base64,TVqQ"/></svg>');
+    const first = inlineAttachmentsIn(m).map((a) => a.element.id);
+    expect(first).toEqual(['m']);
+    lockAttachments([m]);
+    expect(inlineAttachmentsIn(m).map((a) => a.element.id)).toEqual(['m']); // no lock/unlock flip-flop
+    unlockAttachments([m]);
+  });
+
+  it('scores an aimed SMIL retarget with the text of the link it changes', () => {
+    const m = body('<svg><a id="svga"><text>https://www.paypal.com/signin</text></a><set href="#svga" attributeName="href" to="https://login-verify.example/signin" begin="3s"/></svg>');
+    const smil = scanLinks(m).links.find((l) => l.href === 'https://login-verify.example/signin');
+    expect(smil?.text).toBe('https://www.paypal.com/signin');
+  });
+});
+
+describe('bodyText on one huge text node', () => {
+  it('keeps both ends of a single text node far longer than the sample', () => {
+    const t = bodyText(body(`<p>START ${'lorem ipsum '.repeat(100_000)}URGENT verify your password</p>`));
+    expect(t.startsWith('START lorem')).toBe(true);
+    expect(t.endsWith('URGENT verify your password')).toBe(true);
+    expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+  });
+
+  it('reads a node only once when head and tail meet inside it', () => {
+    const t = bodyText(body(`<p>${'a'.repeat(MAX_BODY_CHARS - 10)}MIDDLE${'b'.repeat(5000)}</p>`));
+    expect(t).toBe(`${'a'.repeat(MAX_BODY_CHARS / 2)}\n${`${'a'.repeat(MAX_BODY_CHARS - 10)}MIDDLE${'b'.repeat(5000)}`.slice(-MAX_BODY_CHARS / 2)}`);
   });
 });

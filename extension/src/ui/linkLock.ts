@@ -177,7 +177,11 @@ function pruneDetached(container: HTMLElement): void {
 function stashInside(container: HTMLElement): void {
   pruneDetached(container);
   const tracked = trackedIn(container);
-  for (const el of container.querySelectorAll<Element>('a, area, form, [formaction], set, animate')) {
+  // Re-track elements stashed earlier (found by their page-visible markers too, as their live attribute is gone);
+  // restoring still uses only the isolated-world records.
+  for (const el of container.querySelectorAll<Element>(
+    `a, area, form, set, animate, [formaction], [${FORMACTION_ATTR}], [${ACTION_ATTR}], [${ANIM_ATTR}]`,
+  )) {
     if (stashes.has(el)) tracked.add(el);
   }
   for (const el of container.querySelectorAll<Element>('a, area')) {

@@ -108,7 +108,9 @@ function pruneDetached(root: HTMLElement, set: Set<Element>): void {
 function stashTarget(root: HTMLElement): void {
   const targets = [
     root,
-    ...root.querySelectorAll<Element>('a, area, button, [href], [download], [download_url], [formaction]'),
+    ...root.querySelectorAll<Element>(
+      `a, area, button, [href], [download], [download_url], [formaction], [${ATT_HREF_ATTR}], [${ATT_DL_ATTR}], [${ATT_DLURL_ATTR}], [${ATT_FA_ATTR}], [${XLINK_STASH_ATTR}]`,
+    ),
   ];
   let set = stashedIn.get(root);
   if (!set) stashedIn.set(root, (set = new Set()));
