@@ -1,4 +1,4 @@
-import { isValidDomain } from '../src/domain';
+import { isLookupDomain } from '../src/domain';
 import { getIntel, type DomainIntel } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { isSafeHttpUrl } from '../src/linkGuard';
@@ -94,7 +94,7 @@ export default defineBackground(() => {
       void browser.storage.session?.set?.({ [`tab:${sender.tab.id}`]: m.payload })?.catch(() => {});
       return undefined;
     }
-    if (m?.type === 'domainIntel' && typeof m.domain === 'string' && isValidDomain(m.domain)) {
+    if (m?.type === 'domainIntel' && typeof m.domain === 'string' && isLookupDomain(m.domain)) {
       const domain = m.domain;
       return (async () => {
         const settings = await getSettings(browser.storage.local, browser.storage.managed);

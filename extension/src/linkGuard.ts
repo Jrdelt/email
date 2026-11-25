@@ -1,4 +1,4 @@
-import { isIpHost, isValidDomain, registrableDomain } from './domain';
+import { isIpHost, isLookupDomain, registrableDomain } from './domain';
 import { destinationIntelWarnings, type DomainIntel } from './domainIntel';
 import { IP_LOGGER_HOSTS, isCloudHtmlLink, safePercentDecode, SHORTENER_HOSTS } from './features';
 
@@ -117,7 +117,7 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
   const level = hasDanger ? 'danger' : hasWarning ? 'warning' : 'safe';
   const senderReg = senderRegistrable.trim().toLowerCase().replace(/\.$/, '');
   const needsDomainCheck =
-    level === 'safe' && Boolean(registrable) && isValidDomain(registrable) && registrable !== senderReg;
+    level === 'safe' && Boolean(registrable) && isLookupDomain(registrable) && registrable !== senderReg;
 
   return { href, host, registrable, reasons, level, needsDomainCheck };
 }

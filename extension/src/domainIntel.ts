@@ -4,7 +4,7 @@
 //   RDAP (registry found via IANA bootstrap data.iana.org; rdap.org fallback): registration date, expiry, registrar
 //   DNS-over-HTTPS (cloudflare-dns.com): MX, SPF, DMARC, NXDOMAIN
 //   URIBL via DNS-over-HTTPS (Cloudflare, dns.google if refused): whether the domain has been reported in spam
-import { isValidDomain } from './domain';
+import { isLookupDomain, isValidDomain } from './domain';
 import type { KV } from './storage';
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -206,7 +206,7 @@ export async function lookupDomain(domain: string, fetchFn: FetchFn, now = Date.
 
 /** Cached lookup (24 h, newest 200 domains). Concurrent writes are serialized and expired entries pruned. */
 export async function getIntel(kv: KV, domain: string, fetchFn: FetchFn, now = Date.now()): Promise<DomainIntel> {
-  if (!isValidDomain(domain)) throw new Error('invalid domain');
+  if (!isLookupDomain(domain)) throw new Error('invalid or private domain');
   const rawCache = (await kv.get(CACHE_KEY))[CACHE_KEY];
   if (rawCache && typeof rawCache === 'object' && Object.hasOwn(rawCache, domain)) {
     const hit = (rawCache as Record<string, DomainIntel>)[domain];

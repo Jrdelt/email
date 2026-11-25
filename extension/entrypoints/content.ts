@@ -10,6 +10,7 @@ import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from '../src/adapt
 import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender, untrustEmails } from '../src/allowlist';
 import { type AttachmentAnalysis, analyzeAttachments } from '../src/attachments';
 import { closestEl, eventElement, getAttr, getAttrNS, ownerDocOf, resolveAnchorHref, XLINK_NS } from '../src/dom';
+import { isLookupDomain } from '../src/domain';
 import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
@@ -452,7 +453,12 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
 
   const intelByDomain = new Map<string, IntelState>();
   for (const item of items) {
-    if (!item.trusted && !item.overflow && item.sender.registrable && !intelByDomain.has(item.sender.registrable)) {
+    if (
+      !item.trusted &&
+      !item.overflow &&
+      isLookupDomain(item.sender.registrable) &&
+      !intelByDomain.has(item.sender.registrable)
+    ) {
       intelByDomain.set(item.sender.registrable, settings.strictLocalMode ? 'offline' : 'loading');
     }
   }

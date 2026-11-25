@@ -18,6 +18,18 @@ export function isIpHost(host: string): boolean {
 /** True for a syntactically valid lowercase ASCII hostname (punycode allowed). Gate for every network lookup. */
 export const isValidDomain = (d: string): boolean => d.length <= 253 && DOMAIN_RE.test(d);
 
+// Private-use and special-use TLDs never resolve publicly, so looking them up can only leak intranet names
+// (e.g. an EHR host on hospital.lan) to DNS/RDAP providers. RFC 2606 documentation names (.example, .test) are
+// harmless and stay checkable.
+const PRIVATE_TLDS = new Set([
+  'local', 'localhost', 'localdomain', 'lan', 'home', 'corp', 'internal', 'intranet', 'private', 'arpa',
+  'onion', 'alt', 'invalid',
+]);
+
+/** True when a domain may be sent for an online lookup: valid syntax and not on a private/special-use TLD. */
+export const isLookupDomain = (d: string): boolean =>
+  isValidDomain(d) && !PRIVATE_TLDS.has(d.slice(d.lastIndexOf('.') + 1));
+
 /** Normalized lowercase hostname for http(s) URLs (strips IPv6 brackets and trailing FQDN dot), or '' otherwise. */
 export function hostOf(url: string): string {
   try {

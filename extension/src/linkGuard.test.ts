@@ -152,3 +152,15 @@ describe('mergeLinkIntel & destinationIntelWarnings', () => {
     expect(mergeLinkIntel(base, webOnly, NOW).level).toBe('safe');
   });
 });
+
+describe('private-use domains are never looked up online', () => {
+  it('does not request a domain check for intranet TLDs but still does for public ones', async () => {
+    const { isLookupDomain } = await import('./domain');
+    for (const d of ['hospital.lan', 'ehr.corp', 'printer.local', 'svc.internal', 'x.onion']) {
+      expect(isLookupDomain(d)).toBe(false);
+      expect(analyzeLinkDestination(`https://${d}/patient/123`).needsDomainCheck).toBe(false);
+    }
+    expect(isLookupDomain('evil.example')).toBe(true);
+    expect(analyzeLinkDestination('https://shop.example.com/x').needsDomainCheck).toBe(true);
+  });
+});
