@@ -746,5 +746,144 @@
       "urgency_hits": 0,
       "body_len": 1
     }
+  },
+  {
+    "name": "whatwg_ipv4_hex_octal_short_forms",
+    "sender": "a@paypal.com",
+    "body": "Click",
+    "links": [
+      {
+        "text": "Click",
+        "href": "http://0x7f.1/login"
+      },
+      {
+        "text": "Click",
+        "href": "http://0177.0.0.1/login"
+      },
+      {
+        "text": "Click",
+        "href": "http://10.1.1/login"
+      },
+      {
+        "text": "Click",
+        "href": "http://0xC0A80101/x"
+      }
+    ],
+    "expected": {
+      "n_links": 4,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 4,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 4,
+      "urgency_hits": 0,
+      "body_len": 5
+    }
+  },
+  {
+    "name": "whatwg_invalid_ipv4_and_numeric_tld_are_not_hosts",
+    "sender": "a@paypal.com",
+    "body": "x",
+    "links": [
+      {
+        "text": "a",
+        "href": "http://999.1.1.1/"
+      },
+      {
+        "text": "b",
+        "href": "https://example.123/"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "whatwg_percent_encoded_and_forbidden_hosts",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "bit.ly",
+        "href": "https://b%69t.ly/x"
+      },
+      {
+        "text": "c",
+        "href": "https://a<b.com/"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 1,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "whatwg_uts46_deviation_and_bad_punycode",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "fa\u00df.de",
+        "href": "https://fa\u00df.de/login"
+      },
+      {
+        "text": "d",
+        "href": "https://xn--zz.com/login"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 1,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "whatwg_ipv4_mapped_ipv6",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "e",
+        "href": "http://[::ffff:127.0.0.1]/"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 1,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
   }
 ]

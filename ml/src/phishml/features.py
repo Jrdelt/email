@@ -115,26 +115,117 @@ def _normalize_http_url(url: str) -> str:
     return s
 
 
+# WHATWG forbidden domain code points: a host containing one is not a valid URL host at all.
+FORBIDDEN_DOMAIN_CHARS = frozenset("\x00\t\n\r #/:<>?@[\\]^|%\x7f") | frozenset(chr(c) for c in range(0x20))
+_DIGITS = {10: frozenset("0123456789"), 8: frozenset("01234567"), 16: frozenset("0123456789abcdefABCDEF")}
+
+
+def _ends_in_number(host: str) -> bool:
+    """WHATWG "ends in a number": the last label (ignoring one trailing dot) is decimal or 0x-hex."""
+    parts = host.split(".")
+    if parts[-1] == "" and len(parts) > 1:
+        parts = parts[:-1]
+    last = parts[-1]
+    if last and all(c in _DIGITS[10] for c in last):
+        return True
+    return last[:2] in ("0x", "0X") and all(c in _DIGITS[16] for c in last[2:])
+
+
+def _whatwg_ipv4(host: str) -> str:
+    """WHATWG IPv4 parser (hex, octal and short forms such as 0x7f.1 or 127.1). Raises ValueError if invalid."""
+    parts = host.split(".")
+    if parts[-1] == "" and len(parts) > 1:
+        parts = parts[:-1]
+    if len(parts) > 4:
+        raise ValueError("too many IPv4 parts")
+    numbers = []
+    for part in parts:
+        if part == "":
+            raise ValueError("empty IPv4 part")
+        radix = 10
+        if part[:2] in ("0x", "0X"):
+            radix, part = 16, part[2:]
+        elif len(part) >= 2 and part[0] == "0":
+            radix, part = 8, part[1:]
+        if part and any(c not in _DIGITS[radix] for c in part):
+            raise ValueError("bad IPv4 digit")
+        numbers.append(int(part, radix) if part else 0)
+    if any(n > 255 for n in numbers[:-1]) or numbers[-1] >= 256 ** (5 - len(numbers)):
+        raise ValueError("IPv4 part out of range")
+    value = numbers[-1] + sum(n * 256 ** (3 - i) for i, n in enumerate(numbers[:-1]))
+    return str(ipaddress.IPv4Address(value))
+
+
+# UTS46 non-transitional (what WHATWG URL uses) keeps these "deviation" characters instead of mapping them
+# (IDNA 2003 turns faß.de into fass.de; browsers produce xn--fa-hia.de).
+_DEVIATIONS = frozenset("\u00df\u03c2\u200c\u200d")
+
+
+def _label_to_ascii(label: str) -> str:
+    if not label:
+        return ""
+    if any(c in _DEVIATIONS for c in label):
+        mapped = unicodedata.normalize("NFKC", label).lower()
+        return "xn--" + mapped.encode("punycode").decode("ascii")
+    return label.encode("idna").decode("ascii").lower()
+
+
+def _valid_punycode(label: str) -> bool:
+    """WHATWG rejects hosts whose xn-- labels are not valid punycode (e.g. xn--zz.com)."""
+    try:
+        decoded = label[4:].encode("ascii").decode("punycode")
+        # Must decode to a real non-ASCII label that encodes back to itself (rejects controls like U+0080).
+        return bool(decoded) and not decoded.isascii() and _label_to_ascii(decoded) == label
+    except (UnicodeError, ValueError):
+        return False
+
+
+def _whatwg_ipv6(addr: ipaddress.IPv6Address) -> str:
+    """Serialise like WHATWG: hex pieces only (never dotted IPv4), longest run of 2+ zero pieces as '::'."""
+    pieces = [int.from_bytes(addr.packed[i : i + 2], "big") for i in range(0, 16, 2)]
+    best_start, best_len, i = -1, 1, 0
+    while i < 8:
+        if pieces[i] == 0:
+            j = i
+            while j < 8 and pieces[j] == 0:
+                j += 1
+            if j - i > best_len:
+                best_start, best_len = i, j - i
+            i = j
+        else:
+            i += 1
+    if best_start == -1:
+        return ":".join(f"{p:x}" for p in pieces)
+    head = ":".join(f"{p:x}" for p in pieces[:best_start])
+    tail = ":".join(f"{p:x}" for p in pieces[best_start + best_len :])
+    return f"{head}::{tail}"
+
+
 def _to_ascii_hostname(raw_host: str) -> str:
-    host = raw_host.lower().removesuffix(".")
+    """Host as WHATWG URL serialises it (mirror of `new URL(...).hostname` used by features.ts), or "" if invalid."""
+    host = unquote(raw_host).lower()  # WHATWG percent-decodes the host first (ev%69l.com -> evil.com)
     if not host:
         return ""
     if ":" in host:
         try:
-            return str(ipaddress.IPv6Address(host)).lower()
+            return _whatwg_ipv6(ipaddress.IPv6Address(host))
         except ValueError:
             return host
-    if host.isdigit():
-        n = int(host)
-        if 0 <= n <= 0xFFFFFFFF:
-            return str(ipaddress.IPv4Address(n))
     if not host.isascii():
         try:
-            labels = [lbl.encode("idna").decode("ascii") if lbl else "" for lbl in host.split(".")]
-            return ".".join(labels).lower()
+            host = ".".join(_label_to_ascii(lbl) for lbl in host.split("."))
         except UnicodeError:
             return ""
-    return host
+    if any(c in FORBIDDEN_DOMAIN_CHARS for c in host):
+        return ""
+    if any(lbl.startswith("xn--") and not _valid_punycode(lbl) for lbl in host.split(".")):
+        return ""
+    if _ends_in_number(host):
+        try:
+            return _whatwg_ipv4(host)
+        except ValueError:
+            return ""
+    return host.removesuffix(".")
 
 
 def _parse_http(url: str) -> tuple[str, str] | None:
