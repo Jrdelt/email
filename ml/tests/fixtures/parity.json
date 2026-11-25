@@ -426,7 +426,7 @@
     }
   },
   {
-    "name": "fullwidth_digits_not_treated_as_ipv4",
+    "name": "fullwidth_digits_normalized_as_reader_sees_them",
     "sender": "a@bank.com",
     "body": "Note",
     "links": [
@@ -437,15 +437,15 @@
     ],
     "expected": {
       "n_links": 1,
-      "n_text_href_mismatch": 0,
+      "n_text_href_mismatch": 1,
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 0,
-      "body_len": 4,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 4
     }
   },
   {
@@ -603,6 +603,148 @@
       "n_external_links": 1,
       "urgency_hits": 0,
       "body_len": 2
+    }
+  },
+  {
+    "name": "invisible_soft_hyphen_in_link_text",
+    "sender": "a@shop.example",
+    "body": "Sign in",
+    "links": [
+      {
+        "text": "www.pay\u00adpal.com/signin",
+        "href": "https://account-review.example/signin"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 7
+    }
+  },
+  {
+    "name": "fullwidth_dot_in_link_text",
+    "sender": "a@shop.example",
+    "body": "Sign in",
+    "links": [
+      {
+        "text": "www.paypal\uff0ecom",
+        "href": "https://account-review.example/signin"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 7
+    }
+  },
+  {
+    "name": "zero_width_space_in_link_text",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "paypal\u200b.com",
+        "href": "https://paypal.com/x"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "cyrillic_homoglyph_link_text",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "www.\u0440\u0430\u0443\u0440\u0430l.com",
+        "href": "https://www.paypal.com/"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "regional_virtual_hosted_s3_html",
+    "sender": "a@shop.example",
+    "body": "Mailbox full",
+    "links": [
+      {
+        "text": "Review",
+        "href": "https://mail-quota-7731.s3.us-east-1.amazonaws.com/index.html"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 1,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 12
+    }
+  },
+  {
+    "name": "gcs_virtual_and_azure_static_html",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "a",
+        "href": "https://bucket.storage.googleapis.com/login.html"
+      },
+      {
+        "text": "b",
+        "href": "https://acct.z13.web.core.windows.net/verify.htm"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 2,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 2,
+      "urgency_hits": 0,
+      "body_len": 1
     }
   }
 ]

@@ -42,8 +42,12 @@ const CLOUD_STORAGE_SUFFIXES = [
   '.r2.dev',
   '.backblazeb2.com',
   '.digitaloceanspaces.com',
+  '.storage.googleapis.com', // GCS virtual-hosted buckets
+  '.web.core.windows.net', // Azure Storage static websites
 ];
 const REGIONAL_S3_HOST = /^s3[.-][a-z0-9-]+\.amazonaws\.com$/;
+// <bucket>.s3.<region>, .s3-<region>, .s3-website-<region>, .s3.dualstack.<region> (AWS's default URL shapes)
+const VIRTUAL_REGIONAL_S3_HOST = /\.s3[.-](?:website[.-])?(?:dualstack\.)?[a-z0-9-]+\.amazonaws\.com$/;
 
 // Intentionally omits common non-web file extensions (pdf, js, py, sh, pl, rs, md, zip, mov).
 const COMMON_TLDS = new Set([
@@ -79,6 +83,7 @@ function isCloudStorageHost(host: string): boolean {
   return (
     CLOUD_STORAGE_HOSTS.has(host) ||
     REGIONAL_S3_HOST.test(host) ||
+    VIRTUAL_REGIONAL_S3_HOST.test(host) ||
     CLOUD_STORAGE_SUFFIXES.some((s) => host.endsWith(s))
   );
 }
@@ -104,12 +109,32 @@ function trimTrailingPunct(s: string): string {
   return s.slice(0, end);
 }
 
+// Characters that render as nothing (soft hyphen, zero-width space/joiners, word joiner, BOM, bidi marks) and
+// look-alike dots. Link text "www.pay&shy;pal.com" or "paypal\uff0ecom" still shows a domain to the reader.
+const INVISIBLE_RE = /[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]/g;
+const DOT_LOOKALIKE_RE = /[\u3002\uff0e\uff61]/g;
+
+/** Normalise link text the way a reader sees it (mirror of features.py _normalize_shown_text). */
+function normalizeShownText(text: string): string {
+  return text.normalize('NFKC').replace(INVISIBLE_RE, '').replace(DOT_LOOKALIKE_RE, '.');
+}
+
+/** ASCII (punycode) form of a non-ASCII host such as Cyrillic look-alike text, or '' if it is not a valid host. */
+function asciiHost(host: string): string {
+  if (!/[^\x00-\x7f]/.test(host)) return host;
+  try {
+    return new URL(`http://${host}/`).hostname;
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Extract a hostname only when the link text looks like an explicit URL or bare domain/IP,
  * so prose like "please reset your password immediately." or filenames like "report.pdf" return ''.
  */
 export function shownHost(text: string): string {
-  const t = text.trim();
+  const t = normalizeShownText(text).trim();
   if (!t) return '';
   const m = t.match(EXPLICIT_URL);
   if (m) {
@@ -122,7 +147,7 @@ export function shownHost(text: string): string {
   if (authority.includes('@') || authority.includes('://') || authority.endsWith('.')) return '';
   const bracketedIpv6 = authority.match(/^\[([0-9a-f:.]+)\](?::\d{1,5})?$/i)?.[1]?.toLowerCase();
   if (bracketedIpv6 && isIpHost(bracketedIpv6)) return bracketedIpv6;
-  const rawHost = authority.replace(/:\d{1,5}$/, '').toLowerCase();
+  const rawHost = asciiHost(authority.replace(/:\d{1,5}$/, '').toLowerCase());
   if (isIpHost(rawHost)) return rawHost;
   if (!isValidDomain(rawHost)) return '';
   const tld = rawHost.slice(rawHost.lastIndexOf('.') + 1);

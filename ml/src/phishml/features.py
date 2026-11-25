@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import unicodedata
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
@@ -45,8 +46,13 @@ CLOUD_STORAGE_SUFFIXES = (
     ".r2.dev",
     ".backblazeb2.com",
     ".digitaloceanspaces.com",
+    ".storage.googleapis.com",
+    ".web.core.windows.net",
 )
 REGIONAL_S3_HOST = re.compile(r"^s3[.-][a-z0-9-]+\.amazonaws\.com\Z", re.ASCII)
+VIRTUAL_REGIONAL_S3_HOST = re.compile(r"\.s3[.-](?:website[.-])?(?:dualstack\.)?[a-z0-9-]+\.amazonaws\.com\Z", re.ASCII)
+INVISIBLE_RE = re.compile("[\u00ad\u034f\u180e\u200b-\u200f\u2060-\u2064\ufeff]")
+DOT_LOOKALIKE_RE = re.compile("[\u3002\uff0e\uff61]")
 HTML_EXT_RE = re.compile(r"\.(?:html?|shtml|xhtml)\Z", re.IGNORECASE | re.ASCII)
 
 MULTI_SUFFIXES = frozenset({
@@ -168,6 +174,7 @@ def _is_cloud_storage_host(host: str) -> bool:
     return (
         host in CLOUD_STORAGE_HOSTS
         or bool(REGIONAL_S3_HOST.match(host))
+        or bool(VIRTUAL_REGIONAL_S3_HOST.search(host))
         or any(host.endswith(s) for s in CLOUD_STORAGE_SUFFIXES)
     )
 
@@ -184,9 +191,14 @@ def is_cloud_html_link(url: str) -> bool:
     return not path.endswith("\n") and bool(HTML_EXT_RE.search(path))
 
 
+def _normalize_shown_text(text: str) -> str:
+    """Normalise link text the way a reader sees it (mirror of features.ts normalizeShownText)."""
+    return DOT_LOOKALIKE_RE.sub(".", INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text)))
+
+
 def shown_host(text: str) -> str:
     """Extract a hostname only when link text looks like an explicit URL or bare domain/IP."""
-    t = text.strip()
+    t = _normalize_shown_text(text).strip()
     if not t:
         return ""
     m = EXPLICIT_URL.search(t)
@@ -205,6 +217,8 @@ def shown_host(text: str) -> str:
         if is_ip_host(v6):
             return v6
     raw_host = PORT_SUFFIX_RE.sub("", authority).lower()
+    if not raw_host.isascii():
+        raw_host = _to_ascii_hostname(raw_host)
     if is_ip_host(raw_host):
         return raw_host
     if not _is_valid_domain(raw_host):
