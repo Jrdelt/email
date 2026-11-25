@@ -1,14 +1,14 @@
 # Chrome Web Store & Microsoft Edge Add-ons Listing — Phishing Email Detector
 
-> Last Updated: 2026-11-23
+> Last Updated: 2026-11-25
 
-> **Important Version Note:** Chrome Web Store version `0.1.0` (ID `bdpnkkpanopdfhnclfcpllnlccphlejp`) was submitted prior to adding **Strict Local Mode (`managed_schema.json`)** and the **Yahoo Mail** & **Proton Mail** adapters (`mail.yahoo.com`, `mail.proton.me`). Leave `0.1.0` in review as-is, and bump `extension/package.json` `"version"` to `0.2.0` before submitting the next update to Chrome Web Store (fresh submissions to Edge Add-ons and Firefox AMO can use the latest `store-upload/` archives immediately). See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md) and [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md) for all browser stores and HIPAA guidance.
+> **Version note:** Chrome Web Store version `0.1.0` (ID `bdpnkkpanopdfhnclfcpllnlccphlejp`) was submitted before **Strict Local Mode** (`managed_schema.json`) and the **Yahoo Mail** and **Proton Mail** adapters (`mail.yahoo.com`, `mail.proton.me`) were added. Leave `0.1.0` in review as it is, and change `"version"` in `extension/package.json` to `0.2.0` before submitting the next Chrome Web Store update. New submissions to Edge Add-ons and Firefox AMO can use the latest build right away. See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md) for all stores and [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md) for HIPAA guidance.
 
 ---
 
 ## Store Packages Ready to Upload
 
-All ready-to-upload files are gathered in `/Users/cesardeltoro-lemire/email-detection/store-upload/` (regenerate anytime with `cd extension && npm run build:all && npm run zip:all`):
+Ready-to-upload files are collected in a local `store-upload/` folder, which is not committed (`.gitignore`). Rebuild the ZIP files at any time with `cd extension && npm run build:all && npm run zip:all`:
 - **Chrome Web Store ZIP:** `store-upload/phishing-email-detection-extension-0.1.0-chrome.zip` (also at `extension/.output/phishing-email-detection-extension-0.1.0-chrome.zip`)
 - **Microsoft Edge Add-ons ZIP:** `store-upload/phishing-email-detection-extension-0.1.0-edge.zip` (also at `extension/.output/phishing-email-detection-extension-0.1.0-edge.zip`)
 
@@ -23,8 +23,11 @@ Phishing Email Detector
 Warns about phishing in webmail. Email content stays in your browser; only sender and clicked link domains are checked.
 
 **Detailed Description** [REQUIRED — plain text, copy-paste directly]
+
+This text names all five webmail services in the current code. The `0.1.0` package in review supports only Gmail, Outlook on the web and iCloud Mail.
+
 ```text
-Warns you about phishing emails, deceptive links, and unsafe attachments in Gmail, Outlook on the web, and iCloud Mail while keeping your email content private on your device.
+Warns you about phishing emails, deceptive links, and unsafe attachments in Gmail, Outlook on the web, iCloud Mail, Yahoo Mail, and Proton Mail while keeping your email content private on your device.
 
 FEATURES
 • Spots impersonation and scam tactics — flags fake sender names, lookalike websites, urgent account threats, unverified senders, and links that display one website in the text while pointing somewhere else.
@@ -65,12 +68,12 @@ English
 
 | Asset | Dimensions | Store | Status | Filename |
 |-------|-----------|-------|--------|----------|
-| Store Icon [REQUIRED] | 128×128 PNG | Chrome & Edge | ✅ Ready | `store-upload/icon-128.png` (`extension/public/icons/icon-128.png`) |
-| Edge Store Logo [REQUIRED for Edge] | 300×300 PNG | Edge Add-ons | ✅ Ready | `store-upload/edge-logo-300x300.png` |
-| Screenshot 1 [REQUIRED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/screenshot-1-phishing-banner-1280x800.png` |
-| Screenshot 2 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/screenshot-2-link-stopped-1280x800.png` |
-| Screenshot 3 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/screenshot-3-attachment-lock-popup-1280x800.png` |
-| Small Promo Tile [RECOMMENDED] | 440×280 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/small-promo-440x280.png` |
+| Store Icon [REQUIRED] | 128×128 PNG | Chrome & Edge | Ready | `store-upload/icon-128.png` (`extension/public/icons/icon-128.png`) |
+| Edge Store Logo [REQUIRED for Edge] | 300×300 PNG | Edge Add-ons | Ready | `store-upload/edge-logo-300x300.png` |
+| Screenshot 1 [REQUIRED] | 1280×800 (24-bit PNG) | Chrome & Edge | Ready | `store-upload/screenshot-1-phishing-banner-1280x800.png` |
+| Screenshot 2 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | Ready | `store-upload/screenshot-2-link-stopped-1280x800.png` |
+| Screenshot 3 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | Ready | `store-upload/screenshot-3-attachment-lock-popup-1280x800.png` |
+| Small Promo Tile [RECOMMENDED] | 440×280 (24-bit PNG) | Chrome & Edge | Ready | `store-upload/small-promo-440x280.png` |
 
 ---
 

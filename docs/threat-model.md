@@ -1,53 +1,68 @@
 # Threat Model
 
-## Assets & Goals
+## Goals and assets
 
-- **Goal:** Warn users about phishing emails, malicious attachments, and deceptive destination links in webmail while maintaining a low false-positive rate (`<=0.1%` target).
-- **Protected assets:** User credentials, session state, local device safety, user trust, and mailbox privacy (zero email bodies, attachment contents/names, sender addresses, or full URLs ever leave the browser).
-- **Out of scope (v1):** Deep byte-level attachment sandboxing (inspecting inside encrypted ZIPs, PDFs, or Office binaries), native desktop/mobile mail apps, and server-side mail gateway filtering.
+- **Goal:** warn users about phishing emails, malicious attachments and deceptive links in webmail, while keeping false alarms low (target: a false-positive rate of 0.1% or less).
+- **Protected assets:** user credentials, session state, the safety of the user's device, user trust, and mailbox privacy. Email bodies, attachment contents and names, sender addresses and full URLs never leave the browser.
+- **Out of scope (v1):** deep inspection of attachment contents (such as encrypted ZIPs, PDFs or Office files), desktop and mobile mail apps, and server-side mail filtering.
 
-## Attacker Capabilities
+## What an attacker can do
 
-An adversary can send arbitrary HTML emails to the user's inbox and may attempt to:
-- Impersonate trusted brands via display names (including compact/camelCase forms), lookalike/homoglyph domains, punycode (`xn--`), or forged `From` headers sent through third-party relays.
-- Disguise malicious links via mismatched anchor text, `@` userinfo authority tricks, multi-hop open/tracking redirects, URL shorteners, raw cloud object storage HTML pages, SVG `href`/`xlink:href` anchors, or HTML `<form action>` / `[formaction]` submissions.
-- Smuggle credentials stealers or malware via attachments (`.html`, `.svg`, `.hta`, `.lnk`, `.iso`, `.exe`, double extensions like `invoice.pdf.exe`, or inline `data:`/`blob:` downloads).
-- Clobber DOM properties (`<form><input name="getAttribute"><input name="hasAttribute"></form>`), spoof webmail header CSS classes inside the message body, or override page styles to hide/restyle security UI.
+An attacker can send any HTML email to the user and may try to:
 
-## Defense Layers & Residual Limits
+- **Impersonate a brand** with a display name (including squashed forms like `PayPalSupport`), a lookalike or homoglyph domain (letters that look alike), punycode (`xn--`), or a forged `From` header sent through a third-party relay.
+- **Disguise a link** with link text that shows a different site, an `@` trick in the address, chains of redirects, URL shorteners, web pages on raw cloud storage, SVG `href`/`xlink:href` links, or form submissions (`<form action>` and `[formaction]`).
+- **Deliver malware or credential-stealing pages as attachments**: `.html`, `.svg`, `.hta`, `.lnk`, `.iso`, `.exe`, double extensions like `invoice.pdf.exe`, or inline `data:`/`blob:` downloads.
+- **Attack the extension's own code or UI**: clobber DOM properties (for example `<form><input name="getAttribute"></form>`), copy webmail header CSS classes inside the message body, or restyle the page to hide security warnings.
 
-### 1. Link & Form Locking
-Flagged emails pause links (`a`, `area`, SVG `href` & `xlink:href`), `<a ping>` beacons, embedded image links, `<form>` submissions, and `[formaction]` controls by stashing attributes (`data-ped-*`) via `Element.prototype`-bound helpers (`src/dom.ts`, immune to `<form>` DOM clobbering) and intercepting `click`, `auxclick`, `dragstart`, `submit`, and `keydown` (`Enter`/`Space`) in capture phase, with instant `MutationObserver` re-locking of dynamically inserted nodes.
-- *Residual limit:* Users manually copying and pasting plain-text URLs into the address bar.
+## Defenses and remaining limits
 
-### 2. Always-On Attachment Locking for Untrusted Mail
-Native webmail attachment shelves/cards (Gmail, Outlook Web, iCloud Mail) and inline `a[download]` / `data:` / `blob:` links in **any untrusted email** are locked (`data-ped-att-locked`, stashing `href`, `download`, `download_url`, `formaction`, and blocking `click`, `auxclick`, `dblclick`, `mousedown`, `pointerdown`, `dragstart`, `submit`, and `keydown` `Enter`/`Space`), even when body text scores safe or after dismissing the banner. Local filename inspection (`src/attachments.ts`) highlights dangerous smuggling/executable/double-extension patterns without downloading bytes.
-- *Residual limit:* Browser-native context-menu `"Save link as…"` or malicious payloads inside benignly named files (`.pdf`) after the user explicitly chooses to trust the email.
+### 1. Link and form locking
 
-### 3. Click-Time Destination Inspector & Race-to-Click Gate
-Clicking a link or submitting a form before the 400 ms debounced scan finishes triggers an immediate scan flush (`isPending` gate). Clicking an external `http(s)` link unwraps multi-hop redirectors (Outlook Safe Links, Google, Facebook, YouTube), checks local URL risk signals (`@` authority disguise, IPv4/IPv6 literal, punycode, raw cloud HTML, dangerous file extensions, IP-loggers/Grabify traps like `urlto.me`, URL shorteners, unencrypted `http://`), and queries destination domain intelligence (700 ms timeout; disabled in Strict Local Mode), routing risky clicks to `warning.html` via a 1-hour ephemeral `browser.storage.session` UUID token containing zero sender email addresses.
-- *Residual limit:* Server-side multi-hop redirects that occur *after* navigating to an aged, reputable domain (without opt-in `webNavigation` permissions).
+When an email is flagged, the extension pauses links (`a`, `area`, SVG `href` and `xlink:href`), `<a ping>` beacons, embedded image links, form submissions and `[formaction]` controls. It moves their target attributes into `data-ped-*` attributes using helpers bound to `Element.prototype` (`src/dom.ts`), which cannot be tricked by DOM clobbering. It also blocks `click`, `auxclick`, `dragstart`, `submit` and `keydown` (`Enter`/`Space`) in the capture phase, and a `MutationObserver` locks any links added later.
 
-### 4. Spoof-Resistant Allowlist
-Sender trust (`trustedSenders`) matches exact validated email addresses only (never domains, wildcards, or display names). Whenever webmail exposes an unauthenticated badge or a conflicting non-ESP `via` relay, `canTrustByAllowlist` refuses auto-trust, disables `"Always trust sender"` in the banner, and surfaces a spoofing warning.
-- *Residual limit:* Webmail views where authentication metadata is hidden until headers are expanded.
+- *Remaining limit:* a user copying a plain-text URL into the address bar.
 
-## Third-Party Domain Lookups & HIPAA Strict Local Mode
+### 2. Attachment locking for untrusted mail
 
-By default, lookup services learn only the **registrable domain** of opened emails' senders and clicked external link destinations (plus the user's IP address). Mitigations:
-- **Strict Local Mode & Enterprise Policy (`src/settings.ts`, `public/managed_schema.json`):** Users can toggle **Strict Local Mode** directly in the popup, or HIPAA/enterprise IT administrators can enforce `strictLocalMode: true` via `browser.storage.managed`, disabling all `domainIntel` `fetch()` calls (0 bytes off-device) across content, click-guard, warning, and background scripts.
-- Strict `isValidDomain` validation before constructing any request URL; `https:`-only registry RDAP bootstrap validation (`Object.create(null)` map + hostname verification).
+In **any untrusted email**, the webmail's own attachment areas (Gmail shelves, Outlook attachment wells and cards, iCloud attachment bars, Yahoo tiles, Proton attachment lists) and inline `a[download]`, `data:` and `blob:` links are locked (`data-ped-att-locked`). The lock sets aside `href`, `download`, `download_url` and `formaction` attributes and blocks `click`, `auxclick`, `dblclick`, `mousedown`, `pointerdown`, `dragstart`, `submit` and `keydown` (`Enter`/`Space`). This applies even when the text scores safe or the banner is dismissed. File names are checked locally (`src/attachments.ts`) for smuggling files, executables and double extensions, without downloading anything.
+
+- *Remaining limits:* the browser's own "Save link as…" menu, or a harmful payload inside a normal-looking file (such as a `.pdf`) after the user chooses to trust the email.
+
+### 3. Click-time link check and race-to-click gate
+
+If the user clicks a link or submits a form before the 400 ms delayed scan has finished, the scan runs immediately first (the `isPending` gate). When the user clicks an outside `http(s)` link, the extension:
+
+- unwraps redirect wrappers (Outlook Safe Links, Google, Facebook, YouTube);
+- checks local warning signs: an `@` in the address, a raw IPv4/IPv6 address, punycode, a raw cloud-storage web page, a risky file extension, an IP logger such as Grabify (`urlto.me`), a URL shortener, or unencrypted `http://`;
+- looks up the destination domain, with a 700 ms time limit (skipped in Strict Local Mode).
+
+Risky clicks open the local `warning.html` page. The link is passed through a one-time ID stored in `browser.storage.session` for up to 1 hour, which never contains the sender's email address.
+
+- *Remaining limit:* server-side redirects that happen after the user reaches an established, reputable domain (catching these would need extra opt-in permissions such as `webNavigation`).
+
+### 4. Spoof-resistant allowlist
+
+Trusted senders (`trustedSenders`) match exact, validated email addresses only, never domains, wildcards or display names. When the webmail shows an unauthenticated-sender badge or a conflicting `via` relay that is not a known email service provider, `canTrustByAllowlist` refuses automatic trust, the banner disables "Always trust sender", and a spoofing warning is shown.
+
+- *Remaining limit:* webmail views that hide authentication details until the user expands the headers.
+
+## Third-party domain lookups and Strict Local Mode
+
+By default, lookup services learn only the **registrable domain** of an opened email's sender or a clicked outside link, plus the user's IP address. Mitigations:
+
+- **Strict Local Mode and enterprise policy** (`src/settings.ts`, `public/managed_schema.json`): users can turn it on in the popup, or IT admins can enforce `strictLocalMode: true` through `browser.storage.managed`. This disables every `domainIntel` `fetch()` call in the content script, click guard, warning page and background script, so nothing leaves the device.
+- Strict `isValidDomain` checks before any request URL is built. The registry RDAP list from IANA is validated (`https:` only, checked hostnames, stored in an `Object.create(null)` map).
 - `credentials: 'omit'` and `referrerPolicy: 'no-referrer'` on every `fetch`.
-- 24-hour local cache (`domainIntelCache`), DNS `NOERROR`/`NXDOMAIN` RCODE verification (ignoring transient `SERVFAIL` errors), and `127.0.0.x` URIBL response validation.
-- Hardened local report redaction (`feedback.ts` strips emails, full URLs, IP literals, and domain names to `[address]`/`[url]`/`[ip]`/`[domain]`) and zero sender addresses stored inside `warn:*` session warnings (minimum-necessary principle).
+- A 24-hour local cache (`domainIntelCache`). DNS answers count only if they are `NOERROR` or `NXDOMAIN` (temporary `SERVFAIL` errors are ignored), and URIBL answers must be in `127.0.0.x`.
+- Local false-positive notes are redacted (`feedback.ts` replaces addresses, full URLs, IPv4 addresses and domain names with `[address]`, `[url]`, `[ip]` and `[domain]`), and `warn:*` session entries hold no sender address (minimum necessary data).
 
-## Permissions, Messaging & UI Isolation
+## Permissions, messaging and UI isolation
 
-- **Minimal install permissions:** Only `storage` and the explicit active webmail match patterns in `extension/src/hosts.ts` (Gmail, Outlook Web including `outlook.cloud.microsoft`, Yahoo Mail, Proton Mail, and scoped iCloud Mail frames `www.icloud.com/mail/*`, `www.icloud.com/applications/mail2/*`, and `*.icloud-sandbox.com/applications/mail2-message/*`). No `<all_urls>`, no `tabs` host access, zero `web_accessible_resources`, and zero runtime npm dependencies.
-- **Native attachment blocking on all 5 supported providers:** Works across Gmail shelves, Outlook Aria attachment wells/cards, iCloud mail2 attachment bars, Yahoo attachment tiles, Proton attachment lists, and inline download/data/blob anchors.
-- **Sender-verified messaging:** `background.ts` verifies `sender.id` and `isSupportedWebmailUrl(sender.url)` (plus top-frame / iCloud `app`-frame checks on `verdict` and `sandbox`-frame checks on `icloudBody`), never using `window.postMessage`.
-- **Closed Shadow DOM & strict CSP:** `#ped-banner-host` and `#ped-toast-host` use `attachShadow({ mode: 'closed' })` with `:host { all: initial !important }` mounted on `document.documentElement`, constructed strictly via `textContent` / `createElementNS`. Extension pages enforce `script-src 'self'; object-src 'none'; base-uri 'none';`.
+- **Minimal install permissions:** only `storage` and the webmail sites in `extension/src/hosts.ts`: Gmail, Outlook on the web (including `outlook.cloud.microsoft`), Yahoo Mail, Proton Mail, and the iCloud Mail frames `www.icloud.com/mail/*`, `www.icloud.com/applications/mail2/*` and `*.icloud-sandbox.com/applications/mail2-message/*`. No `<all_urls>`, no `tabs` permission, no `web_accessible_resources`, and no runtime npm dependencies.
+- **Checked messaging:** `background.ts` checks `sender.id`, checks `isSupportedWebmailUrl(sender.url)` on messages from webmail pages, and checks the frame (top frame or iCloud `app` frame for `verdict`, iCloud `sandbox` frame for `icloudBody`). It never uses `window.postMessage`.
+- **Closed Shadow DOM and strict CSP:** the banner (`#ped-banner-host`) and toast (`#ped-toast-host`) use `attachShadow({ mode: 'closed' })` with `:host { all: initial !important }`, are mounted on `document.documentElement`, and are built only with `textContent` and `createElementNS`. Extension pages use the Content Security Policy `script-src 'self'; object-src 'none'; base-uri 'none';`.
 
-## Remaining Roadmap Hardening
+## Planned hardening
 
-- Time-split evasion benchmarks (`T9`) and SHA-256 hash verification of the exported JSON ML model (`T5–T6`).
+- Evasion tests on a time-based split (T9) and SHA-256 checking of the exported model file (T5, T6). See [ROADMAP.md](ROADMAP.md).

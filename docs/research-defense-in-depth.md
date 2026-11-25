@@ -1,175 +1,163 @@
-# Defense-in-Depth Research: Effectiveness, Usable Security, Post-Click Protection, and Extension Hardening
+# Defense-in-Depth Research
 
-This document synthesizes primary research, browser platform specifications (Chrome Manifest V3 and MDN Web Docs), and a line-by-line audit of the initial codebase to outline how **Phishing Email Detector** catches real-world phishing, stays clear and low-fatigue for everyday users, resists DOM/extension bypasses, and protects the user **even if they click a malicious link**.
+This document collects the research behind Phishing Email Detector's design: primary studies, browser platform documentation (Chrome Manifest V3 and MDN Web Docs) and an audit of the early codebase. It covers four areas: protecting users even after they click, catching modern phishing, keeping warnings clear and low-fatigue, and hardening the extension itself.
 
 > [!NOTE]
-> **Implementation status:** All **Tier 1** protections (hardened link/form/attachment locking, DOM-clobbering resistance, 400 ms race-to-click scan gate, click-time destination inspector, `warning.html` interstitial & recovery guide, closed Shadow DOM `:host { all: initial !important }`, 2-step `danger` unlock, Undo pill, and auth-guarded allowlist) plus **T1 cross-language parity fixtures** have shipped. See [Section 6](#6-prioritized-implementation-matrix) and [docs/threat-model.md](threat-model.md) for current architecture and remaining Tier 2/3 roadmap items.
+> **Status:** All Tier 1 items in [Section 6](#6-prioritized-implementation-matrix) have shipped: hardened link, form and attachment locking; DOM-clobbering resistance; the 400 ms race-to-click gate; the click-time destination check with the `warning.html` page and recovery guide; Shadow DOM style isolation; the 2-step `danger` unlock; the Undo pill; and the auth-guarded allowlist. T1 parity fixtures have also shipped. Tier 2 and Tier 3 items are partly done or planned. See [threat-model.md](threat-model.md) for the current design.
 
----
+## 1. Constraints
 
-## 1. Executive Summary & Architectural Constraints
+Every idea here must respect the rules in [AGENTS.md](../AGENTS.md), [privacy.md](privacy.md) and [threat-model.md](threat-model.md):
 
-Every recommendation below must respect the hard guarantees established in [AGENTS.md](../AGENTS.md), [docs/privacy.md](privacy.md), and [docs/threat-model.md](threat-model.md):
-
-| Constraint | Current Budget / Rule | Implication for New Protections |
+| Constraint | Current budget or rule | What it means for new protections |
 |---|---|---|
-| **Privacy** | Zero email bodies, full URLs, or sender email addresses leave the browser. Only validated registrable domains are queried (`credentials: 'omit'`, `referrerPolicy: 'no-referrer'`, 24 h cache). | Post-click URL checks must either run locally or query only the destination **registrable domain** (or privacy-preserving local Bloom filters / hash prefixes). |
-| **Performance** | `<10 ms` scoring per email; `~0` idle CPU; `<10 MB` RAM; `<500 KB` total package (currently `~210 kB`); `<200 KB` model JSON; no ONNX/TF.js. | Avoid synchronous image decoding loops on every DOM mutation; keep threat lists compact (e.g., compact Bloom filter or prefix table) and run heavy click-time checks only on actual user clicks. |
-| **Permissions** | Only `storage` + `WEBMAIL_MATCHES` in `extension/src/hosts.ts` at install time. | Any browser-wide navigation or download shield beyond webmail tabs must use MV3 `optional_permissions` / `optional_host_permissions` requested **only** if the user opts in. |
-| **Precision** | Evaluate at `<=0.1%` false-positive rate (FPR) to avoid warning fatigue. | Compound weak signals (e.g., free hosting alone) rather than triggering `danger` alerts on single benign patterns. |
+| **Privacy** | No email bodies, full URLs or sender addresses leave the browser. Only validated registrable domains are looked up (`credentials: 'omit'`, `referrerPolicy: 'no-referrer'`, 24 h cache). | Post-click URL checks must run locally or look up only the destination's **registrable domain** (or use privacy-preserving local Bloom filters or hash prefixes). |
+| **Performance** | <10 ms scoring per email; ~0 idle CPU; <10 MB memory; <500 KB package (currently ~210 kB); <200 KB model JSON; no ONNX or TF.js. | Avoid heavy work on every DOM change. Keep threat lists compact (for example a Bloom filter or prefix table) and run heavier checks only on real clicks. |
+| **Permissions** | Only `storage` plus the webmail sites in `extension/src/hosts.ts` at install time. | Any browser-wide navigation or download protection must use MV3 `optional_permissions` / `optional_host_permissions`, requested **only** if the user opts in. |
+| **Precision** | Evaluate at a false-positive rate (FPR) of 0.1% or less to avoid warning fatigue. | Combine weak signals (for example free hosting alone) instead of raising `danger` alerts on single, often-benign patterns. |
 
----
+## 2. Protection at and after the click
 
-## 2. Pillar 1 — Click-Time & Post-Click Protection ("What if a user clicks a malicious link?")
+Before the click-time guard shipped, protection stopped at the inbox page: if a scan had not finished, if the scorer missed an attack, or if the user opened a URL by hand, nothing stepped in after the click. Five layers close this gap.
 
-Right now, protection ends at the inbox DOM: if a scan hasn't finished yet, if an attacker evades the pre-click email scorer, or if the user manually opens/pastes a URL, nothing intervenes after the click. Defense-in-depth closes this gap in five layers.
+### 2.1 Race-to-click window (shipped)
 
-### 2.1 Eliminate the 400 ms–5 s Race-to-Click Window
-**Codebase audit ([content.ts](../extension/entrypoints/content.ts)):**
-- `createScheduler` waits `DEBOUNCE_MS = 400` plus an indeterminate `requestIdleCallback` delay before `scan()` even starts.
-- After extraction, `evaluateAndRender` awaits `listTrusted` + `listTrustedEmails` + `hashEmail`, and then sends an asynchronous `domainIntel` lookup (`TIMEOUT_MS = 5000` per request in [domainIntel.ts](../extension/src/domainIntel.ts)).
-- If a fast user clicks a link in an email within the first ~500 ms after opening it — or before an async `domainIntel` warning arrives — the link is still active.
+**Audit finding ([content.ts](../extension/entrypoints/content.ts)):** the scheduler waits `DEBOUNCE_MS = 400` plus an idle callback before scanning, and domain lookups can take up to `TIMEOUT_MS = 5000` per request ([domainIntel.ts](../extension/src/domainIntel.ts)). A fast click in the first ~500 ms, or before a domain warning arrived, reached a still-active link.
 
-**Fix (zero extra permissions):**
-- Install an ultra-lightweight **pending-scan click gate** on extracted message containers while a scan is in flight (or before the first `render()` finishes): if a user clicks a link during those ~400 ms, call `e.preventDefault()`, flush the scan immediately (`await scan()`), and either let the click proceed (if safe) or block and show the warning banner (if flagged).
+**Fix (no extra permissions):** a **pending-scan click gate**. If the user clicks while a scan is pending, the click is held, the scan runs immediately, and the click either continues (if safe) or is blocked with the banner (if flagged).
 
-### 2.2 Click-Time Destination Inspector + Local Interstitial (`warning.html`, Zero New Permissions)
-Even when an email passed initial inspection (e.g., benign-looking prose linking to an unflagged host, a URL shortener, or a file download), the content script already has a capture-phase `click` / `auxclick` listener inside webmail pages.
+### 2.2 Click-time destination check and local warning page (shipped, no new permissions)
 
-**How it works without new permissions:**
-1. On click of any link inside a webmail message body whose destination is not obviously the sender's own clean website (or matches high-risk heuristics), pause default navigation (`e.preventDefault()`).
-2. Run a synchronous + cached **click-time destination check**:
-   - **Local URL risk checks:** IP literal, `xn--` punycode, HTTP (non-HTTPS), `@` credential-masking authority (`https://trusted.com@evil.example`), cloud-storage HTML (`isCloudHtmlLink`), known URL shorteners (`bit.ly`, `tinyurl.com`, `t.co`, `rebrand.ly`, `rb.gy`, `cutt.ly`, `is.gd`), or dangerous file download extensions (`.html`, `.htm`, `.svg`, `.exe`, `.dmg`, `.pkg`, `.msi`, `.zip`, `.iso`, `.lnk`, `.apk`, `.ps1`, `.bat`, `.vbs`, `.scr`).
-   - **Destination-domain intel lookup (privacy-safe):** reuse existing `domainIntel` (`getIntel`) in [background.ts](../extension/entrypoints/background.ts) on the **destination URL's registrable domain** (`registrableDomain(hostOf(href))`). Only the bare domain is queried (never the URL path, query string, or `#fragment`), using existing `credentials: 'omit'` and `referrerPolicy: 'no-referrer'`.
-3. If either the email was flagged **or** the destination domain has high-risk signals (brand-new `<30d` registration, URIBL `black`/`red` listing, `NXDOMAIN`, no MX/unregistered, dangerous attachment extension, raw cloud HTML):
-   - Store `{ href, reasons, sender, domainIntel }` under a random one-time ID in `browser.storage.session` (never passing the raw phishing URL in a query parameter so it never enters browser history or leaks via referrers).
-   - Open an extension interstitial page (`browser.runtime.getURL('warning.html?id=...')`).
-   - Show an opinionated **Warning / Safety Card** (Section 4) with a prominent **"Back to Safety (Close Tab)"** button and a calm **"If you already clicked / entered info"** checklist.
+The content script already listens for `click` and `auxclick` in webmail pages, so it can check a link at the moment it is clicked:
 
-### 2.3 Opt-In Post-Click Browser Shield (`optional_permissions` & `declarativeNetRequest`)
-A link clicked from email often redirects through 2–3 hops (e.g., legitimate marketing tracker or open redirect → fresh phishing domain), or triggers a drive-by SVG/HTML-smuggling download after leaving the webmail tab.
+1. Hold the click on an outside link in a message body while it is checked.
+2. Run fast local checks: raw IP address, `xn--` punycode, plain `http:`, an `@` that hides the real host (`https://trusted.com@evil.example`), raw cloud-storage HTML (`isCloudHtmlLink`), known URL shorteners, IP loggers, or a risky file extension. Then, if needed, look up the **destination's registrable domain** with the existing `getIntel` code in [background.ts](../extension/entrypoints/background.ts). Only the bare domain is sent (never the path, query or `#fragment`), with `credentials: 'omit'` and `referrerPolicy: 'no-referrer'`.
+3. If the destination looks risky (for example registered less than 30 days ago, listed `black` or `red` on URIBL, `NXDOMAIN`, a risky file type or raw cloud HTML), store the link under a random one-time ID in `browser.storage.session` (so the URL never goes into a query string, browser history or a referrer) and open the extension's `warning.html?id=...` page. It shows a clear **"Back to safety (Close tab)"** button and a calm checklist for users who already clicked.
+
+As shipped, the stored entry holds the link, its host and domain, the reasons and any domain details, but no sender address.
+
+### 2.3 Optional post-click browser shield (planned, opt-in)
+
+A link from an email often passes through 2 or 3 redirects (for example a marketing tracker or open redirect, then a fresh phishing domain), or starts an HTML/SVG smuggling download after leaving the webmail tab.
 
 According to Chrome's Manifest V3 documentation (`developer.chrome.com`):
-- Putting `<all_urls>` or `https://*/*` in `host_permissions` forces an alarming install-time warning (*"Read and change all your data on all websites"*), violating [AGENTS.md](../AGENTS.md) minimal-permission principles.
-- However, MV3 supports **`optional_permissions`** (`webNavigation`, `downloads`) and **`optional_host_permissions`** (`https://*/*`, `http://*/*`), which **show zero warnings at install time** and are only prompted via `chrome.permissions.request()` if the user explicitly turns on an opt-in **"Extended Post-Click Shield"** toggle in the popup.
-- Furthermore, **`declarativeNetRequest`** without host permissions allows blocking requests by rule without triggering broad data-access warnings (whereas redirecting/modifying headers requires host permissions).
 
-**Optional post-click capabilities (strictly opt-in):**
-1. **`webNavigation.onCreatedNavigationTarget` + `onCommitted` scoped to email-spawned tabs:** Track only `tabId`s opened directly from a supported webmail tab (`sourceTabId` in webmail tabs) for a brief hop window (e.g., 30 seconds or until settled). If any redirect hop lands on a `NXDOMAIN` / `<30d` / URIBL-listed / blocklisted domain, close or redirect the tab to `warning.html` before the user interacts with the credential form.
-2. **Download guard (`downloads.onCreated`):** When a download originates from a webmail click or an email-spawned tab with a high-risk smuggling extension (`.svg`, `.html`, `.htm`, `.iso`, `.lnk`, `.vbs`, `.scr`, `.exe`, `.dmg` when not expected), pause it (`browser.downloads.pause`) and surface a clear confirmation prompt explaining HTML/SVG smuggling risks.
+- Putting `<all_urls>` or `https://*/*` in `host_permissions` shows an alarming install warning ("Read and change all your data on all websites"), which breaks the minimal-permission rule in [AGENTS.md](../AGENTS.md).
+- MV3 also supports **`optional_permissions`** (`webNavigation`, `downloads`) and **`optional_host_permissions`** (`https://*/*`, `http://*/*`). These show **no warning at install time** and are requested with `chrome.permissions.request()` only if the user turns on an opt-in setting such as an "Extended Post-Click Shield".
+- **`declarativeNetRequest`** can block requests by rule without host permissions and without broad data-access warnings (redirecting or changing headers does need host permissions).
 
-### 2.4 Privacy-Preserving Threat Lists: Local Bloom Filter vs. Safe Browsing v5 Hash-Prefix + OHTTP
-Checking clicked domains against known phishing feeds shouldn't leak user browsing history or blow the `<500 KB` package budget.
+Possible opt-in features:
 
-| Approach | Privacy | Freshness | Bundle / Latency | Fit for This Extension |
+1. **Watch only tabs opened from webmail** (`webNavigation.onCreatedNavigationTarget` and `onCommitted`, using `sourceTabId`) for a short time (for example 30 seconds). If a redirect lands on an `NXDOMAIN`, newly registered, URIBL-listed or blocklisted domain, close the tab or send it to `warning.html` before the user can type into a login form.
+2. **Download guard** (`downloads.onCreated`): when a download from a webmail click or an email-opened tab has a risky smuggling extension (`.svg`, `.html`, `.htm`, `.iso`, `.lnk`, `.vbs`, `.scr`, `.exe`, or an unexpected `.dmg`), pause it (`browser.downloads.pause`) and explain HTML/SVG smuggling before continuing.
+
+### 2.4 Privacy-preserving threat lists (planned)
+
+Checking clicked domains against phishing feeds must not leak browsing history or break the 500 KB package budget.
+
+| Approach | Privacy | Freshness | Size and speed | Fit for this extension |
 |---|---|---|---|---|
-| **Domain-only RDAP/DNS/URIBL** *(already built)* | Only registrable domain + user IP sent (`credentials: 'omit'`). | Real-time (24 h cache). | `~0 KB` bundle; `100–800 ms` click-time check. | **Core baseline** — already implemented and documented in [docs/privacy.md](privacy.md). |
-| **Compact Static/Cached Domain Bloom Filter** | **Zero network queries** for safe/unknown misses; 0 URLs sent anywhere. | Depends on build/feed refresh cadence (e.g., OpenPhish/URLhaus domains). | `~50–150 KB` for 50k–100k domains at `<0.1%` FP rate; `<0.05 ms` check. | **Strong Tier 2 upgrade** if a clean verification fallback (domainIntel check) confirms probabilistic Bloom hits so FP rate stays `<=0.1%`. |
-| **Google Safe Browsing API v5 + Oblivious HTTP (OHTTP)** | Sends only 4-byte SHA-256 hash prefixes via an OHTTP relay so neither IP nor full URL is revealed; leverages a benign Global Cache before real-time lookup. | Real-time. | Requires API key + OHTTP relay backend infrastructure. | **Out of scope for standalone zero-server extension** unless a project-operated OHTTP proxy is ever introduced (would require updating `docs/privacy.md`). |
+| **Domain-only RDAP/DNS/URIBL** (built) | Only the registrable domain and the user's IP are sent (`credentials: 'omit'`). | Real time (24 h cache). | ~0 KB; 100–800 ms at click time. | **Current baseline**, documented in [privacy.md](privacy.md). |
+| **Compact local domain Bloom filter** | **No network queries** for safe or unknown domains; no URLs sent. | Depends on how often the list (for example OpenPhish or URLhaus domains) is rebuilt. | ~50–150 KB for 50k–100k domains at <0.1% false positives; <0.05 ms per check. | **Strong Tier 2 option**, if Bloom filter hits are confirmed by a domain lookup so the FPR stays at or below 0.1%. |
+| **Google Safe Browsing API v5 with Oblivious HTTP (OHTTP)** | Sends only 4-byte SHA-256 hash prefixes through an OHTTP relay, so neither the IP nor the full URL is revealed; uses a local Global Cache first. | Real time. | Needs an API key and an OHTTP relay server. | **Out of scope** for a serverless extension, unless a project-run OHTTP relay is added (which would require updating [privacy.md](privacy.md)). |
 
-### 2.5 Guided "I Clicked by Mistake" Remediation Flow
-When a user lands on `warning.html` or clicks a new **"I clicked a suspicious link"** help action inside the banner/popup, avoid panic and give concrete, ordered steps:
-1. **Did you just click the link, without typing or downloading anything?** → *"Close the page now. Simply clicking a link in a modern browser rarely compromises an account on its own."*
-2. **Did you enter a password, 2FA code, or payment card?** → *"Change that account's password immediately from the real website (type the address yourself), turn on 2FA / passkeys, and sign out of all active sessions."*
-3. **Did a file download (`.html`, `.svg`, `.zip`, `.dmg`, `.exe`)?** → *"Do not open it. Delete it from your Downloads folder and empty the Trash."*
+### 2.5 "I clicked by mistake" recovery steps (shipped)
 
----
+The `warning.html` page and the popup's **"Clicked a suspicious link?"** button give calm, ordered steps instead of alarm:
 
-## 3. Pillar 2 — Detection Effectiveness (2025–2026 Phishing Evasion Techniques)
+1. **Only clicked, nothing typed or downloaded?** Close the page. Simply clicking a link in a modern browser rarely compromises an account on its own.
+2. **Typed a password, 2FA code or payment card?** Change that password from the real website (type the address yourself), turn on 2FA or passkeys, and sign out of active sessions.
+3. **A file downloaded (`.html`, `.svg`, `.zip`, `.dmg`, `.exe`)?** Do not open it. Delete it from Downloads and empty the Trash.
 
-Modern phishing bypasses simple keyword and domain checks using techniques documented by CISA, NIST, and industry threat telemetry:
+## 3. Catching modern phishing (2025–2026 evasion techniques)
 
-### 3.1 Living off Trusted Sites (LOTS) & Redirect Abuse
-Attackers host phishing kits and intermediate redirectors on legitimate cloud and SaaS infrastructure whose root domains have clean reputations:
-- **Raw object storage HTML** *(fixed in `fd7828f` for S3, GCS, Azure Blob, Firebase Storage, R2, IPFS, Backblaze, DigitalOcean Spaces)*.
-- **Free static web hosting & serverless endpoints** commonly abused for credential kits: `*.web.app`, `*.firebaseapp.com`, `*.pages.dev`, `*.workers.dev`, `*.netlify.app`, `*.vercel.app`, `*.github.io`, `*.glitch.me`, `*.trycloudflare.com`, `*.ngrok-free.app`.
-  - *Crucial precision rule:* Because legitimate companies sometimes send `github.io` docs or `vercel.app` previews, **never flag static hosts alone as `danger`**. Give them a weak score (e.g., `+0.15` to `+0.2` when paired with urgency, brand claims, or form/credential keywords) so FPR stays `<=0.1%`!
-- **Legitimate open redirects & tracking wrappers:** unwrap known benign/tracking redirect query parameters locally before scoring (`google.com/url?q=`, `l.facebook.com/l.php?u=`, `urldefense.proofpoint.com`, `statics.teams.cdn...`, `nam*.safelinks.protection.outlook.com` already done for Outlook) so hidden malicious targets inside trusted wrappers are inspected properly.
-- **URL shorteners:** flag shortened URLs (`bit.ly`, `tinyurl.com`, `t.co`, `rebrand.ly`, `rb.gy`, `cutt.ly`, `shorturl.at`, `is.gd`, `ow.ly`) as a moderate obfuscation signal (`+0.2`), because legitimate transactional security alerts from banks/Google/Apple rarely obscure links with public third-party shorteners.
+Modern phishing avoids simple keyword and domain checks with techniques documented by CISA, NIST and industry threat reports.
 
-### 3.2 Quishing (QR Code Phishing) & Image-Only Emails
-Attackers increasingly embed the phishing URL exclusively inside a QR code image or turn the entire email body into images so DOM link extractors find zero `<a>` tags:
-- **Zero-dependency QR scanning with `BarcodeDetector`:** MDN Web Docs documents the browser's built-in `BarcodeDetector({ formats: ['qr_code'] })` available in secure HTTPS contexts in Chromium/Chrome extensions with zero bundle cost.
-  - *Implementation cautions:* Only run when an email contains images (`<img>`) and few/no text links; cap to e.g. the first `5` reasonably sized images (`width >= 80 && height >= 80`) and run asynchronously after initial DOM scan so `<10 ms` synchronous scoring budget isn't violated. Note that cross-origin `<img>` elements served without CORS headers may fail canvas/image-bitmap extraction unless fetched with host permissions or inspected when accessible (`img.complete`).
-- **Image-heavy / low-text heuristic:** Emails with `<80` characters of visible text, `>=1` large clickable image or `<map>`/`<area>`, and urgency words in the subject or `alt` text should receive a boost (`+0.2`). Also include `img[alt]` text in `shownHost` mismatch checks if an image's `alt` displays a spoofed domain/URL.
+### 3.1 Living off trusted sites (LOTS) and redirect abuse
 
-### 3.3 Header, Relay & Structural Evasion Signals
-Observed directly in our live Gmail sample and 2025–2026 campaigns:
-- **Gmail `via` relay mismatch:** In `h3.iw.gFxsud`, Gmail displays `via <relay-domain>` (`span.go` sibling after `a.acP`). When the `via` relay domain differs from the `From` address's domain AND has deep subdomains (4+ labels like `442.320397.jnc7.one.bss0019.narodaro.my.id`) or low-reputation TLDs, surface a clear sender warning (`"Sent through an unrelated relay server (...)"`).
-- **Whole-card clickable wrappers:** Legitimate newsletters rarely wrap an entire multi-paragraph card/table inside a single giant `<a href="...">` element so clicking anywhere opens the lure. Detecting an `<a>` enclosing `>150` chars or multiple block elements (`div`/`p`/`table`) is a strong structural phishing signal.
-- **Deceptive inline trust badges/text:** Strings like `"-This message was sent from a trusted sender."` or fake `[Verified]` / `"Passed security scan"` prefixes inside the message body (`div.a3s`) are classic social-engineering ploys.
-- **Hidden `<form>` & `formaction` URLs:** Extract `<form action>` and `button[formaction]` / `input[formaction]` destinations in `extract.ts` as links so `scoreEmail` inspects form exfiltration targets identically to `<a href>`.
+Attackers host phishing pages and redirectors on legitimate cloud and SaaS platforms whose root domains have clean reputations:
 
-### 3.4 Replacing Heuristic Thresholds with Calibrated Local ML (Roadmap T1–T6)
-Hardcoded weights (`+0.3`, `+0.4`) have fixed tradeoffs. Completing [docs/ROADMAP.md](ROADMAP.md) **T1–T6** solves this systematically:
-- **T1 Parity fixtures** guarantee identical feature vectors between Python (`ml/src/phishml/features.py`) and TypeScript (`extension/src/features.ts`).
-- **T3/T4 Time-split training + evaluation** trains calibrated models (logistic regression baseline → shallow GBDT + hashed character/word n-grams under `200 KB` JSON) evaluated strictly at **`<=0.1%` FPR** on future time-held-out emails.
-- **T8 Explainability** converts top per-feature SHAP/tree/linear contributions directly into plain-English banner reasons.
+- **Raw object-storage HTML** (shipped): S3, GCS, Azure Blob, Firebase Storage, R2, IPFS, Backblaze and DigitalOcean Spaces.
+- **Free static hosting and serverless endpoints** (planned): `*.web.app`, `*.firebaseapp.com`, `*.pages.dev`, `*.workers.dev`, `*.netlify.app`, `*.vercel.app`, `*.github.io`, `*.glitch.me`, `*.trycloudflare.com`, `*.ngrok-free.app`.
+  - *Precision rule:* real companies sometimes send `github.io` docs or `vercel.app` previews, so **never flag static hosts alone as `danger`**. Give them a weak score (for example +0.15 to +0.2, only together with urgency, brand claims or login wording) so the FPR stays at or below 0.1%.
+- **Open redirects and tracking wrappers:** unwrap them locally before checking. Outlook Safe Links, `google.com/url?q=`, `l.facebook.com/l.php?u=` and YouTube redirects are unwrapped at click time (shipped). Others such as `urldefense.proofpoint.com` are not yet handled.
+- **URL shorteners** (shipped): treated as a moderate hiding signal, because real security alerts from banks, Google or Apple rarely use public shorteners (for example `bit.ly`, `tinyurl.com`, `t.co`, `rebrand.ly`, `rb.gy`, `cutt.ly`, `shorturl.at`, `is.gd`, `ow.ly`).
 
----
+### 3.2 QR-code phishing ("quishing") and image-only emails (planned)
 
-## 4. Pillar 3 — Usable Security & User-Friendliness
+Attackers increasingly put the phishing URL only in a QR code image, or turn the whole email into images, so there are no `<a>` tags to find:
 
-Seminal usable-security research provides concrete, counterintuitive lessons on why users ignore warnings:
+- **QR scanning with the built-in `BarcodeDetector`:** MDN Web Docs documents `BarcodeDetector({ formats: ['qr_code'] })`, available in secure contexts in Chromium, with no bundle cost.
+  - *Cautions:* only run it when an email has images and few or no text links; limit it to the first few reasonably sized images (for example 5 images of at least 80×80); and run it after the main scan so the <10 ms scoring budget holds. Cross-origin images served without CORS headers may not be readable.
+- **Image-heavy, low-text check:** emails with fewer than 80 characters of visible text, at least one large clickable image or `<map>`/`<area>`, and urgent wording in the subject or `alt` text could get a score boost (+0.2). `img[alt]` text could also be included in link-text mismatch checks.
 
-- **Akhawe & Felt (USENIX Security 2013, *"Alice in Warningland"*)** studied millions of real Chrome and Firefox warning impressions and found that roughly **25–33%** of browser phishing/malware warnings were clicked through anyway, and users overwhelmingly ignored secondary `"Advanced"` / `"Learn more"` links. Core lessons:
-  1. **Put the crucial warning reason on the main surface immediately** — never bury the concrete proof behind an expandable toggle.
-  2. **Fight habituation ("warning fatigue"):** Keep clean mail silent and reserve high-urgency red UI (`danger`) for high-confidence threats.
-  3. **Use Opinionated Design:** Make the safe path visually dominant and frictionless; make bypassing a dangerous alert require deliberate effort rather than an equally weighted button next to it.
-- **NIST Technical Note 2276 (*NIST Phish Scale*)** establishes that human susceptibility depends heavily on **premise alignment** (how well the email pretext matches what the user expects in daily life, e.g., cloud storage full, delivery, password alert) vs **observable cues**. Highlighting the **exact mismatch** between premise and cue is what actually breaks the illusion.
+### 3.3 Header, relay and structure signals
 
-### Concrete UX Improvements for Our Banner & Popup
-1. **Tiered Friction on Bypass ("Opinionated Design"):**
-   - For **`warning`** (sender/domain check only): keep 1-click **"I trust this email"** unlock.
-   - For **`danger`** (`likely-phishing` / `suspicious` content): move **"Unlock links anyway"** into a secondary/subdued action (or require a 2-step confirmation: *"These links look dangerous — unlock anyway?"*) while keeping **"Back / Keep links paused"** visually prominent.
-2. **Concrete Side-by-Side Cue Comparison on the Main Card:**
-   - Instead of abstract warnings, render a clean visual pill pair right on the main banner card when spoofing/mismatch is present:
-     - `Claims: Gmail` → `Real address: alert-442-320397@nozfr.itl`
-     - `Link looks like: Review billing` → `Goes to: storage.googleapis.com`
-3. **Interactive Feedback When Clicking a Paused Link:**
-   - Currently, clicking a locked link silently does nothing (`e.preventDefault()`, `cursor: not-allowed`). Non-technical users often think the webmail page froze and immediately click **"I trust this email"** just to make the link work!
-   - **Fix:** When a user clicks a locked link, display a small non-intrusive toast/popover right near the banner or cursor: *"Link paused for safety → points to `storage.googleapis.com`. Review the warning above before unlocking."*
-4. **Reversible Post-Trust Feedback (`"Trusted ✓ [Undo]"`):**
-   - After clicking **"I trust this email"**, keep a compact dismissible confirmation pill for that page view with an **Undo** button that removes the fingerprint from `trustedEmails` and re-locks links immediately if the user trusted by mistake.
+Seen in a real Gmail sample and in 2025–2026 campaigns:
 
----
+- **Gmail `via` relay mismatch** (shipped): Gmail shows `via <relay-domain>` next to the sender. When the relay's domain differs from the `From` domain and looks suspicious (deep subdomains such as `442.320397.jnc7.one.bss0019.narodaro.my.id`, numeric labels, lookalike characters or freemail), the extension warns that the mail came through a suspicious relay.
+- **Whole-card clickable wrappers** (planned): real newsletters rarely wrap a whole multi-paragraph card in one giant `<a>`. An `<a>` that contains more than 150 characters or several block elements (`div`, `p`, `table`) is a strong structural signal.
+- **Fake trust labels in the body** (planned): text like "This message was sent from a trusted sender." or fake `[Verified]` / "Passed security scan" labels inside the message are classic social-engineering tricks.
+- **Hidden `<form>` and `formaction` URLs** (shipped): `<form action>` and `[formaction]` targets are extracted as links so the scorer checks them the same way as `<a href>`.
 
-## 5. Pillar 4 — Hardening the Extension's Own Security
+### 3.4 Replacing hand-set weights with a calibrated local model (Roadmap T1 to T6)
 
-A security extension running inside adversarial webmail DOMs (and parsing untrusted HTML emails) must resist bypasses against its own DOM locks, UI shadow root, allowlist, and model integrity.
+Fixed weights (+0.3, +0.4) have fixed trade-offs. The [roadmap](ROADMAP.md) addresses this:
 
-### 5.1 Historical Codebase Audit: Bypasses Identified & Remediated
+- **T1 parity fixtures** (shipped) guarantee identical features in Python (`ml/src/phishml/features.py`) and TypeScript (`extension/src/features.ts`).
+- **T3/T4 time-split training and evaluation** train calibrated models (logistic regression first, then shallow gradient-boosted trees with hashed text features, under 200 KB of JSON), evaluated at **an FPR of 0.1% or less** on later, held-out emails.
+- **T8 explainability** turns the top feature contributions into plain-English banner reasons.
 
-| File | Pre-Hardening Behavior | Vulnerability / Bypass Identified | Shipped Fix |
+## 4. Usable security
+
+Usable-security research gives concrete lessons on why people ignore warnings:
+
+- **Akhawe and Felt (USENIX Security 2013, "Alice in Warningland")** studied millions of real Chrome and Firefox warning impressions. Roughly 25–33% of browser phishing and malware warnings were clicked through, and users mostly ignored secondary "Advanced" or "Learn more" links. Lessons:
+  1. **Put the key reason on the main surface**, not behind a toggle.
+  2. **Fight warning fatigue:** keep clean mail silent and save red `danger` styling for high-confidence threats.
+  3. **Use opinionated design:** make the safe choice the obvious one, and make bypassing a dangerous alert take deliberate effort.
+- **NIST Technical Note 2276 (the NIST Phish Scale)** shows that how likely people are to fall for an email depends heavily on **premise alignment** (how well the story fits what the user expects, such as "storage full", a delivery notice or a password alert) as well as **observable cues**. Pointing out the **exact mismatch** between the story and the cue is what breaks the illusion.
+
+UX changes made in response (all shipped):
+
+1. **More friction for risky bypasses:** `warning` alerts unlock in one click ("I trust this email"); `danger` alerts need a second confirmation ("Yes, unlock links anyway"), while the safe choice stays prominent.
+2. **Side-by-side cue on the main card:** the real `From:` address shown next to `Links go to:` with the link destination domains (and any attachment names).
+3. **Feedback when a paused link is clicked:** a small toast explains that the link was paused and names its destination. Before this, a locked link silently did nothing, and users often assumed the page was broken and clicked "I trust this email" just to make it work.
+4. **Undo after trusting:** an "Email trusted" pill with an **Undo** button removes the fingerprint from `trustedEmails` and re-locks the links.
+
+## 5. Hardening the extension itself
+
+A security extension that runs inside hostile webmail pages and parses untrusted HTML must resist attacks on its own locks, UI, allowlist and model.
+
+### 5.1 Audit: bypasses found and fixed
+
+| File | Before | Bypass found | Fix shipped |
 |---|---|---|---|
-| [linkLock.ts](../extension/src/ui/linkLock.ts) + [extract.ts](../extension/src/adapters/extract.ts) | Stashes `href` on `a, area` and `action` on `form`; queries `a[href], area[href]`. | **1. `formaction` override:** Per MDN / HTML spec, `<button formaction="https://evil.example">` or `<input type="submit" formaction="...">` overrides `<form action>` and still submits even when `action` was removed from `<form>` (only `submit` listener prevents default if triggered via native submit, and `extract.ts` misses extracting `formaction` URLs for scoring!).<br>**2. SVG `xlink:href` & `<a ping>`:** Deprecated SVG 1.1 `<a xlink:href="...">` is ignored by `a[href]`; `<a ping="...">` sends background POST beacons on click.<br>**3. Keyboard / `keydown`:** Pressing `Enter` or `Space` on focused pseudo-interactive elements (`role="link"`, `[onclick]`) isn't captured by `click` in every handler.<br>**4. `MutationObserver` timing gap:** Links inserted dynamically between 400 ms debounced scans stay active until the next scan. | Stash/restore `formaction` (`data-ped-formaction`), `xlink:href` (`data-ped-xlink-href`), and `ping` (`data-ped-ping`); extract `form[action]`, `[formaction]`, and SVG links in `extract.ts`; block `keydown` (`Enter`/`Space`) on locked interactive controls; re-apply `lockLinks` immediately on DOM mutation when container already has `data-ped-locked`. |
-| [banner.ts](../extension/src/ui/banner.ts) | Closed shadow root (`attachShadow({ mode: 'closed' })`), `:host { font-family: ... }`, appended to `(doc.body ?? doc.documentElement)`. | **Inherited CSS leakage & DOM removal:** Without `:host { all: initial !important; ... }`, inherited page styles (`font-size`, `line-height`, `color`, `letter-spacing`, `visibility`, `text-transform`) bleed across the Shadow DOM boundary (per MDN). Mounting inside `doc.body` also lets webmail SPA re-renders wipe `#ped-banner-host`. | Set `:host { all: initial !important; display: block !important; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif !important; }` inside shadow `<style>` and mount directly on `doc.documentElement`! |
-| [allowlist.ts](../extension/src/allowlist.ts) + [content.ts](../extension/entrypoints/content.ts) | `trustedSenders` skips scanning whenever normalized `sender.address` matches an allowlisted address. | **Allowlist spoofing (documented in [docs/threat-model.md](threat-model.md)):** If an attacker sends via an unauthenticated server with a forged `From` header (e.g., Gmail shows `via suspicious-relay.my.id` or `unauthenticated` badge), auto-trusting `sender.address` skips scanning and unlocks links! | Extract unauthenticated / `via`-mismatch flag in adapters (`gmail.ts`: detect `via` domain `!==` sender domain or Gmail question-mark / `"couldn't verify"` indicator). Never honor `trustedSenders` (and warn explicitly!) when header authentication / `via` relay conflicts with the claimed sender address. |
-| [content.ts](../extension/entrypoints/content.ts) + [gmail.ts](../extension/src/adapters/gmail.ts) | Scans only `h2.hP` + body text + `a`/`area` links. | **iCloud collapsed sender & Gmail Spoofed DOM:** On iCloud Mail, collapsed header shows display name only until `"Details"` is expanded; on Gmail, an email could spoof `.gD` classes *inside* `div.a3s` (already guarded in `gmail.ts` via `!container.contains(el)`). | Keep strict `!container.contains(el)` guards across all adapters; optionally add a non-invasive tip in iCloud banner when `senderAddress === ''` (*"Click Details in iCloud to check sender address"*). |
+| [linkLock.ts](../extension/src/ui/linkLock.ts) and [extract.ts](../extension/src/adapters/extract.ts) | Locked `href` on `a`/`area` and `action` on `form`. | 1. **`formaction` override:** per MDN and the HTML spec, `<button formaction="...">` overrides `<form action>`, and `extract.ts` did not extract `formaction` URLs. 2. **SVG `xlink:href` and `<a ping>`:** SVG 1.1 links are missed by `a[href]`; `ping` sends a background POST on click. 3. **Keyboard:** `Enter`/`Space` on focused controls was not always caught. 4. **Timing gap:** links added between debounced scans stayed active. | Set aside and restore `formaction`, `xlink:href` and `ping`; extract `form[action]`, `[formaction]` and SVG links; block `Enter`/`Space`; re-lock immediately when the DOM changes inside a locked container. |
+| [banner.ts](../extension/src/ui/banner.ts) | Closed shadow root, mounted in `document.body`. | **Style leakage and removal:** without `:host { all: initial !important }`, inherited page styles leak into the Shadow DOM (per MDN), and webmail re-renders of `body` could remove the banner. | Added `:host { all: initial !important; ... }` and mounted the banner on `document.documentElement`. |
+| [allowlist.ts](../extension/src/allowlist.ts) and [content.ts](../extension/entrypoints/content.ts) | A trusted sender address skipped scanning. | **Allowlist spoofing:** a forged `From` sent through an unauthenticated server (Gmail shows a `via` relay or an unverified badge) could skip scanning and unlock links. | Adapters extract the unauthenticated and `via` signals (`gmail.ts`), and trusted senders are never honored (and a warning is shown) when authentication or the relay conflicts with the claimed sender. |
+| [content.ts](../extension/entrypoints/content.ts) and [gmail.ts](../extension/src/adapters/gmail.ts) | Scanned subject, body text and links. | **Hidden or spoofed headers:** iCloud Mail shows only the display name until "Details" is expanded; an email could copy Gmail's sender CSS classes inside the body. | Keep strict `!container.contains(el)` checks in every adapter. Optionally, add an iCloud tip when no sender address is visible. |
 
-### 5.2 Manifest, CSP, and Model Integrity Hardening ([wxt.config.ts](../extension/wxt.config.ts))
-- **Explicit MV3 `content_security_policy`:** Pin `extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none'"` in `wxt.config.ts` so extension pages (`popup.html`, future `warning.html`) forbid any inline scripts, `eval`, or external script loads.
-- **Zero runtime dependencies:** `extension/package.json` currently ships zero runtime `dependencies` (only build/test `devDependencies`). Maintaining zero runtime third-party packages eliminates npm supply-chain compromise in production bundles.
-- **SHA-256 verification of bundled ML model (T5/T6):** Verify `extension/public/model.json` against `model.sha256` at load time before evaluating JSON weights/trees, falling back cleanly to heuristics on mismatch.
+### 5.2 Manifest, CSP and model integrity ([wxt.config.ts](../extension/wxt.config.ts))
 
----
+- **Strict Content Security Policy** (shipped): `extension_pages: "script-src 'self'; object-src 'none'; base-uri 'none'"`, so extension pages (`popup.html`, `warning.html`) block inline scripts, `eval` and outside scripts.
+- **Zero runtime dependencies** (shipped): `extension/package.json` has only development dependencies, which removes npm supply-chain risk from the shipped bundle.
+- **SHA-256 check of the bundled model** (planned, T5/T6): verify `extension/public/model.json` against `model.sha256` before use, and fall back to the rules on a mismatch.
 
-## 6. Prioritized Implementation Matrix
+## 6. Prioritized implementation matrix
 
-| Priority | Improvement | Status | Security / UX Impact | New Permissions? | Privacy Impact | Bundle / Perf Impact | Files Touched |
+| Priority | Improvement | Status | Security / UX impact | New permissions? | Privacy impact | Size / speed | Files |
 |---|---|---|---|---|---|---|---|
-| **Tier 1 (Do First)** | **Harden `linkLock.ts` & `extract.ts`** (`formaction`, `xlink:href`, `ping`, `keydown`, instant re-lock on mutation) | **Done** (`f8063e9`) | Closes known HTML/SVG/formaction lock bypasses | None | None | `<0.5 KB`, `~0 ms` | [linkLock.ts](../extension/src/ui/linkLock.ts), [extract.ts](../extension/src/adapters/extract.ts) |
-| **Tier 1** | **Click-time destination inspector + local `warning.html` interstitial** (plus "I clicked a bad link" checklist) | **Done** (`67d43b7`) | Protects user **even on click** before leaving webmail | None | Domain-only (`getIntel`), URL stored only in `storage.session` | `~4–6 KB`, runs only on click | `extension/entrypoints/warning/`, [content.ts](../extension/entrypoints/content.ts), [linkLock.ts](../extension/src/ui/linkLock.ts) |
-| **Tier 1** | **Eliminate 400 ms race-to-click gate + paused-link click tooltip** | **Done** (`67d43b7`, `430d2d4`) | Stops fast clicks before scan completes; prevents users blindly clicking "Trust" | None | None | `~1 KB`, `~0 ms` | [content.ts](../extension/entrypoints/content.ts), [linkLock.ts](../extension/src/ui/linkLock.ts), [linkToast.ts](../extension/src/ui/linkToast.ts), [banner.ts](../extension/src/ui/banner.ts) |
-| **Tier 1** | **Banner CSS isolation (`all: initial`, mount on `documentElement`) + Opinionated 2-step `danger` unlock + Undo pill** | **Done** (`f8063e9`, `430d2d4`) | Prevents host CSS breakage; combats habituation per Akhawe & Felt | None | None | `~1.5 KB`, `~0 ms` | [banner.ts](../extension/src/ui/banner.ts) |
-| **Tier 2** | **LOTS static-host weak signal, shorteners, whole-card `<a>`, redirect unwrapping & `via` relay mismatch + allowlist auth guard** | **Partial** (`via` relay mismatch, allowlist auth guard, redirect unwrapping & shorteners in click-time guard shipped in `f8063e9`/`67d43b7`; LOTS static-host & whole-card `<a>` scoring parity remaining) | Catches LOTS kits, shorteners, `via` spoofs, and spoofed allowlist bypass | None | None (requires parity update in `features.py`) | `~1.5 KB`, `<0.2 ms` | [features.ts](../extension/src/features.ts), [features.py](../ml/src/phishml/features.py), [gmail.ts](../extension/src/adapters/gmail.ts), [sender.ts](../extension/src/sender.ts), [linkGuard.ts](../extension/src/linkGuard.ts) |
-| **Tier 2** | **Roadmap T1–T6 + T8 (Parity fixtures, time-split ML model `<200 KB`, SHAP/feature explainability)** | **Planned** | Calibrated `<=0.1%` FPR scoring instead of manual rule weights | None | Local-only inference + SHA-256 verification | `<200 KB` JSON, `<5 ms` | `ml/src/phishml/*`, `extension/src/model.ts`, `docs/results.md` |
-| **Tier 3** | **Compact local Bloom filter + opt-in post-click Browser Shield (`optional_permissions`: `webNavigation`, `downloads`)** | **Planned** | Catches multi-hop redirects and HTML/SVG smuggling downloads outside webmail | **Opt-in only** (`optional_*` = 0 install warnings) | Zero queries on Bloom misses; user chooses opt-in | `~60–150 KB` cached list | [wxt.config.ts](../extension/wxt.config.ts), [background.ts](../extension/entrypoints/background.ts), [popup/main.ts](../extension/entrypoints/popup/main.ts) |
-| **Tier 3** | **Native `BarcodeDetector` QR ("Quishing") detection** | **Planned** | Decodes QR phishing images locally without bundle bloat | None (optional CORS caveat) | 100% local canvas/bitmap | `~1 KB` code, async on image-heavy mails only | `extension/src/qr.ts`, [content.ts](../extension/entrypoints/content.ts) |
+| **Tier 1** | **Harden `linkLock.ts` and `extract.ts`** (`formaction`, `xlink:href`, `ping`, `keydown`, instant re-lock) | **Done** | Closes known HTML/SVG/`formaction` lock bypasses | None | None | <0.5 KB, ~0 ms | [linkLock.ts](../extension/src/ui/linkLock.ts), [extract.ts](../extension/src/adapters/extract.ts) |
+| **Tier 1** | **Click-time destination check and local `warning.html` page** (with the "clicked a bad link" checklist) | **Done** | Protects the user **at the click**, before leaving webmail | None | Domain only (`getIntel`); URL kept only in `storage.session` | ~4–6 KB, runs only on click | `extension/entrypoints/warning/`, [content.ts](../extension/entrypoints/content.ts), [linkLock.ts](../extension/src/ui/linkLock.ts) |
+| **Tier 1** | **400 ms race-to-click gate and paused-link toast** | **Done** | Stops fast clicks before the scan finishes; stops users clicking "Trust" just to make a link work | None | None | ~1 KB, ~0 ms | [content.ts](../extension/entrypoints/content.ts), [linkLock.ts](../extension/src/ui/linkLock.ts), [linkToast.ts](../extension/src/ui/linkToast.ts), [banner.ts](../extension/src/ui/banner.ts) |
+| **Tier 1** | **Banner style isolation, 2-step `danger` unlock and Undo pill** | **Done** | Prevents page CSS breakage; reduces habituation (Akhawe and Felt) | None | None | ~1.5 KB, ~0 ms | [banner.ts](../extension/src/ui/banner.ts) |
+| **Tier 2** | **LOTS static hosts, shorteners, whole-card `<a>`, redirect unwrapping, `via` relay mismatch and allowlist auth guard** | **Partial** (`via` mismatch, allowlist guard, shorteners and click-time redirect unwrapping shipped; LOTS static hosts and whole-card `<a>` remain) | Catches LOTS kits, shorteners, `via` spoofs and allowlist spoofing | None | None (needs a parity update in `features.py`) | ~1.5 KB, <0.2 ms | [features.ts](../extension/src/features.ts), [features.py](../ml/src/phishml/features.py), [gmail.ts](../extension/src/adapters/gmail.ts), [sender.ts](../extension/src/sender.ts), [linkGuard.ts](../extension/src/linkGuard.ts) |
+| **Tier 2** | **Roadmap T2–T6 and T8** (time-split model under 200 KB, explainable reasons) | **Planned** (T1 parity done) | Calibrated scoring at an FPR of 0.1% or less instead of hand-set weights | None | Local-only inference with SHA-256 check | <200 KB JSON, <5 ms | `ml/src/phishml/*`, `extension/src/model.ts`, `docs/results.md` |
+| **Tier 3** | **Local Bloom filter and opt-in post-click shield** (`optional_permissions`: `webNavigation`, `downloads`) | **Planned** | Catches redirect chains and smuggling downloads outside webmail | **Opt-in only** (no install warnings) | No queries on Bloom misses; user opts in | ~60–150 KB list | [wxt.config.ts](../extension/wxt.config.ts), [background.ts](../extension/entrypoints/background.ts), [popup/main.ts](../extension/entrypoints/popup/main.ts) |
+| **Tier 3** | **QR-code ("quishing") detection with `BarcodeDetector`** | **Planned** | Decodes QR phishing images locally with no bundle cost | None (CORS caveat) | Fully local | ~1 KB, async, image-heavy mail only | `extension/src/qr.ts` (new), [content.ts](../extension/entrypoints/content.ts) |
 
----
-
-## 7. Primary Sources Cited
+## 7. Primary sources cited
 
 1. **Chrome for Developers — Manifest V3 Permissions & `optional_host_permissions`:** [https://developer.chrome.com/docs/extensions/reference/api/permissions](https://developer.chrome.com/docs/extensions/reference/api/permissions) and [Declare permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions) (install-time warning minimization via `optional_permissions` / `optional_host_permissions`).
 2. **Chrome for Developers — `declarativeNetRequest` API:** [https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest) (blocking vs. redirecting host-permission requirements).

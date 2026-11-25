@@ -1,97 +1,79 @@
-# Browser Support & Store Publishing Guide (2025–2026)
+# Browser Support and Store Publishing
 
-**Phishing Email Detector** builds from a single TypeScript codebase using [WXT](https://wxt.dev) and Manifest V3 (MV3), with zero runtime third-party npm dependencies and strict Extension Pages CSP (`script-src 'self'; object-src 'none'; base-uri 'none';`).
+The extension is built from one TypeScript codebase with [WXT](https://wxt.dev) and Manifest V3 (MV3). It has no runtime third-party npm dependencies, and its extension pages use a strict Content Security Policy (`script-src 'self'; object-src 'none'; base-uri 'none';`). To load a development build, see [Load Unpacked in Your Browser](../README.md#load-unpacked-in-your-browser).
 
----
+## Browser support
 
-## Major Browser Support Matrix
+| Browser | Engine | How it is installed | Status |
+|---|---|---|---|
+| **Google Chrome** (desktop) | Chromium | [Chrome Web Store](https://chromewebstore.google.com) (version `0.1.0` submitted for review) or unpacked from `chrome-mv3/` | Supported (`npm run build:chrome`) |
+| **Microsoft Edge** | Chromium | Edge Add-ons (Microsoft Partner Center) | Supported (`npm run build:edge`) |
+| **Mozilla Firefox 142+** (desktop and Android) | Gecko | addons.mozilla.org (AMO) | Supported (`npm run build:firefox`) |
+| **Brave, Vivaldi, Arc** | Chromium | Chrome Web Store, or unpacked from `chrome-mv3/` | Compatible (Chrome build) |
+| **Opera** | Chromium | Opera Add-ons (`addons.opera.com`) or the Chrome Web Store | Compatible (Chrome build); separate store review |
+| **Apple Safari 16.4+** (macOS and iOS) | WebKit | Apple App Store, inside an Xcode wrapper app | Same code; needs the Xcode wrapper |
 
-| Browser | Engine | Manifest & API | Extension Store / Install Method | Current Build Status |
-|---|---|---|---|---|
-| **Google Chrome** (Desktop MV3) | Chromium / Blink | MV3 (`service_worker`, `storage.managed_schema`) | [Chrome Web Store](https://chromewebstore.google.com) (`0.1.0` in review; local `chrome-mv3/`) | Supported (`build:chrome`) |
-| **Microsoft Edge** | Chromium / Blink | MV3 (`service_worker`, `storage.managed_schema`) | Microsoft Partner Center — Edge Add-ons | Supported (`build:edge`) |
-| **Mozilla Firefox** (`142.0+` Desktop & Android) | Gecko | MV3 (`gecko.id`, `data_collection_permissions`) | addons.mozilla.org (AMO) (`0` errors, `0` warnings via `addons-linter`) | Supported (`build:firefox`) |
-| **Brave** | Chromium / Blink | MV3 Chromium bundle | Installs directly from **Chrome Web Store** or unpacked via `brave://extensions` | Compatible (Chrome MV3) |
-| **Vivaldi & Arc** | Chromium / Blink | MV3 Chromium bundle | Installs directly from **Chrome Web Store** or unpacked | Compatible (Chrome MV3) |
-| **Opera** | Chromium / Blink | MV3 Chromium bundle | Opera Add-ons (`addons.opera.com`) or CWS compatibility | Compatible (Chrome MV3; separate store review rules) |
-| **Apple Safari** (`16.4+` / macOS & iOS) | WebKit | MV3 (Xcode wrapper app) | Apple App Store via `xcrun safari-web-extension-converter` | Compatible codebase; Xcode wrapper required for App Store |
+## Store requirements
 
----
+### 1. Chrome Web Store
 
-## Store Policies & Submission Requirements (Updated for 2025–2026)
-
-### 1. Google Chrome Web Store
-
-- **Manifest & Architecture:** MV2 is retired; MV3 is mandatory (`"manifest_version": 3`, bundled JS only, zero remote code execution or `eval`).
-- **Privacy, "Limited Use", & "Strictly Necessary" Rules:**
-  - Data collected or transmitted must be strictly necessary for the extension's single, prominently stated purpose.
-  - Because default domain lookups transmit bare registrable domains off-device (and the user's IP to public RDAP/DNS resolvers), **in-UI transparency** in [popup/index.html](../extension/entrypoints/popup/index.html) displays both the data practice summary and a **Strict Local Mode (0 network lookups)** toggle right in the popup before lookups run.
-  - **Privacy Practices dashboard declarations** must match actual `fetch()` / `storage` calls and the public [Privacy Policy](privacy.md) verbatim.
-- **Listing Copy & Metadata (`Yellow Argon` compliance):**
-  - Never place comma-separated lists of website domains (`mail.google.com, outlook.live.com, ...`) inside the public **Detailed Description** — CWS automated scanners flag them as `Yellow Argon` keyword spam. Describe supported webmail services in plain prose in **Store listing**, and list explicit host patterns only in the private **Privacy practices** permission justifications.
-- **Required Store Assets & Account Setup:**
-  - One-time $5 Chrome Web Store developer registration fee and a **verified Publisher Contact Email** under **Account**.
-  - `128×128` PNG icon, at least one `1280×800` (or `640×400`) **24-bit RGB PNG** screenshot (alpha channel stripped), optional `440×280` small promo tile, and an HTTP 200 public Privacy Policy URL.
+- **MV3 only.** All code must be bundled in the package. No remote code and no `eval`.
+- **Data must be strictly necessary** for the extension's single, clearly stated purpose. Default lookups send bare domains (and the user's IP address) to public RDAP and DNS services, so the [popup](../extension/entrypoints/popup/index.html) summarizes this and offers the **Strict Local Mode (0 network lookups)** switch.
+- **Privacy Practices answers** must match the code's real `fetch()` and `storage` use and the public [privacy policy](privacy.md).
+- **No domain lists in the description.** Comma-separated webmail domains (`mail.google.com, outlook.live.com, ...`) in the public Detailed Description are flagged as keyword spam (rejection code "Yellow Argon"). Name the supported webmail in plain prose, and list host patterns only in the private permission justifications.
+- **Account and assets:** a one-time $5 developer fee, a verified publisher contact email, a 128×128 PNG icon, at least one 1280×800 (or 640×400) 24-bit RGB PNG screenshot with no alpha channel, an optional 440×280 promo tile, and a public privacy policy URL that returns HTTP 200.
 
 ### 2. Microsoft Edge Add-ons (Partner Center)
 
-- **Account & Registration:** Register in Microsoft Partner Center with a personal **Microsoft Account (MSA)** (`$0` registration fee).
-- **Package & Manifest:** Accepts the Edge Chromium MV3 ZIP (`extension/.output/phishing-email-detection-extension-*-edge.zip`), with `storage.managed_schema` supported for Intune / GPO Group Policy (`ExtensionSettings`). Strip Chrome-only `update_url` fields if manually ported (WXT already omits `update_url`).
-- **Required Store Assets:**
-  - **Store Logo:** Square **`300×300` PNG** required per locale (minimum `128×128`).
-  - **Screenshots:** `1280×800` or `640×480` PNGs (up to 6).
-  - **Optional Promo Tiles:** `440×280` (small) and `1400×560` (large) PNGs.
-- **Review Process & Pitfalls:**
-  - Single-purpose & Privacy disclosures in Partner Center must align with [docs/privacy.md](privacy.md).
-  - First submissions and updates with host permissions typically review in **1–7 business days**. Do **not** upload a new package while an existing submission is still in review, as doing so cancels/restarts the queue.
+- **Account:** register in Microsoft Partner Center with a personal Microsoft account (no fee).
+- **Package:** upload the Edge ZIP (`extension/.output/phishing-email-detection-extension-<version>-edge.zip`). Edge supports `storage.managed_schema` for Intune and Group Policy (`ExtensionSettings`). WXT does not add Chrome's `update_url`, so nothing needs to be removed.
+- **Assets:** a 300×300 PNG store logo for each language (minimum 128×128), up to 6 screenshots at 1280×800 or 640×480, and optional 440×280 and 1400×560 promo tiles.
+- **Review:** single-purpose and privacy answers must match [privacy.md](privacy.md). Reviews of new submissions or updates with host permissions usually take 1 to 7 business days. Do not upload a new package while one is still in review, because that cancels and restarts the queue.
 
-### 3. Mozilla Firefox Add-ons (AMO)
+### 3. Firefox Add-ons (AMO)
 
-- **Mandatory `data_collection_permissions` (effective Nov 3, 2025):**
-  - All new AMO extensions must declare `browser_specific_settings.gecko.data_collection_permissions` in `manifest.json` (`extension/wxt.config.ts`).
-  - Because **Phishing Email Detector** queries bare registrable website domains from opened emails and clicked external links against RDAP/DNS by default (unless the user or enterprise admin enables **Strict Local Mode**), Firefox declares:
-    ```json
-    "data_collection_permissions": {
-      "required": ["websiteContent"]
-    }
-    ```
-  - **Desktop & Android Version Interlock:** `strict_min_version` is set to `"142.0"` so Firefox Desktop (140+) and Firefox for Android (142+) both support `data_collection_permissions`, yielding **0 errors and 0 warnings** from `addons-linter --warnings-as-errors`.
-- **Mandatory `-sources.zip` Reproducible Build Review:**
-  - Because Vite / WXT bundles and minifies TypeScript, AMO requires uploading both the extension ZIP (`phishing-email-detection-extension-*-firefox.zip`) and the source archive (`phishing-email-detection-extension-*-sources.zip`) generated by `npm run zip:all`, with build commands documented in [CONTRIBUTING.md](../CONTRIBUTING.md).
-- **Compatibility Differences Handled in Code:**
-  - Firefox ignores Chromium `storage.managed_schema` in `manifest.json` (so `wxt.config.ts` emits `managed_schema` only on Chromium targets; Firefox reads `storage.managed` via native policy manifests wrapped in `try/catch` in `src/settings.ts`).
-  - `details::details-content` transitions are gated behind `@supports (interpolate-size: allow-keywords)` so Firefox toggles accordions instantly without discrete delay.
-  - Closing `warning.html` tries `browser.tabs.getCurrent()` + `browser.tabs.remove()` before `window.close()` / `history.back()`.
+- **`data_collection_permissions` (required for new extensions since November 3, 2025).** It is declared under `browser_specific_settings.gecko` in `extension/wxt.config.ts`. By default (unless the user or an admin turns on Strict Local Mode), the extension looks up bare domains from opened emails and clicked links, so it declares:
 
-### 4. Brave, Vivaldi & Arc (Chromium Store Ecosystem)
+  ```json
+  "data_collection_permissions": {
+    "required": ["websiteContent"]
+  }
+  ```
 
-- Brave, Vivaldi, and Arc have **no separate extension store** — they install directly from the **Chrome Web Store** once published, or load unpacked from `chrome-mv3/` during development (`brave://extensions` / `vivaldi://extensions`).
-- Brave's built-in tracking protection leaves extension service-worker DNS-over-HTTPS / RDAP fetches intact and does not interfere with closed Shadow DOM (`#ped-banner-host`, `#ped-toast-host`).
+- **Minimum version 142.0.** `strict_min_version` is `"142.0"` because Firefox desktop (140+) and Firefox for Android (142+) both support `data_collection_permissions` from that point.
+- **Source upload.** WXT bundles and minifies the code, so AMO needs both the extension ZIP (`phishing-email-detection-extension-<version>-firefox.zip`) and the source ZIP (`phishing-email-detection-extension-<version>-sources.zip`). `npm run zip:all` creates both. Build steps are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+- **Firefox differences handled in code:**
+  - Firefox ignores `storage.managed_schema` in `manifest.json`, so `wxt.config.ts` adds it only for Chromium builds. Firefox gets `storage.managed` values from its own enterprise policy setup, and `src/settings.ts` reads them inside `try/catch`.
+  - Accordion animations are wrapped in `@supports (interpolate-size: allow-keywords)`, so Firefox opens them instantly.
+  - Closing `warning.html` tries `browser.tabs.getCurrent()` and `browser.tabs.remove()` before falling back to `window.close()` and `history.back()`.
 
-### 5. Opera Add-ons (`addons.opera.com`)
+### 4. Brave, Vivaldi and Arc
 
-- Opera runs Chromium MV3 (the Edge/Chrome build is API-compatible), enforces a strict **"One Goal"** single-purpose rule, and **prohibits unreviewable minified/obfuscated bundles** unless full readable source code is provided or linked cleanly for moderation.
-- Manual review queues on Opera Add-ons often take weeks; users can alternatively install directly from the Chrome Web Store via Opera's extension support while Opera Add-ons moderation completes.
+These browsers have **no separate extension store**. They install from the Chrome Web Store once the extension is published there, or load the unpacked `chrome-mv3/` build during development (`brave://extensions`, `vivaldi://extensions`).
 
-### 6. Apple Safari Web Extensions (macOS / iOS App Store)
+### 5. Opera Add-ons
 
-- Safari supports MV3 content scripts, service workers, and `browser.storage.*` APIs, **but cannot be uploaded as a standalone `.zip`**.
-- **Packaging Path:**
-  1. Build the Chromium MV3 unpacked output (`cd extension && npm run build:chrome`).
-  2. Convert with Xcode's CLI tool on macOS:
-     ```sh
-     xcrun safari-web-extension-converter extension/.output/chrome-mv3 \
-       --app-name "Phishing Email Detector" \
-       --bundle-identifier io.github.jrdelt.phishing-email-detector \
-       --macos-only
-     ```
-  3. Requires an active **Apple Developer Program** membership, App Sandbox configuration, and **App Store Connect Privacy Nutrition Labels** matching [docs/privacy.md](privacy.md) (with **Strict Local Mode** supporting zero network egress).
+Opera runs Chromium MV3, and the Chrome and Edge build is API-compatible with it. Its store enforces a strict single-purpose ("One Goal") rule and **rejects minified bundles it cannot review** unless readable source code is provided or linked. Manual reviews can take weeks. Meanwhile, users can install from the Chrome Web Store through Opera's extension support.
 
----
+### 6. Apple Safari (macOS and iOS App Store)
 
-## Pre-Submission Technical Checks (`extension/`)
+Safari supports MV3 content scripts, service workers and `browser.storage.*`, but **cannot accept a plain ZIP**. To package it:
 
-1. Unpacked size budget: Chrome `~210 kB`, Edge `~210 kB`, Firefox `~210 kB` (limit: `<500 KB`).
-2. `npm run typecheck`, `npm test`, `npm run build:all`, `npm run zip:all` all green.
-3. `npx addons-linter .output/firefox-mv3 --warnings-as-errors` → **0 errors, 0 warnings**.
-4. Store copy and privacy forms match `CHROMEWEBSTORE.md` and `docs/privacy.md` with zero unused `host_permissions`.
+1. Build the Chromium version: `cd extension && npm run build:chrome`.
+2. On macOS, from the repo root, convert it with Xcode's command-line tool:
+
+   ```sh
+   xcrun safari-web-extension-converter extension/.output/chrome-mv3 \
+     --app-name "Phishing Email Detector" \
+     --bundle-identifier io.github.jrdelt.phishing-email-detector \
+     --macos-only
+   ```
+
+3. You need an **Apple Developer Program** membership, App Sandbox settings, and **App Store Connect privacy labels** that match [privacy.md](privacy.md). Strict Local Mode supports zero network traffic.
+
+## Checks before submitting (run in `extension/`)
+
+1. Each unpacked build is about 210 kB (limit: 500 KB).
+2. `npm run typecheck`, `npm test`, `npm run build:all` and `npm run zip:all` all pass.
+3. `npx addons-linter .output/firefox-mv3 --warnings-as-errors` reports 0 errors and 0 warnings.
+4. Store text and privacy forms match [CHROMEWEBSTORE.md](../CHROMEWEBSTORE.md) and [privacy.md](privacy.md), and every `host_permissions` entry is used.

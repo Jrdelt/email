@@ -4,103 +4,100 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-26d08c.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-ffd166.svg)](extension/wxt.config.ts)
 
-Privacy-first phishing email protection that runs locally in your browser. One TypeScript codebase ([WXT](https://wxt.dev), Manifest V3, `~210 kB` unpacked / `~78 kB` zipped, zero runtime npm dependencies) ships to **Chrome, Edge, and Firefox**, paired with a reproducible Python ML feature/training pipeline (`ml/`).
+Phishing Email Detector is a browser extension that warns you about phishing while you read webmail. It checks each email inside your browser, pauses risky links and attachments, and explains why. Email content never leaves your browser. It is built with TypeScript and [WXT](https://wxt.dev) as a Manifest V3 (the current extension format) extension for Chrome, Edge and Firefox. The `ml/` folder holds a Python pipeline for a planned machine-learning model.
 
-> **Project status:** Active development. Heuristic content scoring, sender/authentication checks, live domain intelligence, zero-permission link & attachment locking, and click-time destination protection are shipped (**T0–T1**). Calibrated time-split ML model training and in-extension JSON inference are tracked in [docs/ROADMAP.md](docs/ROADMAP.md) (**T2–T10**).
-
-## Preview
-
-| In-Page Phishing Alert & Locked Links | Click-Time Link Warning & Recovery Guide | Always-On Attachment Lock & Popup |
+| Phishing alert and paused links | Click-time link warning | Attachment lock and popup |
 |---|---|---|
-| ![Phishing warning banner in webmail pausing links and attachments](docs/assets/screenshot-1-phishing-banner-1280x800.png) | ![Click-time dangerous link interstitial and recovery steps](docs/assets/screenshot-2-link-stopped-1280x800.png) | ![Untrusted attachment lock toast and toolbar popup](docs/assets/screenshot-3-attachment-lock-popup-1280x800.png) |
+| ![Phishing warning banner in webmail pausing links and attachments](docs/assets/screenshot-1-phishing-banner-1280x800.png) | ![Click-time dangerous link warning page with recovery steps](docs/assets/screenshot-2-link-stopped-1280x800.png) | ![Untrusted attachment lock message and toolbar popup](docs/assets/screenshot-3-attachment-lock-popup-1280x800.png) |
 
-## Key Protections
+## What it does
 
-- **Local content & sender analysis:** Detects brand impersonation (including compact/camelCase forms like `PayPalSupport`), lookalike/punycode domains, link-text vs. destination mismatches, raw cloud-storage HTML lures, urgency pretexts, unauthenticated senders, and suspicious `via` relays—all inside the browser.
-- **Privacy-preserving domain intelligence & HIPAA Strict Local Mode:** Queries only validated registrable domains (never email bodies, sender addresses, or URL paths/queries) via RDAP, Cloudflare/Google DNS (`MX`, `SPF`, `DMARC`, `NXDOMAIN`), and URIBL—**or toggle Strict Local Mode** in the popup (or lock via enterprise Group Policy / Intune / `policies.json`) for **0 network requests** in HIPAA-regulated and air-gapped environments.
-- **Hardened link & form locking:** Any content, sender, or domain warning pauses `<a>`, `<area>`, `<a ping>`, SVG `href`/`xlink:href`, `<form action>`, and `[formaction]` elements inside untrusted messages (with DOM-clobbering-safe attribute stashing and instant MutationObserver re-locking) without blocking reading the email.
-- **Always-on attachment lock for untrusted mail:** Blocks webmail attachment shelves/cards and inline `download`/`data:`/`blob:` links on every untrusted email until explicitly trusted, flagging HTML/SVG smuggling, executables, scripts, macros, and double extensions locally by filename.
-- **Click-time destination guard & recovery:** Flushes pending scans if a user clicks within the initial 400 ms debounce window, blocks Grabify/IP-logger links (`urlto.me`, `grabify.link`) and shorteners, unwraps multi-hop tracking redirects (Safe Links, Google, Facebook, YouTube), checks destination domain age/reputation, and routes risky clicks to a local `warning.html` interstitial and calm recovery checklist.
-- **Usable, spoof-resistant trust controls:** Shows a `From` vs. `Links go to` comparison cue on the main card, requires 2-step confirmation to unlock `danger` alerts, disables `"Always trust sender"` when sender authentication fails, and remembers `"I trust this email"` as a one-way SHA-256 digest with one-click **Undo**.
+- **Spots phishing tricks:** brand impersonation (including squashed names like `PayPalSupport`), lookalike and punycode domains (look-alike or non-Latin letters), link text that differs from the real destination, pages hosted on raw cloud storage, and urgent "act now" wording.
+- **Checks the sender:** invalid or forged-looking addresses, a fake address in the display name, senders the webmail could not verify, and suspicious "via" relays.
+- **Looks up domains, never emails:** only the bare domain (like `example.com`) of the sender or a clicked link. RDAP (public domain-registration data) gives the domain's age. Cloudflare DNS gives mail records (MX, SPF, DMARC) and whether the domain exists (NXDOMAIN). URIBL (a public spam list) is checked through Cloudflare, with Google DNS as a fallback. No cookies or credentials are sent, and results are cached for 24 hours.
+- **Strict Local Mode:** for HIPAA (US health privacy law) and no-network setups. A switch in the popup turns off all lookups, so the extension makes zero network requests. IT can lock it on with Group Policy, Intune or Firefox `policies.json`.
+- **Pauses links and forms:** any warning locks links, image-map areas, "ping" trackers, SVG links, form actions and `formaction` buttons, including content added later. You can still read the email.
+- **Blocks attachments from untrusted emails:** always, until you trust the email or sender. File names are checked for HTML/SVG smuggling (web files that hide a fake page or download), executables, scripts, macro-enabled Office files and double extensions like `invoice.pdf.exe`. Inline `download`, `data:` and `blob:` links are blocked too.
+- **Checks links when you click:** blocks IP loggers like Grabify, flags URL shorteners, unwraps Microsoft Safe Links, Google, Facebook and YouTube redirects, and (when lookups are on) checks the destination's domain age and reputation. Risky clicks open a local warning page with recovery steps.
+- **Hard-to-fake trust:** trust is per exact address, never per domain or display name. "Always trust sender" is disabled for unverified senders and suspicious relays. High-risk alerts need a second click to unlock, and trusting an email can be undone.
 
-## Supported Browsers & Webmail Providers
+## Supported browsers and webmail
 
-Ships native Manifest V3 builds for **Chrome**, **Edge**, and **Firefox (142+)** — and runs seamlessly in **Brave**, **Vivaldi**, **Arc**, **Opera**, and **Safari** (via Xcode converter). See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md).
+Builds: **Chrome**, **Microsoft Edge** and **Firefox 142+**. Other Chromium browsers (Brave, Vivaldi, Arc, Opera) can use the Chrome build; Safari needs Apple's Xcode converter. See [browser support and stores](docs/browser-support-and-stores.md).
 
-| Provider | Host(s) | Status | Notes |
-|---|---|---|---|
-| **Gmail / Google Workspace** | `mail.google.com` | Supported | Zero Gmail OAuth scopes; `via`/unauthenticated header checks; attachment shelf & inline lock |
-| **Outlook Web / Microsoft 365** | `outlook.live.com`, `outlook.office.com`, `outlook.office365.com`, `outlook.cloud.microsoft` | Supported | Reading Pane + iframe extraction, Safe Links unwrapping, attachment card lock |
-| **Apple iCloud Mail** | `www.icloud.com/mail/*` (+ scoped `mail2` & `icloud-sandbox` frames) | Supported | Stateless `sender.url`-verified cross-frame coordination (never touches Photos/Drive) |
-| **Yahoo Mail** | `mail.yahoo.com` | Supported | Message body + iframe fallback extraction, compose exclusion, attachment tile lock |
-| **Proton Mail** | `mail.proton.me` | Supported | Read-only inspection on locally decrypted DOM (`content-iframe` / message body); PGP keys untouched |
+| Webmail | Web address |
+|---|---|
+| Gmail and Google Workspace | `mail.google.com` |
+| Outlook on the web and Microsoft 365 | `outlook.live.com`, `outlook.office.com`, `outlook.office365.com`, `outlook.cloud.microsoft` |
+| iCloud Mail | `www.icloud.com/mail` (plus its mail-only frames) |
+| Yahoo Mail | `mail.yahoo.com` |
+| Proton Mail | `mail.proton.me` |
 
-## Architecture
+The only permissions are `storage` and access to these sites. The extension reads the page you already see, so it needs no Google or Microsoft account access (OAuth scopes).
 
-```text
-Webmail tab (Gmail, Outlook Web, iCloud Mail, Yahoo Mail, Proton Mail)
-  └─ Content script (extension/entrypoints/content.ts)
-       ├─ Per-provider DOM adapter (extension/src/adapters/*)
-       ├─ Local scorer + sender/attachment checks (features.ts, sender.ts, attachments.ts)
-       ├─ 400 ms pending-scan click gate + DOM-clobbering-safe link/attachment locks
-       ├─ Click-time destination inspector (linkGuard.ts) -> session token -> warning.html
-       └─ Closed Shadow DOM banner & paused-action toast (extension/src/ui/*)
-            │
-            ▼
-  Background service worker / script (extension/entrypoints/background.ts)
-       ├─ Domain-only RDAP + DNS + URIBL lookups (disabled when Strict Local Mode is on)
-       ├─ Enterprise policy enforcement (managed_schema.json via storage.managed)
-       ├─ Ephemeral 1 h warning.html session store (browser.storage.session)
-       └─ Stateless sender.url-verified iCloud Mail frame relay
+## Load Unpacked in Your Browser
 
-Offline ML pipeline (ml/src/phishml/*, Python 3.11+ / uv)
-  └─ Exact feature parity with TypeScript verified via ml/tests/fixtures/parity.json
-```
-
-## Quick Start
-
-### Build & Run Tests
-
-Requires **Node.js 22+** and **Python 3.11+** with [`uv`](https://docs.astral.sh/uv/).
+You need [Node.js](https://nodejs.org) 22 or later. First run:
 
 ```sh
-# Browser extension
 cd extension
 npm ci
-npm run typecheck
-npm test
-npm run build:all      # Builds Chrome, Edge, and Firefox MV3 bundles (+ syncs ../chrome-mv3/)
-
-# Python ML pipeline & cross-language parity suite
-cd ../ml
-uv sync --locked
-uv run pytest
 ```
 
-### Load Unpacked in Your Browser
+- **Chrome** (and other Chromium browsers): run `npm run build`. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and select the `chrome-mv3/` folder at the repo root.
+- **Edge:** run `npm run build:edge`. Open `edge://extensions`, turn on **Developer mode**, click **Load unpacked**, and select `extension/.output/edge-mv3/`.
+- **Firefox 142+:** run `npm run build:firefox`. Open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…**, and select `extension/.output/firefox-mv3/manifest.json`. Firefox removes temporary add-ons when it restarts.
 
-- **Chrome / Brave / Chromium:** Run `npm run build` in `extension/`, open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the repo-root `chrome-mv3/` directory.
-- **Microsoft Edge:** Run `npm run build:edge` in `extension/`, open `edge://extensions`, enable **Developer mode**, click **Load unpacked**, and select `extension/.output/edge-mv3/`.
-- **Firefox (142+):** Run `npm run build:firefox` in `extension/`, open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…**, and select `extension/.output/firefox-mv3/manifest.json`.
+Then open an email in a supported webmail and click the toolbar icon to see the result.
 
-## Repository Layout
+## Build and test
 
-| Path | Description |
+You need Node.js 22+, Python 3.11+ and [uv](https://docs.astral.sh/uv/) (a Python project manager).
+
+```sh
+cd extension
+npm ci
+npm run typecheck   # TypeScript type check
+npm test            # unit tests (Vitest)
+npm run build:all   # Chrome, Edge and Firefox builds
+
+cd ../ml
+uv sync --locked
+uv run pytest       # includes TypeScript/Python feature parity tests
+```
+
+CI (GitHub Actions) runs these on every push and pull request, builds the store ZIPs (`npm run zip:all`), and fails if any build reaches 500 KB. Each build is about 210 kB today.
+
+## Privacy
+
+Email text, attachments and their names, sender addresses and full link addresses never leave your browser, and there are no accounts, analytics or developer-run servers. With Strict Local Mode off, the only network traffic is the domain-only lookups above: IANA and registry RDAP servers (with an `rdap.org` fallback), `cloudflare-dns.com`, `dns.google` and URIBL (queried through DNS), sent without credentials and cached for 24 hours. With Strict Local Mode on, there are no network requests at all. See the [privacy policy](docs/privacy.md), [HIPAA notes](docs/hipaa-and-compliance.md) and [threat model](docs/threat-model.md).
+
+## Project status
+
+Active development, version 0.1.0.
+
+- **Shipped:** rule-based scoring, sender checks, domain lookups, Strict Local Mode with enterprise policy, link/form/attachment locking, the click-time link check, adapters for all five webmail services (unit-tested on synthetic pages), and TypeScript/Python feature parity tests (T1).
+- **On the [roadmap](docs/ROADMAP.md):** train and evaluate a model on public data with a time-based split (T2–T4), run it in the extension from a small JSON file (T5–T6), verify adapters in live inboxes (T7), plain-language model reasons (T8), evasion tests and a speed benchmark (T9–T9b), and store release (T10).
+
+## Documentation
+
+| Document | What it covers |
 |---|---|
-| [`extension/`](extension/) | WXT + TypeScript Manifest V3 extension (`src/`, `entrypoints/`, `public/managed_schema.json`) |
-| `chrome-mv3/` | Gitignored unpacked Chrome MV3 build synced automatically on `npm run build` |
-| [`ml/`](ml/) | Python feature extraction, parity fixtures, and upcoming model training (`uv`) |
-| [`docs/`](docs/) | [browser-support-and-stores.md](docs/browser-support-and-stores.md), [hipaa-and-compliance.md](docs/hipaa-and-compliance.md), [privacy.md](docs/privacy.md), [threat-model.md](docs/threat-model.md), [ROADMAP.md](docs/ROADMAP.md), [research-defense-in-depth.md](docs/research-defense-in-depth.md) |
-| Community & Store | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md), [LICENSE](LICENSE) |
+| [Architecture](docs/architecture.md) | How it works: diagram and code map |
+| [Privacy policy](docs/privacy.md) | What is processed, stored and sent |
+| [HIPAA and compliance](docs/hipaa-and-compliance.md) | Strict Local Mode, enterprise policy, provider notes |
+| [Threat model](docs/threat-model.md) | Attacks covered and known limits |
+| [Browser support and stores](docs/browser-support-and-stores.md) | Browsers and store requirements |
+| [Defense-in-depth research](docs/research-defense-in-depth.md) | Research and sources behind the design |
+| [Roadmap](docs/ROADMAP.md) | Tasks and acceptance criteria |
+| [Contributing](CONTRIBUTING.md) | Setup, checks and project rules |
+| [Store listing](CHROMEWEBSTORE.md) | Chrome Web Store and Edge Add-ons listing text |
+| [Agent rules](AGENTS.md) | Rules for AI coding agents in this repo |
 
-## Privacy & HIPAA Compliance
+## Security
 
-Email bodies, attachment files/filenames, full URLs, paths, query strings, `#fragments`, and sender email addresses **never leave your browser**. In Standard Mode, only validated registrable domains are queried against public RDAP and DNS services (`credentials: 'omit'`, cached locally for 24 hours). For HIPAA-regulated or strict zero-egress organizations, **Strict Local Mode** (user-toggleable in the popup or locked by IT via `managed_schema.json`) disables 100% of external network lookups. See [docs/privacy.md](docs/privacy.md), [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md), and [docs/threat-model.md](docs/threat-model.md).
-
-## Authorized Use & Security
-
-Test only with emails and pages you own or have permission to analyze. To report a security or privacy vulnerability, please follow [SECURITY.md](SECURITY.md).
+Only test with emails and pages you own or may analyze. Report security or privacy problems privately as described in [SECURITY.md](SECURITY.md), not in public issues.
 
 ## License
 
-Released under the [MIT License](LICENSE).
+[MIT](LICENSE)
