@@ -9,10 +9,13 @@ import {
   inlineAttachmentsIn,
   isHidden,
   isNestedIn,
+  sameOriginFrameDocs,
   isUnsafeNode,
   linksIn,
 } from './extract';
 import type { AttachmentRef, WebmailAdapter } from './types';
+
+const BODY_IFRAMES = '[aria-label*="Reading Pane" i] iframe, iframe[title*="Message" i]';
 
 const HOSTS = new Set(['outlook.live.com', 'outlook.office.com', 'outlook.office365.com', 'outlook.cloud.microsoft']);
 
@@ -48,7 +51,7 @@ function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElemen
     if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
   }
   const results: { container: HTMLElement; hostEl: HTMLElement }[] = [];
-  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>('[aria-label*="Reading Pane" i] iframe, iframe[title*="Message" i]')) {
+  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(BODY_IFRAMES)) {
     if (isHidden(iframe)) continue;
     try {
       const body = iframe.contentDocument?.body;
@@ -246,6 +249,7 @@ export const outlook: WebmailAdapter = {
       };
     });
   },
+  frameDocs: (doc) => sameOriginFrameDocs(doc, BODY_IFRAMES),
   extract(doc) {
     const all = outlook.extractAll!(doc);
     return all[all.length - 1] ?? null;

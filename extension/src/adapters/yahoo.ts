@@ -7,10 +7,13 @@ import {
   inlineAttachmentsIn,
   isHidden,
   isNestedIn,
+  sameOriginFrameDocs,
   isUnsafeNode,
   linksIn,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
+
+const BODY_IFRAMES = '[data-test-id="message-view-body"] iframe, iframe[title*="message" i]';
 
 const BODY_SELECTORS = [
   '[data-test-id="message-view-body-content"]',
@@ -40,9 +43,7 @@ function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElemen
     if (valid.length > 0) return valid.map((el) => ({ container: el, hostEl: el }));
   }
   const results: { container: HTMLElement; hostEl: HTMLElement }[] = [];
-  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(
-    '[data-test-id="message-view-body"] iframe, iframe[title*="message" i]',
-  )) {
+  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(BODY_IFRAMES)) {
     if (isHidden(iframe)) continue;
     try {
       const body = iframe.contentDocument?.body;
@@ -172,6 +173,7 @@ export const yahoo: WebmailAdapter = {
       };
     });
   },
+  frameDocs: (doc) => sameOriginFrameDocs(doc, BODY_IFRAMES),
   extract(doc) {
     const all = yahoo.extractAll!(doc);
     return all[all.length - 1] ?? null;

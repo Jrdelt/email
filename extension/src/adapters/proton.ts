@@ -7,10 +7,13 @@ import {
   inlineAttachmentsIn,
   isHidden,
   isNestedIn,
+  sameOriginFrameDocs,
   isUnsafeNode,
   linksIn,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
+
+const CONTENT_IFRAMES = 'iframe[data-testid="content-iframe"], iframe[title*="Email content" i]';
 
 // Proton Mail decrypts messages locally in the browser and renders HTML inside a same-origin/srcdoc
 // content iframe ([data-testid="content-iframe"]) or body container ([data-testid="message-content:body"]).
@@ -33,9 +36,7 @@ const hasContent = (el: HTMLElement): boolean =>
 
 function findBodies(doc: Document): { container: HTMLElement; hostEl: HTMLElement }[] {
   const iframeHits: { container: HTMLElement; hostEl: HTMLElement }[] = [];
-  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(
-    'iframe[data-testid="content-iframe"], iframe[title*="Email content" i]',
-  )) {
+  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(CONTENT_IFRAMES)) {
     if (isHidden(iframe) || isCompose(iframe)) continue;
     try {
       const body = iframe.contentDocument?.body;
@@ -196,6 +197,7 @@ export const proton: WebmailAdapter = {
       };
     });
   },
+  frameDocs: (doc) => sameOriginFrameDocs(doc, CONTENT_IFRAMES),
   extract(doc) {
     const all = proton.extractAll!(doc);
     return all[all.length - 1] ?? null;

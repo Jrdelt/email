@@ -39,6 +39,20 @@ export function isNestedIn(el: Element, selectors: readonly string[]): boolean {
 export const MAX_HEADER_CHARS = 1000;
 export const ADDRESS_TOKEN_RE = /[^\s<>"'(),;@]+@[^\s<>"'(),;@]+\.[^\s<>"'(),;@]+/;
 
+/** Same-origin documents of the iframes matching `selector` (cross-origin ones are skipped). */
+export function sameOriginFrameDocs(doc: Document, selector: string): Document[] {
+  const out: Document[] = [];
+  for (const iframe of doc.querySelectorAll<HTMLIFrameElement>(selector)) {
+    try {
+      const d = iframe.contentDocument;
+      if (d) out.push(d);
+    } catch {
+      /* cross-origin iframe */
+    }
+  }
+  return out;
+}
+
 export const bodyText = (el: HTMLElement) => textOf(el).slice(0, MAX_BODY_CHARS);
 
 /** Parse a header string like `PayPal <a@b.com>`, `PayPal (a@b.com)`, or bare `a@b.com`. */

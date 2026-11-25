@@ -25,4 +25,9 @@ export interface WebmailAdapter {
   extract(doc: Document): ExtractedEmail | null;
   /** Return all currently expanded/visible emails in DOM order (top to bottom). */
   extractAll?(doc: Document): ExtractedEmail[];
+  /**
+   * Same-origin iframe documents that host (or will host) message bodies. The content script guards clicks in
+   * them and rescans when they change, since mutations inside an iframe never reach the top-level observer.
+   */
+  frameDocs?(doc: Document): Document[];
 }

@@ -779,8 +779,29 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     flushScan: () => scheduler.flush(),
   });
 
+  // Message bodies rendered in same-origin iframes (Proton, Outlook/Yahoo fallbacks): guard their clicks from
+  // the moment they appear and rescan when they change, since iframe mutations never reach the top observer.
+  const watchedFrameDocs = new WeakSet<Document>();
+  const watchFrames = () => {
+    for (const frameDoc of adapter?.frameDocs?.(document) ?? []) {
+      if (watchedFrameDocs.has(frameDoc)) continue;
+      watchedFrameDocs.add(frameDoc);
+      guardDoc(frameDoc);
+      const root = frameDoc.documentElement;
+      if (root) new MutationObserver(scheduler.schedule).observe(root, { childList: true, subtree: true });
+    }
+  };
+  const onTopMutation = () => {
+    watchFrames();
+    scheduler.schedule();
+  };
   const rootTarget = document.body ?? document.documentElement;
-  if (rootTarget) new MutationObserver(scheduler.schedule).observe(rootTarget, { childList: true, subtree: true });
+  if (rootTarget) new MutationObserver(onTopMutation).observe(rootTarget, { childList: true, subtree: true });
+  // An iframe that (re)loads gets a new document without any top-level DOM change.
+  document.addEventListener('load', (e) => {
+    if (e.target instanceof HTMLIFrameElement) onTopMutation();
+  }, true);
+  watchFrames();
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) scheduler.schedule();
   });
