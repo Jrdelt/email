@@ -26,13 +26,39 @@ import {
 import { decideBanner, removeBanner, showBanner } from '../src/ui/banner';
 import type { IntelState } from '../src/ui/details';
 import { isLocked, lockLinks, setLinkBlockedHandler, unlockLinks } from '../src/ui/linkLock';
-import { showPausedAttachmentToast } from '../src/ui/linkToast';
+import { showPausedAttachmentToast, showPausedLinkToast } from '../src/ui/linkToast';
 
 const DEBOUNCE_MS = 400;
 const MAX_THREAD_MESSAGES = 20;
 const MAX_SESSION_SET = 200;
 const CLICK_INTEL_TIMEOUT_MS = 700;
 const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
+
+/** True while this content script still talks to a live extension (false after an update or reload orphans it). */
+function extensionAlive(): boolean {
+  try {
+    return typeof browser?.runtime?.id === 'string' && browser.runtime.id.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** runtime.sendMessage that never throws: an orphaned content script's APIs throw synchronously. */
+function sendRuntime<T = unknown>(message: unknown): Promise<T | undefined> {
+  try {
+    return (browser.runtime.sendMessage(message) as Promise<T>).catch(() => undefined);
+  } catch {
+    return Promise.resolve(undefined);
+  }
+}
+
+function managedStorage(): typeof browser.storage.managed | undefined {
+  try {
+    return browser.storage?.managed;
+  } catch {
+    return undefined;
+  }
+}
 
 interface ScannableMsg {
   senderName: string;
@@ -225,6 +251,15 @@ function installClickGuard(opts: {
     const pending = opts.isPending();
     const initialRisk = analyzeLinkDestination(rawHref, hit.senderRegistrable, location.origin);
     if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
+    if (!extensionAlive()) {
+      // Orphaned by an extension update: the background can no longer check or open links for us,
+      // so let safe links navigate natively and keep risky ones paused until the tab is reloaded.
+      if (initialRisk.level === 'safe') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      showPausedLinkToast(ownerDocOf(a), initialRisk.host, a instanceof HTMLElement ? a : null);
+      return;
+    }
 
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -240,44 +275,38 @@ function installClickGuard(opts: {
       const latest = opts.findTarget(a) ?? hit;
       const risk = analyzeLinkDestination(rawHref, latest.senderRegistrable, location.origin);
       if (risk.level !== 'safe') {
-        void browser.runtime
-          .sendMessage({
-            type: 'openWarning',
-            href: risk.href,
-            host: risk.host,
-            registrable: risk.registrable,
-            level: risk.level,
-            reasons: risk.reasons,
-          })
-          .catch(() => {});
+        void sendRuntime({
+          type: 'openWarning',
+          href: risk.href,
+          host: risk.host,
+          registrable: risk.registrable,
+          level: risk.level,
+          reasons: risk.reasons,
+        });
         return;
       }
 
       if (risk.needsDomainCheck) {
-        const settings = await getSettings(browser.storage.local, browser.storage.managed);
+        const settings = await getSettings(browser.storage.local, managedStorage());
         if (!settings.strictLocalMode) {
           let timerId: ReturnType<typeof setTimeout> | undefined;
           const intel = await Promise.race([
-            (browser.runtime.sendMessage({ type: 'domainIntel', domain: risk.registrable }) as Promise<
-              DomainIntel | undefined
-            >).catch(() => undefined),
+            sendRuntime<DomainIntel>({ type: 'domainIntel', domain: risk.registrable }),
             new Promise<undefined>((resolve) => {
               timerId = setTimeout(() => resolve(undefined), CLICK_INTEL_TIMEOUT_MS);
             }),
           ]).finally(() => clearTimeout(timerId));
           const finalRisk = mergeLinkIntel(risk, intel);
           if (finalRisk.level !== 'safe') {
-            void browser.runtime
-              .sendMessage({
-                type: 'openWarning',
-                href: finalRisk.href,
-                host: finalRisk.host,
-                registrable: finalRisk.registrable,
-                level: finalRisk.level,
-                reasons: finalRisk.reasons,
-                intel,
-              })
-              .catch(() => {});
+            void sendRuntime({
+              type: 'openWarning',
+              href: finalRisk.href,
+              host: finalRisk.host,
+              registrable: finalRisk.registrable,
+              level: finalRisk.level,
+              reasons: finalRisk.reasons,
+              intel,
+            });
             return;
           }
         }
@@ -293,7 +322,7 @@ function installClickGuard(opts: {
         location.assign(rawHref);
         return;
       }
-      void browser.runtime.sendMessage({ type: 'openSafeLink', href: rawHref, active: activeTab }).catch(() => {});
+      void sendRuntime({ type: 'openSafeLink', href: rawHref, active: activeTab });
     })();
   };
 
@@ -322,9 +351,10 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
 }) {
   const { kv, messages, trustedThisSession, dismissed, isStale, onEvaluated, applyLocks, unlockAll, unlockMatching } = opts;
   const [settings, trustedSendersList, trustedEmailsList, prelim] = await Promise.all([
-    getSettings(kv, browser.storage.managed),
-    listTrusted(kv),
-    listTrustedEmails(kv),
+    getSettings(kv, managedStorage()),
+    // Storage reads fail after an extension update orphans this script: fail closed (no trust) and keep scanning.
+    listTrusted(kv).catch((): string[] => []),
+    listTrustedEmails(kv).catch((): string[] => []),
     Promise.all(
       messages.map(async (email) => {
         const attNames = attachmentNamesOf(email);
@@ -406,18 +436,16 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     );
 
     const primaryBanner = primaryEntry.banner;
-    browser.runtime
-      .sendMessage({
-        type: 'verdict',
-        payload: {
-          verdict: primaryEntry.item.verdict,
-          sender: primaryEntry.item.sender,
-          intel: primaryEntry.intel,
-          attachments: primaryEntry.item.trusted ? undefined : primaryEntry.item.attAnalysis,
-          trusted: primaryEntry.item.trusted,
-        },
-      })
-      .catch(() => {});
+    void sendRuntime({
+      type: 'verdict',
+      payload: {
+        verdict: primaryEntry.item.verdict,
+        sender: primaryEntry.item.sender,
+        intel: primaryEntry.intel,
+        attachments: primaryEntry.item.trusted ? undefined : primaryEntry.item.attAnalysis,
+        trusted: primaryEntry.item.trusted,
+      },
+    });
 
     if (!primaryBanner) {
       setAttachmentBlockedHandler(document, null);
@@ -457,17 +485,15 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           setAttachmentBlockedHandler(document, null);
           setLinkBlockedHandler(document, null);
           unlockAll(evaluated.map((e) => e.item.email));
-          browser.runtime
-            .sendMessage({
-              type: 'verdict',
-              payload: {
-                verdict: { score: 0, level: 'safe', reasons: [] },
-                sender: primaryEntry.item.sender,
-                intel: primaryEntry.intel,
-                trusted: true,
-              },
-            })
-            .catch(() => {});
+          void sendRuntime({
+            type: 'verdict',
+            payload: {
+              verdict: { score: 0, level: 'safe', reasons: [] },
+              sender: primaryEntry.item.sender,
+              intel: primaryEntry.intel,
+              trusted: true,
+            },
+          });
           await trustEmails(kv, evaluated.map((e) => e.item.hash));
         },
         onUndoUnlock: async () => {
@@ -522,15 +548,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   if (!settings.strictLocalMode && intelByDomain.size > 0) {
     void Promise.all(
       [...intelByDomain.keys()].map(async (domain) => {
-        try {
-          const res = (await browser.runtime.sendMessage({ type: 'domainIntel', domain })) as
-            | DomainIntel
-            | null
-            | undefined;
-          intelByDomain.set(domain, res === null ? 'offline' : (res ?? 'unavailable'));
-        } catch {
-          intelByDomain.set(domain, 'unavailable');
-        }
+        const res = await sendRuntime<DomainIntel | null>({ type: 'domainIntel', domain });
+        intelByDomain.set(domain, res === null ? 'offline' : (res ?? 'unavailable'));
       }),
     ).then(() => {
       if (!isStale()) render();
@@ -562,7 +581,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       lastKey = '';
       ++token;
       removeBanner();
-      browser.runtime.sendMessage({ type: 'verdict', payload: null }).catch(() => {});
+      void sendRuntime({ type: 'verdict', payload: null });
       return;
     }
 
@@ -707,9 +726,7 @@ function runICloudSandbox() {
       desiredAttachmentsLocked = false;
       if (force || lastSig !== 'inactive') {
         lastSig = 'inactive';
-        void browser.runtime
-          .sendMessage({ type: 'icloudBody', active: false, body: '', links: [], attachmentNames: [] })
-          .catch(() => {});
+        void sendRuntime({ type: 'icloudBody', active: false, body: '', links: [], attachmentNames: [] });
       }
       return;
     }
@@ -717,9 +734,7 @@ function runICloudSandbox() {
     const sig = JSON.stringify({ active, body, links, attachmentNames });
     if (force || sig !== lastSig) {
       lastSig = sig;
-      void browser.runtime
-        .sendMessage({ type: 'icloudBody', active: true, body, links, attachmentNames })
-        .catch(() => {});
+      void sendRuntime({ type: 'icloudBody', active: true, body, links, attachmentNames });
     }
     if (desiredLocked) lockLinks(container);
     syncInlineAttachmentLocks(attachments, desiredAttachmentsLocked);
@@ -766,9 +781,7 @@ function runICloudSandbox() {
     if (!document.hidden) scheduler.schedule();
   });
   window.addEventListener('pagehide', () => {
-    void browser.runtime
-      .sendMessage({ type: 'icloudBody', active: false, body: '', links: [], attachmentNames: [] })
-      .catch(() => {});
+    void sendRuntime({ type: 'icloudBody', active: false, body: '', links: [], attachmentNames: [] });
   });
   scheduler.schedule();
 }
@@ -785,7 +798,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
 
   const setFramesLocked = (frameIds: number[], locked: boolean, attachmentsLocked: boolean) => {
     if (frameIds.length > 0) {
-      void browser.runtime.sendMessage({ type: 'icloudLock', locked, attachmentsLocked, frameIds }).catch(() => {});
+      void sendRuntime({ type: 'icloudLock', locked, attachmentsLocked, frameIds });
     }
   };
   const frameIdsOf = (list: { frameId?: number }[]) =>
@@ -797,7 +810,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
     const headerIds = headers.map((h) => h.id).join('|');
     if (headerIds !== lastHeaderIds) {
       lastHeaderIds = headerIds;
-      if (headers.length > 0) void browser.runtime.sendMessage({ type: 'icloudPing' }).catch(() => {});
+      if (headers.length > 0) void sendRuntime({ type: 'icloudPing' });
     }
 
     const messages = combineICloudThread(headers, sandboxBodies).slice(-MAX_THREAD_MESSAGES);
@@ -811,7 +824,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       lastKey = '';
       ++token;
       removeBanner();
-      browser.runtime.sendMessage({ type: 'verdict', payload: null }).catch(() => {});
+      void sendRuntime({ type: 'verdict', payload: null });
       return;
     }
 
@@ -921,7 +934,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       scheduler.schedule();
     }
   });
-  void browser.runtime.sendMessage({ type: 'icloudPing' }).catch(() => {});
+  void sendRuntime({ type: 'icloudPing' });
   scheduler.schedule();
 }
 
