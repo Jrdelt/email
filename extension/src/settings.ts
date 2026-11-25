@@ -72,10 +72,19 @@ export async function setStrictLocalMode(
 ): Promise<PrivacySettings> {
   const current = await getSettings(localKV, managedKV);
   if (current.managedLocked) return current;
+  // Keep the user's own disableLocalReports, never the managed-merged value: otherwise an IT policy would be
+  // copied into local storage and outlive its removal.
+  let localNoReports = false;
+  try {
+    const raw = (await localKV.get(SETTINGS_KEY))[SETTINGS_KEY] as { disableLocalReports?: unknown } | undefined;
+    localNoReports = raw?.disableLocalReports === true;
+  } catch {
+    // Default when storage read fails.
+  }
   await localKV.set({
     [SETTINGS_KEY]: {
       strictLocalMode: Boolean(enabled),
-      disableLocalReports: current.disableLocalReports,
+      disableLocalReports: localNoReports,
     },
   });
   return { ...current, strictLocalMode: Boolean(enabled) };

@@ -71,3 +71,14 @@ describe('privacy settings & managed policy', () => {
     expect((await local.get('domainIntelCache')).domainIntelCache).toEqual({});
   });
 });
+
+describe('setStrictLocalMode keeps managed policy out of local storage', () => {
+  it('does not persist a managed disableLocalReports when the user toggles strict mode', async () => {
+    const local = memoryKV();
+    const managed = { get: async (k: string) => (k === 'disableLocalReports' ? { disableLocalReports: true } : {}) };
+    await setStrictLocalMode(local, true, managed);
+    const afterPolicyRemoved = await getSettings(local, { get: async () => ({}) });
+    expect(afterPolicyRemoved.strictLocalMode).toBe(true);
+    expect(afterPolicyRemoved.disableLocalReports).toBe(false);
+  });
+});
