@@ -14,7 +14,7 @@ Every recommendation below must respect the hard guarantees established in [AGEN
 | Constraint | Current Budget / Rule | Implication for New Protections |
 |---|---|---|
 | **Privacy** | Zero email bodies, full URLs, or sender email addresses leave the browser. Only validated registrable domains are queried (`credentials: 'omit'`, `referrerPolicy: 'no-referrer'`, 24 h cache). | Post-click URL checks must either run locally or query only the destination **registrable domain** (or privacy-preserving local Bloom filters / hash prefixes). |
-| **Performance** | `<10 ms` scoring per email; `~0` idle CPU; `<10 MB` RAM; `<500 KB` total package (currently `~176 kB`); `<200 KB` model JSON; no ONNX/TF.js. | Avoid synchronous image decoding loops on every DOM mutation; keep threat lists compact (e.g., compact Bloom filter or prefix table) and run heavy click-time checks only on actual user clicks. |
+| **Performance** | `<10 ms` scoring per email; `~0` idle CPU; `<10 MB` RAM; `<500 KB` total package (currently `~188 kB`); `<200 KB` model JSON; no ONNX/TF.js. | Avoid synchronous image decoding loops on every DOM mutation; keep threat lists compact (e.g., compact Bloom filter or prefix table) and run heavy click-time checks only on actual user clicks. |
 | **Permissions** | Only `storage` + `WEBMAIL_MATCHES` in `extension/src/hosts.ts` at install time. | Any browser-wide navigation or download shield beyond webmail tabs must use MV3 `optional_permissions` / `optional_host_permissions` requested **only** if the user opts in. |
 | **Precision** | Evaluate at `<=0.1%` false-positive rate (FPR) to avoid warning fatigue. | Compound weak signals (e.g., free hosting alone) rather than triggering `danger` alerts on single benign patterns. |
 
