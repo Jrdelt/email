@@ -1,5 +1,5 @@
 import { cleanAttachmentName } from '../attachments';
-import { XLINK_NS, closestEl, getAttr, getAttrNS, hasAttr, isFormEl, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
+import { XLINK_NS, closestEl, getAttr, getAttrNS, hasAttr, isFormEl, rawLinkTarget, ownerDocOf, resolveAgainstBase, resolveAnchorHref, tagOf, textOf } from '../dom';
 import { INVISIBLE_RE, safePercentDecode, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
@@ -269,6 +269,13 @@ const animValues = (anim: Element): Set<string> =>
 export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean } {
   const base = ownerDocOf(el).baseURI || 'https://invalid.local';
   const out: Link[] = [];
+  // Newsletters repeat the same href many times; unwrapping parses a URL, so do it once per distinct href.
+  const unwrapped = new Map<string, string>();
+  const unwrapCached = (href: string): string => {
+    let v = unwrapped.get(href);
+    if (v === undefined) unwrapped.set(href, (v = unwrapRedirectUrl(href)));
+    return v;
+  };
   const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
   const nodes = [...el.querySelectorAll(sel)];
   // Past the examination bound, look at the first and last nodes and report truncation (fail closed): thousands
@@ -297,7 +304,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
       // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
-      if (href) out.push({ text: capText(textOf(node), MAX_LINK_TEXT_CHARS), href: unwrapRedirectUrl(href) });
+      if (href) out.push({ text: capText(textOf(node), MAX_LINK_TEXT_CHARS), href: unwrapCached(href) });
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? '';
       const href = resolveAgainstBase(raw, base);
@@ -343,6 +350,25 @@ function filenameFromHref(rawHref: string, base: string): string {
   }
 }
 
+// A URL whose scheme parses as data: or blob:. The URL parser strips leading C0 controls and spaces and removes
+// tabs/newlines anywhere, so ' da\nta:' is data: too. Anchored and linear: it stops at the first other character.
+const DOWNLOAD_SCHEME_RE =
+  /^[\x00-\x20]*(?:d[\t\n\r]*a[\t\n\r]*t[\t\n\r]*a|b[\t\n\r]*l[\t\n\r]*o[\t\n\r]*b)[\t\n\r]*:/i;
+
+/**
+ * Cheap pre-check: could this link's navigation target be a data:/blob: URL? Mirrors resolveAnchorHref's order
+ * (animated value, href, xlink:href, then the lock stashes when nothing live remains) and may over-match, never miss.
+ */
+function mayBeDownloadScheme(el: Element): boolean {
+  const live = rawLinkTarget(el);
+  if (live) return DOWNLOAD_SCHEME_RE.test(live);
+  for (const attr of ['data-ped-href', 'data-ped-att-href', 'data-ped-xlink-href', 'data-ped-att-xlink-href']) {
+    const v = getAttr(el, attr);
+    if (v !== null && DOWNLOAD_SCHEME_RE.test(v)) return true;
+  }
+  return false;
+}
+
 /**
  * Extract inline download/data:/blob: links inside an email body container: `<a>` and `<area>`, SVG `<a>`
  * with `xlink:href`, and stashed (locked) attributes. The scheme is read from the parsed URL, so case,
@@ -368,6 +394,8 @@ export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
 
   for (const el of container.querySelectorAll<HTMLElement>('a, area')) {
     const dl = getAttr(el, 'download') ?? getAttr(el, 'data-ped-att-download');
+    // Resolving every href parses a URL; only data:/blob: schemes (in any spelling the URL parser accepts) matter.
+    if (dl === null && !mayBeDownloadScheme(el)) continue;
     const href = resolveAnchorHref(el, true);
     if (dl === null && !isDownloadUrl(href)) continue;
     const dlAttr = dl ?? '';

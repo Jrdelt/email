@@ -208,3 +208,13 @@ describe('filler cannot hide content past the work caps', () => {
     expect(analyzeSender(parsed!.senderName, parsed!.senderAddress, []).warnings.join(' ')).toMatch(/PayPal/);
   });
 });
+
+describe('inline download pre-filter', () => {
+  it('finds every spelling the URL parser treats as data:/blob: and skips ordinary links', () => {
+    const spellings = [' data:text/html,x', '\tda\nta:x', 'DATA:x', '\u0001blob:https://a/1', 'b\rl\to\nb:https://a/2', 'data\t:x'];
+    for (const s of spellings) expect(new URL(s, 'https://mail.example/').protocol).toMatch(/^(data|blob):$/);
+    const html = spellings.map((s, i) => `<a id="d${i}" href="${s.replace(/\t/g, '&#9;').replace(/\n/g, '&#10;').replace(/\r/g, '&#13;').replace(/\u0001/g, '&#1;')}">f</a>`).join('');
+    const found = inlineAttachmentsIn(body(`${html}<a href="https://x.example/data:y">n</a><a href="/blob:z">n</a><a href="mailto:a@b.c">m</a>`));
+    expect(found.map((a) => a.element.id)).toEqual(spellings.map((_, i) => `d${i}`));
+  });
+});
