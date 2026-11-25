@@ -4,8 +4,13 @@ export type ICloudFrameRole = 'shell' | 'app' | 'sandbox' | null;
 
 export const ICLOUD_APP_MATCHES = ['https://www.icloud.com/applications/mail2/*'];
 export const ICLOUD_SANDBOX_MATCHES = ['https://*.icloud-sandbox.com/applications/mail2-message/*'];
+/** The iCloud Mail page itself: the extension never runs there, but needs its URL (popup, tab checks). */
+export const ICLOUD_SHELL_MATCHES = ['https://www.icloud.com/mail/*'];
+/** iCloud's mail app and message iframes: the content script must run in these subframes. */
+export const ICLOUD_FRAME_MATCHES = [...ICLOUD_APP_MATCHES, ...ICLOUD_SANDBOX_MATCHES];
 
-export const WEBMAIL_MATCHES = [
+/** Webmail that renders in the top frame: the content script runs there only (it reaches message iframes itself). */
+export const STANDARD_WEBMAIL_MATCHES = [
   'https://mail.google.com/*', // Gmail
   'https://outlook.live.com/*', // Outlook.com
   'https://outlook.office.com/*', // Microsoft 365
@@ -13,16 +18,13 @@ export const WEBMAIL_MATCHES = [
   'https://outlook.cloud.microsoft/*', // Microsoft 365 (current Outlook Web)
   'https://mail.yahoo.com/*', // Yahoo Mail
   'https://mail.proton.me/*', // Proton Mail
-  'https://www.icloud.com/mail/*', // iCloud Mail
-  ...ICLOUD_APP_MATCHES,
-  ...ICLOUD_SANDBOX_MATCHES,
 ];
 
-// Exact hosts of the non-iCloud match patterns, derived so a host added above is accepted by the background too.
+export const WEBMAIL_MATCHES = [...STANDARD_WEBMAIL_MATCHES, ...ICLOUD_SHELL_MATCHES, ...ICLOUD_FRAME_MATCHES];
+
+// Exact hosts of the standard match patterns, derived so a host added above is accepted by the background too.
 const STANDARD_WEBMAIL_HOSTS = new Set(
-  WEBMAIL_MATCHES.map((p) => p.match(/^https:\/\/([^/*]+)\/\*$/)?.[1]).filter(
-    (h): h is string => h !== undefined && h !== 'www.icloud.com',
-  ),
+  STANDARD_WEBMAIL_MATCHES.map((p) => p.match(/^https:\/\/([^/*]+)\/\*$/)?.[1]).filter((h): h is string => h !== undefined),
 );
 
 /** Identify which iCloud Mail frame a URL belongs to, or null if not iCloud Mail. */

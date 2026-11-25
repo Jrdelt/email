@@ -1278,6 +1278,8 @@ function runICloudApp(kv: typeof browser.storage.local) {
   scheduler.schedule();
 }
 
+// The production manifest splits this entry by frame (wxt.config.ts build hook): top frame only on standard webmail,
+// all frames on iCloud's app/message frames. The early returns below keep any other injection a no-op.
 export default defineContentScript({
   matches: WEBMAIL_MATCHES,
   allFrames: true,
