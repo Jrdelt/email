@@ -1,5 +1,6 @@
 import { cleanAttachmentName } from '../attachments';
-import { isValidDomain } from '../domain';
+import { KNOWN_ESP_DOMAINS } from '../brands';
+import { isValidDomain, registrableDomain } from '../domain';
 import {
   ADDRESS_TOKEN_RE,
   MAX_ATTACHMENTS,
@@ -18,6 +19,9 @@ const extractEmailText = (raw: string): string => raw.slice(0, MAX_HEADER_CHARS)
 const cleanHost = (raw: string): string =>
   raw.trim().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '').toLowerCase();
 
+const DISPLAY_NAME_SEL = 'span.gD:not(.go), [name]';
+const VIA_LABEL_RE = /^via\s+([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)/i;
+
 function extractViaDomain(scope: Document | HTMLElement, container: HTMLElement): string | undefined {
   for (const anchor of scope.querySelectorAll<HTMLElement>('a.acP, a[href*="support.google.com/mail/answer/1311182"]')) {
     if (container.contains(anchor)) continue;
@@ -27,15 +31,17 @@ function extractViaDomain(scope: Document | HTMLElement, container: HTMLElement)
     const candidate = cleanHost(afterVia);
     if (candidate && isValidDomain(candidate)) return candidate;
   }
-  for (const el of scope.querySelectorAll<HTMLElement>('span.go, h3.iw')) {
-    if (container.contains(el)) continue;
-    const m = (el.textContent ?? '').match(
-      /\bvia\s+([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)/i,
-    );
+  // Only Gmail's own "via <relay>" label counts: never h3.iw as a whole or the display-name chip, whose text
+  // the sender controls ("Boss via sendgrid.net" must not hide the real relay).
+  const candidates: string[] = [];
+  for (const el of scope.querySelectorAll<HTMLElement>('span.go')) {
+    if (container.contains(el) || el.closest(DISPLAY_NAME_SEL) || el.querySelector(DISPLAY_NAME_SEL)) continue;
+    const m = (el.textContent ?? '').trim().match(VIA_LABEL_RE);
     const candidate = cleanHost(m?.[1] ?? '');
-    if (candidate && isValidDomain(candidate)) return candidate;
+    if (candidate && isValidDomain(candidate) && !candidates.includes(candidate)) candidates.push(candidate);
   }
-  return undefined;
+  // More than one relay label means one is spoofed: fail closed by reporting a non-ESP relay if there is one.
+  return candidates.find((c) => !KNOWN_ESP_DOMAINS.has(registrableDomain(c))) ?? candidates[0];
 }
 
 function isUnauthenticated(scope: Document | HTMLElement, container: HTMLElement): boolean {

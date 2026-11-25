@@ -87,3 +87,16 @@ describe('address parsing stays linear on attacker text', () => {
     expect(parseSenderHeader('From: billing@shop.example')).toEqual({ senderName: '', senderAddress: 'billing@shop.example' });
   });
 });
+
+describe('gmail via relay', () => {
+  it('ignores "via <ESP>" written into the display name and keeps the real relay', async () => {
+    const { gmail } = await import('./gmail');
+    document.body.innerHTML = `
+      <div class="adn"><h3 class="iw"><span class="qu">
+        <span class="gD"><span>Boss via sendgrid.net</span></span>
+        <span class="go gD">boss@company.example</span>
+        <span class="go">via 12.relay.evil.example</span>
+      </span></h3><div class="a3s">Please wire the payment today.</div></div>`;
+    expect(gmail.extract(document)!.viaDomain).toBe('12.relay.evil.example');
+  });
+});
