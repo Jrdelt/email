@@ -52,6 +52,11 @@ export default defineBackground(() => {
 
   browser.tabs?.onRemoved?.addListener((tabId: number) => {
     void browser.storage.session?.remove?.(`tab:${tabId}`).catch(() => {});
+    void pruneOldWarnings(Date.now());
+  });
+  // A tab that starts loading a new page drops its stored verdict; webmail content scripts re-send theirs.
+  browser.tabs?.onUpdated?.addListener((tabId: number, changeInfo: { status?: string }) => {
+    if (changeInfo.status === 'loading') void browser.storage.session?.remove?.(`tab:${tabId}`)?.catch(() => {});
   });
 
   const handleMessage = (

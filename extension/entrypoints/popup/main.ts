@@ -3,6 +3,7 @@ import type { AttachmentAnalysis } from '../../src/attachments';
 import type { Verdict } from '../../src/features';
 import { clearReports, listReports } from '../../src/feedback';
 import type { SenderInfo } from '../../src/sender';
+import { isSupportedWebmailUrl } from '../../src/hosts';
 import { clearAllLocalData, getSettings, setStrictLocalMode } from '../../src/settings';
 import { deriveStatusSummary } from '../../src/ui/banner';
 import { type IntelState, renderITDetailsContent, renderSimpleDetails } from '../../src/ui/details';
@@ -23,7 +24,8 @@ $('logo').append(createLogoSvg(document, 32));
 
 async function renderVerdict() {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) return;
+  // tab.url is only visible for host-permitted (webmail) pages; anywhere else, don't show an old email's verdict.
+  if (tab?.id === undefined || !isSupportedWebmailUrl(tab.url)) return;
   const key = `tab:${tab.id}`;
   const st = (await browser.storage.session?.get?.(key))?.[key] as TabState | undefined;
   if (!st?.verdict) return;
