@@ -298,3 +298,22 @@ describe('icloudFrameRole matches only the manifest paths', () => {
     expect(icloudFrameRole(new URL('https://www.icloud.com/mail/'))).toBe('shell');
   });
 });
+
+describe('combineICloudThread pairs by frame id when available', () => {
+  it('keeps each body with its own card even when frames reported in reverse order', () => {
+    document.body.innerHTML = `
+      <div id="message-iframe-1"><div class="conversation-list-item"><span class="contact-token" title="colleague@corp.example">C</span><h2>Hi</h2><iframe id="f1"></iframe></div></div>
+      <div id="message-iframe-2"><div class="conversation-list-item"><span class="contact-token" title="phish@evil.example">P</span><h2>Hi</h2><iframe id="f2"></iframe></div></div>`;
+    const headers = extractICloudHeaders(document);
+    const bodies = new Map([
+      [9, { body: 'phishing body', links: [{ text: 'x', href: 'http://192.168.4.20/' }] }],
+      [7, { body: 'colleague body', links: [] }],
+    ]);
+    const ids: Record<string, number> = { f1: 7, f2: 9 };
+    const msgs = combineICloudThread(headers, bodies, (el) => ids[el.id]);
+    expect(msgs.map((m) => [m.senderAddress, m.frameId, m.body.includes('phishing')])).toEqual([
+      ['colleague@corp.example', 7, false],
+      ['phish@evil.example', 9, true],
+    ]);
+  });
+});

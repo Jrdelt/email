@@ -36,6 +36,8 @@ const CLICK_INTEL_TIMEOUT_MS = 700;
 // While the sender's own domain lookup is still running, a click on a same-domain link waits a little longer
 // for it: a brand-new or non-existent sender domain is the classic phishing shape.
 const SENDER_INTEL_WAIT_MS = 2500;
+// Longest a click in an iCloud message frame waits for the app frame's lock decision before going through.
+const ICLOUD_VERDICT_WAIT_MS = 2500;
 const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
 
 /** True while this content script still talks to a live extension (false after an update or reload orphans it). */
@@ -819,6 +821,20 @@ function runICloudSandbox() {
   let desiredLocked = false;
   let desiredAttachmentsLocked = false;
   let activeInlineAtts: HTMLElement[] = [];
+  // The lock decision comes from the app frame after it scores this body. Until it arrives (first render,
+  // changed body, or a reloaded frame), clicks are held like a pending scan instead of going straight through.
+  let awaitingVerdict = true;
+  let verdictWaiters: (() => void)[] = [];
+  const waitForVerdict = () =>
+    awaitingVerdict
+      ? new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, ICLOUD_VERDICT_WAIT_MS);
+          verdictWaiters.push(() => {
+            clearTimeout(timer);
+            resolve();
+          });
+        })
+      : Promise.resolve();
 
   const syncInlineAttachmentLocks = (attachments: AttachmentRef[], locked: boolean) => {
     const els = attachments.map((a) => a.element);
@@ -858,6 +874,7 @@ function runICloudSandbox() {
     const attachmentNames = attachments.map((a) => a.name);
     const sig = JSON.stringify({ active, body, links, attachmentNames });
     if (force || sig !== lastSig) {
+      if (sig !== lastSig) awaitingVerdict = true;
       lastSig = sig;
       void sendRuntime({ type: 'icloudBody', active: true, body, links, attachmentNames });
     }
@@ -882,8 +899,11 @@ function runICloudSandbox() {
       }
       return null;
     },
-    isPending: () => scheduler.isPending(),
-    flushScan: () => scheduler.flush(),
+    isPending: () => scheduler.isPending() || awaitingVerdict,
+    flushScan: async () => {
+      await scheduler.flush();
+      await waitForVerdict();
+    },
   });
 
   browser.runtime.onMessage.addListener((msg: unknown) => {
@@ -891,6 +911,8 @@ function runICloudSandbox() {
     if (m?.type === 'icloudLock') {
       desiredLocked = Boolean(m.locked);
       desiredAttachmentsLocked = Boolean(m.attachmentsLocked);
+      awaitingVerdict = false;
+      for (const release of verdictWaiters.splice(0)) release();
       if (document.body) {
         if (desiredLocked) lockLinks(document.body);
         else unlockLinks(document.body);
@@ -925,9 +947,24 @@ function runICloudApp(kv: typeof browser.storage.local) {
   let activeAttachmentEls: HTMLElement[] = [];
   let token = 0;
 
+  // Last decision sent to each sandbox frame and the body it was made for. When a frame re-reports that same
+  // body (e.g. after reloading) the thread key is unchanged and nothing is re-evaluated, so re-send it.
+  const frameLocks = new Map<number, { locked: boolean; attachmentsLocked: boolean; payload: string }>();
   const setFramesLocked = (frameIds: number[], locked: boolean, attachmentsLocked: boolean) => {
+    for (const id of frameIds) {
+      frameLocks.set(id, { locked, attachmentsLocked, payload: JSON.stringify(sandboxBodies.get(id) ?? null) });
+    }
     if (frameIds.length > 0) {
       void sendRuntime({ type: 'icloudLock', locked, attachmentsLocked, frameIds });
+    }
+  };
+  const frameIdOf = (iframe: HTMLIFrameElement): number | undefined => {
+    try {
+      const getFrameId = (browser.runtime as { getFrameId?: (target: Element) => number }).getFrameId;
+      const id = getFrameId?.(iframe);
+      return typeof id === 'number' && id >= 0 ? id : undefined;
+    } catch {
+      return undefined;
     }
   };
   const frameIdsOf = (list: { frameId?: number }[]) =>
@@ -942,7 +979,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       if (headers.length > 0) void sendRuntime({ type: 'icloudPing' });
     }
 
-    const messages = combineICloudThread(headers, sandboxBodies);
+    const messages = combineICloudThread(headers, sandboxBodies, frameIdOf);
     if (messages.length === 0) {
       setFramesLocked([...sandboxBodies.keys()], false, false);
       if (activeAttachmentEls.length) unlockAttachments(activeAttachmentEls);
@@ -1046,11 +1083,14 @@ function runICloudApp(kv: typeof browser.storage.local) {
       const attachmentNames = Array.isArray(m.attachmentNames)
         ? m.attachmentNames.filter((n): n is string => typeof n === 'string')
         : [];
-      sandboxBodies.set(m.frameId, {
+      const payload: ICloudSandboxPayload = {
         body: typeof m.body === 'string' ? m.body : '',
         links: Array.isArray(m.links) ? (m.links as Link[]) : [],
         ...(attachmentNames.length ? { attachmentNames } : {}),
-      });
+      };
+      sandboxBodies.set(m.frameId, payload);
+      const last = frameLocks.get(m.frameId);
+      if (last && last.payload === JSON.stringify(payload)) setFramesLocked([m.frameId], last.locked, last.attachmentsLocked);
       scheduler.schedule();
     } else if (sandboxBodies.delete(m.frameId)) {
       scheduler.schedule();

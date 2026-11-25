@@ -21,6 +21,8 @@ export interface ICloudHeader {
   senderAddress: string;
   subject: string;
   iframeCount: number;
+  /** The card's message-body iframes, used to pair the card with its sandbox frame by frame id. */
+  iframes?: HTMLIFrameElement[];
   attachments: AttachmentRef[];
   attachmentContainers: HTMLElement[];
   container: HTMLElement;
@@ -207,7 +209,8 @@ export function extractICloudHeaders(doc: Document): ICloudHeader[] {
       : wrapper.querySelector<HTMLElement>('.conversation-list-item') ?? wrapper;
     const { senderName, senderAddress } = extractHeaderSender(card);
     const subject = (card.querySelector('h2')?.textContent ?? '').trim();
-    const iframeCount = card.querySelectorAll('iframe').length;
+    const iframes = [...card.querySelectorAll<HTMLIFrameElement>('iframe')];
+    const iframeCount = iframes.length;
     const { attachments, attachmentContainers } = extractICloudCardAttachments(card);
     return {
       id: wrapper.id || '',
@@ -215,6 +218,7 @@ export function extractICloudHeaders(doc: Document): ICloudHeader[] {
       senderAddress,
       subject,
       iframeCount,
+      iframes,
       attachments,
       attachmentContainers,
       container: card,
@@ -243,12 +247,40 @@ export function extractICloudSandbox(
   return { active: true, body, links, attachments, container: bodyEl };
 }
 
-/** Pair header cards from mail2 with active sandboxed body payloads in DOM order. */
+function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: ICloudSandboxPayload | undefined): ICloudThreadMessage {
+  const body = [h.subject, payload?.body ?? ''].filter(Boolean).join('\n').slice(0, MAX_BODY_CHARS);
+  const attachmentNames = [...h.attachments.map((a) => a.name), ...(payload?.attachmentNames ?? [])];
+  return {
+    senderName: h.senderName,
+    senderAddress: h.senderAddress,
+    body,
+    links: payload?.links ?? [],
+    ...(h.attachments.length ? { attachments: h.attachments } : {}),
+    ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
+    ...(attachmentNames.length ? { attachmentNames } : {}),
+    frameId,
+  };
+}
+
+/**
+ * Pair header cards from mail2 with sandboxed body payloads. With `frameIdOf` (runtime.getFrameId on each card's
+ * iframe) the pairing is exact: a body is only ever evaluated with its own card's sender, and a card whose frame
+ * has not reported yet keeps that frame id so lock decisions still reach it. Without it, fall back to order.
+ */
 export function combineICloudThread(
   headers: ICloudHeader[],
   bodies: Map<number, ICloudSandboxPayload>,
+  frameIdOf?: (iframe: HTMLIFrameElement) => number | undefined,
 ): ICloudThreadMessage[] {
   if (headers.length === 0) return [];
+  if (frameIdOf) {
+    const ids = headers.map((h) =>
+      (h.iframes ?? []).map(frameIdOf).find((id): id is number => typeof id === 'number' && id >= 0),
+    );
+    if (ids.some((id) => id !== undefined)) {
+      return headers.map((h, i) => threadMessage(h, ids[i], ids[i] === undefined ? undefined : bodies.get(ids[i]!)));
+    }
+  }
   const entries = [...bodies.entries()];
   const expandedIndices = headers
     .map((h, idx) => (h.iframeCount > 0 ? idx : -1))
