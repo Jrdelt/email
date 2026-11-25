@@ -165,6 +165,18 @@ describe('getIntel cache', () => {
     await getIntel(kv, 'example.com', f, NOW + 25 * 3600_000);
     expect(lookups()).toBe(calls * 2);
   });
+  it('retries a partial result (RDAP failed) after 15 minutes instead of 24 hours', async () => {
+    const kv = memoryKV();
+    const ok = fakeFetch();
+    const rdapDown = (async (url: string, init?: RequestInit) => {
+      if (String(url).includes('rdap')) throw new Error('429');
+      return ok(url, init);
+    }) as FetchFn;
+    const first = await getIntel(kv, 'example.com', rdapDown, NOW);
+    expect(first.rdap.status).toBe('error');
+    expect((await getIntel(kv, 'example.com', ok, NOW + 5 * 60_000)).rdap.status).toBe('error'); // still cached
+    expect((await getIntel(kv, 'example.com', ok, NOW + 16 * 60_000)).rdap.status).toBe('ok'); // retried
+  });
   it('does not cache total failures', async () => {
     const kv = memoryKV();
     await getIntel(kv, 'example.com', (async () => { throw new Error('x'); }) as FetchFn, NOW);

@@ -21,6 +21,11 @@ export interface DomainIntel {
 const TIMEOUT_MS = 5000;
 const CACHE_KEY = 'domainIntelCache';
 const TTL_MS = 24 * 3600 * 1000;
+// A partial result (RDAP or DNS failed, e.g. a registry rate limit) is retried soon: RDAP alone gives the
+// "brand new domain" warning, and phishing domains are often used for less than a day.
+const PARTIAL_TTL_MS = 15 * 60 * 1000;
+const ttlOf = (i: DomainIntel): number =>
+  i.rdap?.status === 'error' || i.dns?.status === 'error' ? PARTIAL_TTL_MS : TTL_MS;
 const MAX_CACHE = 200;
 const DOH = { cloudflare: 'https://cloudflare-dns.com/dns-query', google: 'https://dns.google/resolve' } as const;
 const IANA_RDAP = 'https://data.iana.org/rdap/dns.json';
@@ -210,7 +215,7 @@ export async function getIntel(kv: KV, domain: string, fetchFn: FetchFn, now = D
   const rawCache = (await kv.get(CACHE_KEY))[CACHE_KEY];
   if (rawCache && typeof rawCache === 'object' && Object.hasOwn(rawCache, domain)) {
     const hit = (rawCache as Record<string, DomainIntel>)[domain];
-    if (hit && typeof hit.checkedAt === 'string' && now - Date.parse(hit.checkedAt) < TTL_MS) return hit;
+    if (hit && typeof hit.checkedAt === 'string' && now - Date.parse(hit.checkedAt) < ttlOf(hit)) return hit;
   }
   const intel = await lookupDomain(domain, fetchFn, now, kv);
   if (intel.rdap.status !== 'error' || intel.dns.status !== 'error' || intel.reputation.status !== 'error') {
@@ -220,7 +225,7 @@ export async function getIntel(kv: KV, domain: string, fetchFn: FetchFn, now = D
       if (latestRaw && typeof latestRaw === 'object') {
         for (const [k, v] of Object.entries(latestRaw as Record<string, DomainIntel>)) {
           if (!isValidDomain(k) || !v || typeof v.checkedAt !== 'string') continue;
-          if (now - Date.parse(v.checkedAt) < TTL_MS) merged[k] = v;
+          if (now - Date.parse(v.checkedAt) < ttlOf(v)) merged[k] = v;
         }
       }
       merged[domain] = intel;
