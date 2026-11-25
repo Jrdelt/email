@@ -18,9 +18,9 @@ All extension state is stored **exclusively on your device** using browser local
 - **Privacy preferences (`privacySettings` in `storage.local`, optional enterprise override via `storage.managed`):** Stores your `Strict Local Mode` preference.
 - **Trusted senders (`trustedSenders` in `storage.local`):** Exact email addresses you explicitly choose to trust via *"Always trust sender"*.
 - **Trusted emails (`trustedEmails` in `storage.local`, up to 500 entries):** One-way SHA-256 cryptographic hashes only (no email text, links, attachment names, or sender addresses are stored) so emails you unlock with *"I trust this email"* stay unlocked across page refreshes.
-- **False-positive notes (`falsePositiveReports` in `storage.local`, up to 50 entries):** Verdict level, numeric score, and redacted warning reason text saved locally when you click *"Not phishing"* (email addresses, full URLs, IP addresses, and domain names are stripped to `[address]`, `[url]`, `[ip]`, and `[domain]`). Never transmitted anywhere.
+- **False-positive notes (`falsePositiveReports` in `storage.local`, up to 50 entries):** Verdict level, numeric score, and redacted warning reason text saved locally when you click *"Not phishing"* (attachment filenames, email addresses, full URLs, IPv4/IPv6 addresses, and domain names are stripped to `[file]`, `[address]`, `[url]`, `[ip]`, and `[domain]`). Never transmitted anywhere.
 - **Domain lookup caches (`domainIntelCache` for 24 hours, `rdapBootstrap` for 7 days in `storage.local`):** Public domain registration and DNS results keyed by registrable domain name to avoid repeated network lookups.
-- **Temporary tab & link-warning state (`tab:*` and `warn:*` in `storage.session`):** Held in memory only for the active tab and warning page (containing no sender email addresses), expiring within 1 hour or automatically when the tab or browser closes.
+- **Temporary tab & link-warning state (`tab:*` and `warn:*` in `storage.session`, in memory only):** `tab:*` holds the latest verdict for each open webmail tab so the toolbar popup can show it, including the sender's display name and address, link domains, and attachment names; it is removed when the tab closes or navigates to a new page. `warn:*` holds the clicked link's URL for the warning page; it is removed when you go back or proceed, after 1 hour, or when the browser closes. *"Clear all local data"* removes both.
 
 ## 3. How Data Is Used
 
@@ -28,7 +28,7 @@ Every piece of data processed by the extension is used solely for its single pur
 
 ## 4. Third-Party Services Used for Domain Lookups (Disabled in Strict Local Mode)
 
-When **Strict Local Mode** is off and the extension checks a sender's registrable domain or a clicked external link's registrable domain, those public lookup services receive only the **bare domain name** and your **IP address** (all requests use `credentials: 'omit'` and `referrerPolicy: 'no-referrer'`):
+When **Strict Local Mode** is off and the extension checks a sender's registrable domain or a clicked external link's registrable domain, those public lookup services receive only the **bare domain name** and your **IP address** (all requests use `credentials: 'omit'` and `referrerPolicy: 'no-referrer'`). Domains on private or special-use top-level domains (for example `.local`, `.lan`, `.corp`, `.internal`, `.home`, `.intranet`) are never looked up, so intranet host names are not disclosed:
 
 - **IANA RDAP Bootstrap (`data.iana.org`) & Domain Registry RDAP Servers (with `rdap.org` fallback):** Used to look up domain registration date and registrar ([ICANN/IANA Privacy Policy](https://www.icann.org/privacy/policy), [rdap.org Info](https://about.rdap.org/)).
 - **Cloudflare Public DNS (`cloudflare-dns.com`):** Used for DNS-over-HTTPS `MX`, `SPF`, `DMARC`, `NXDOMAIN`, and URIBL queries ([Cloudflare 1.1.1.1 Privacy Policy](https://developers.cloudflare.com/1.1.1.1/privacy/public-dns-resolver/)).
@@ -41,7 +41,7 @@ We do **not** sell, rent, license, or share user data with third parties. Aside 
 
 ## 6. Data Retention and User Controls
 
-- Temporary session state (`storage.session`) is deleted when you close the tab (`tabs.onRemoved`), after 1 hour, proceed through a warning, or close your browser.
+- Temporary session state (`storage.session`) is deleted when you close or navigate the tab, go back from or proceed through a warning, after 1 hour (link warnings), when you click *"Clear all local data"*, or when you close your browser.
 - Cached domain lookups expire after 24 hours.
 - You can toggle **Strict Local Mode**, view and remove **Trusted senders**, clear **Trusted emails** (or click **Undo** immediately after trusting), clear **False-positive reports**, or wipe everything with **"Clear all local data"** directly from the toolbar popup.
 - Uninstalling the extension permanently deletes all local storage associated with the extension from your browser.
