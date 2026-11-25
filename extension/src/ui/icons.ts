@@ -1,5 +1,5 @@
 // Inline SVG icon builders using createElementNS only (never innerHTML) so CSP stays strict.
-const SVG_NS = 'http://www.w3.org/2000/svg';
+import { SVG_NS } from '../dom';
 
 function svgRoot(doc: Document, size: number, viewBox = '0 0 24 24'): SVGSVGElement {
   const s = doc.createElementNS(SVG_NS, 'svg');

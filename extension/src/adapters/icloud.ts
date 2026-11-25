@@ -13,7 +13,6 @@ import {
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
-export { type ICloudFrameRole, icloudFrameRole };
 
 export interface ICloudHeader {
   id: string;
@@ -128,6 +127,15 @@ function extractHeaderSender(card: HTMLElement): { senderName: string; senderAdd
   return { senderName: fallbackName, senderAddress: '' };
 }
 
+/** First candidate that still names a file after cleaning (a generic "Download" label falls through). */
+const firstCleanName = (candidates: readonly (string | null | undefined)[]): string => {
+  for (const c of candidates) {
+    const name = cleanAttachmentName(c ?? '');
+    if (name) return name;
+  }
+  return '';
+};
+
 function extractICloudCardAttachments(card: HTMLElement): {
   attachments: AttachmentRef[];
   attachmentContainers: HTMLElement[];
@@ -159,27 +167,26 @@ function extractICloudCardAttachments(card: HTMLElement): {
       for (const btn of innerButtons) {
         if (attachments.length >= MAX_ATTACHMENTS || skip(btn)) continue;
         if (attachments.some((prev) => prev.element === btn || prev.element.contains(btn))) continue;
-        const name = cleanAttachmentName(
-          btn.getAttribute('download') ??
-            btn.getAttribute('data-ped-att-download') ??
-            btn.getAttribute('aria-label') ??
-            btn.getAttribute('title') ??
-            btn.textContent ??
-            '',
-        );
+        const name = firstCleanName([
+          btn.getAttribute('download'),
+          btn.getAttribute('data-ped-att-download'),
+          btn.getAttribute('aria-label'),
+          btn.getAttribute('title'),
+          btn.textContent,
+        ]);
         attachments.push({ name, element: btn });
       }
       continue;
     }
     if (attachments.length >= MAX_ATTACHMENTS) break;
     if (attachments.some((prev) => prev.element === el || prev.element.contains(el))) continue;
-    const name = cleanAttachmentName(
-      el.getAttribute('download') ??
-        el.getAttribute('data-ped-att-download') ??
-        el.getAttribute('aria-label') ??
-        el.getAttribute('title') ??
-        (el.textContent ?? '').slice(0, 180),
-    );
+    const name = firstCleanName([
+      el.getAttribute('download'),
+      el.getAttribute('data-ped-att-download'),
+      el.getAttribute('aria-label'),
+      el.getAttribute('title'),
+      el.textContent,
+    ]);
     attachments.push({ name, element: el });
   }
 
@@ -293,18 +300,7 @@ export function combineICloudThread(
     expandedIndices.forEach((hIdx, i) => entryByHeader.set(hIdx, entries[i]));
     return headers.map((h, idx) => {
       const entry = entryByHeader.get(idx);
-      const body = withSubject(h.subject, entry?.[1].body ?? '');
-      const attachmentNames = [...h.attachments.map((a) => a.name), ...(entry?.[1].attachmentNames ?? [])];
-      return {
-        senderName: h.senderName,
-        senderAddress: h.senderAddress,
-        body,
-        links: entry?.[1].links ?? [],
-        ...(h.attachments.length ? { attachments: h.attachments } : {}),
-        ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
-        ...(attachmentNames.length ? { attachmentNames } : {}),
-        frameId: entry?.[0],
-      };
+      return threadMessage(h, entry?.[0], entry?.[1]);
     });
   }
 
@@ -313,18 +309,7 @@ export function combineICloudThread(
   for (let i = 0; i < count; i++) {
     const h = headers[Math.min(i, headers.length - 1)];
     const entry = entries[i];
-    const body = withSubject(h.subject, entry?.[1].body ?? '');
-    const attachmentNames = [...h.attachments.map((a) => a.name), ...(entry?.[1].attachmentNames ?? [])];
-    out.push({
-      senderName: h.senderName,
-      senderAddress: h.senderAddress,
-      body,
-      links: entry?.[1].links ?? [],
-      ...(h.attachments.length ? { attachments: h.attachments } : {}),
-      ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
-      ...(attachmentNames.length ? { attachmentNames } : {}),
-      frameId: entry?.[0],
-    });
+    out.push(threadMessage(h, entry?.[0], entry?.[1]));
   }
   return out;
 }

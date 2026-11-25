@@ -30,3 +30,24 @@ describe('adapters', () => {
   it.todo('T7: each adapter extracts sender/body/links from fixture HTML');
   it.todo('T6: model falls back to heuristics when the model fails to load');
 });
+
+describe('isSupportedWebmailUrl (background sender gate)', () => {
+  it('accepts every manifest host and rejects look-alikes', async () => {
+    const { WEBMAIL_MATCHES, isSupportedWebmailUrl } = await import('./hosts');
+    for (const pattern of WEBMAIL_MATCHES) {
+      const sample = pattern.replace('*.', 'p1.').replace(/\*$/, 'x');
+      expect(isSupportedWebmailUrl(sample)).toBe(true);
+    }
+    for (const bad of [
+      'https://mail.google.com.evil.example/',
+      'http://mail.google.com/',
+      'https://evil-icloud-sandbox.com/applications/mail2-message/x',
+      'https://www.icloud.com/applications/mail2xyz',
+      'https://mail.proton.me.evil.example/',
+      undefined,
+      'not a url',
+    ]) {
+      expect(isSupportedWebmailUrl(bad)).toBe(false);
+    }
+  });
+});

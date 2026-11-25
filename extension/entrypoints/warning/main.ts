@@ -1,5 +1,5 @@
 import { ageDays, type DomainIntel } from '../../src/domainIntel';
-import { destinationIntelWarnings, isSafeHttpUrl } from '../../src/linkGuard';
+import { WARN_TTL_MS, destinationIntelWarnings, isSafeHttpUrl } from '../../src/linkGuard';
 import { getSettings } from '../../src/settings';
 import { formatAge } from '../../src/ui/details';
 import { createLogoSvg, createStatusIcon } from '../../src/ui/icons';
@@ -14,7 +14,6 @@ interface StoredWarning {
   createdAt?: number;
 }
 
-const WARN_TTL_MS = 3600_000;
 
 const $ = (id: string) => document.getElementById(id)!;
 let warnKey: string | null = null; // session entry holding the clicked URL; removed when the user backs out

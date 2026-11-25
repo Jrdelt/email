@@ -1,13 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
+import { icloudFrameRole } from '../hosts';
 import { lockLinks, unlockLinks } from '../ui/linkLock';
-import {
-  combineICloudThread,
-  extractICloudHeaders,
-  extractICloudSandbox,
-  icloud,
-  icloudFrameRole,
-} from './icloud';
+import { combineICloudThread, extractICloudHeaders, extractICloudSandbox, icloud } from './icloud';
 
 describe('icloudFrameRole', () => {
   it('classifies iCloud shell, mail2 app, and sandbox message frames strictly', () => {

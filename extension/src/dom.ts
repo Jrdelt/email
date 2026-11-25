@@ -46,8 +46,6 @@ export const tagOf = (el: Element): string => String(builtin<string>(el, 'localN
 export const isFormEl = (el: Element): boolean => tagOf(el) === 'form';
 export const closestEl = (el: Element, selector: string): Element | null =>
   builtin<Element['closest']>(el, 'closest').call(el, selector);
-export const containsNode = (parent: Node, child: Node | null): boolean =>
-  builtin<Node['contains']>(parent, 'contains').call(parent, child);
 export const textOf = (node: Node): string => builtin<string | null>(node, 'textContent') ?? '';
 export const ownerDocOf = (node: Node): Document => builtin<Document>(node, 'ownerDocument');
 const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;

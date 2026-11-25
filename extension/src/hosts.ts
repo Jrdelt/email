@@ -18,15 +18,12 @@ export const WEBMAIL_MATCHES = [
   ...ICLOUD_SANDBOX_MATCHES,
 ];
 
-const STANDARD_WEBMAIL_HOSTS = new Set([
-  'mail.google.com',
-  'outlook.live.com',
-  'outlook.office.com',
-  'outlook.office365.com',
-  'outlook.cloud.microsoft',
-  'mail.yahoo.com',
-  'mail.proton.me',
-]);
+// Exact hosts of the non-iCloud match patterns, derived so a host added above is accepted by the background too.
+const STANDARD_WEBMAIL_HOSTS = new Set(
+  WEBMAIL_MATCHES.map((p) => p.match(/^https:\/\/([^/*]+)\/\*$/)?.[1]).filter(
+    (h): h is string => h !== undefined && h !== 'www.icloud.com',
+  ),
+);
 
 /** Identify which iCloud Mail frame a URL belongs to, or null if not iCloud Mail. */
 export function icloudFrameRole(url: URL): ICloudFrameRole {

@@ -15,6 +15,8 @@ export interface LinkRisk {
 }
 
 const MAX_UNWRAP_DEPTH = 4;
+/** Lifetime of a link-warning (warn:*) session entry; shared by background.ts and warning.html. */
+export const WARN_TTL_MS = 3600_000;
 
 const PATH_EXT_RE = /\.([a-z0-9-]{1,20})$/i;
 

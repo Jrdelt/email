@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { outlook, unwrapSafeLink } from './outlook';
+import { unwrapRedirectUrl as unwrapSafeLink } from '../linkGuard';
+import { outlook } from './outlook';
 
 describe('outlook adapter', () => {
   it('extracts sender, body, and links from modern Outlook Web layout', () => {

@@ -1,12 +1,13 @@
 import { isLookupDomain } from '../src/domain';
 import { getIntel, type DomainIntel } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
-import { isSafeHttpUrl } from '../src/linkGuard';
+import { MAX_ATTACHMENT_NAMES } from '../src/attachments';
+import { MAX_LINK_TEXT_CHARS, MAX_LINKS } from '../src/adapters/extract';
+import { WARN_TTL_MS, isSafeHttpUrl } from '../src/linkGuard';
 import { clearLookupCaches, getSettings } from '../src/settings';
 
-const WARN_TTL_MS = 3600_000;
-const MAX_BODY_CHARS = 21_000; // sandbox body (head + tail sample, see adapters/extract.ts bodyText) plus slack
-const MAX_LINKS = 500;
+const MAX_BODY_CHARS = 21_000;
+const MAX_RELAY_FRAMES = 200; // every open message frame of a long thread must still receive its lock decision // sandbox body (head + tail sample, see adapters/extract.ts bodyText) plus slack
 
 function frameRoleOf(url?: string) {
   if (!url) return null;
@@ -161,8 +162,8 @@ export default defineBackground(() => {
       const attachmentNames = Array.isArray(m.attachmentNames)
         ? m.attachmentNames
             .filter((n): n is string => typeof n === 'string')
-            .slice(0, 50)
-            .map((n) => n.slice(0, 160))
+            .slice(0, MAX_ATTACHMENT_NAMES)
+            .map((n) => (n.length > 1024 ? n.slice(-1024) : n)) // keep the end: the extension decides the risk
         : [];
       const links = Array.isArray(m.links)
         ? m.links
@@ -174,7 +175,7 @@ export default defineBackground(() => {
                 typeof (l as { href?: unknown }).href === 'string',
             )
             .slice(0, MAX_LINKS)
-            .map((l) => ({ text: l.text.slice(0, 300), href: l.href.slice(0, 2048) }))
+            .map((l) => ({ text: l.text.slice(0, MAX_LINK_TEXT_CHARS), href: l.href.slice(0, 2048) }))
         : [];
       void browser.tabs
         .sendMessage(sender.tab.id, {
@@ -190,7 +191,7 @@ export default defineBackground(() => {
     }
     if (m?.type === 'icloudLock' && sender.tab?.id !== undefined && frameRoleOf(sender.url) === 'app') {
       const frameIds = Array.isArray(m.frameIds)
-        ? m.frameIds.filter((id): id is number => typeof id === 'number').slice(0, 20)
+        ? m.frameIds.filter((id): id is number => Number.isInteger(id) && id >= 0).slice(0, MAX_RELAY_FRAMES)
         : [];
       const locked = Boolean(m.locked);
       const attachmentsLocked = Boolean(m.attachmentsLocked);

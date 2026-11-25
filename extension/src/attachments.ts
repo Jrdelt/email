@@ -7,7 +7,7 @@ export interface AttachmentAnalysis {
   reasons: string[];
 }
 
-const MAX_ATTACHMENT_NAMES = 50;
+export const MAX_ATTACHMENT_NAMES = 50;
 
 import { ellipsizeMiddle, hasBidiControls, showable } from './text';
 

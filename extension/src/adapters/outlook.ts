@@ -1,6 +1,5 @@
 import { cleanAttachmentName } from '../attachments';
 import { textOf } from '../dom';
-import { unwrapRedirectUrl } from '../linkGuard';
 import {
   MAX_ATTACHMENTS,
   bodyText,
@@ -34,8 +33,6 @@ const isEditable = (el: HTMLElement): boolean =>
   isUnsafeNode(el) ||
   el.isContentEditable || el.getAttribute('contenteditable') === 'true' || el.closest('[contenteditable="true"]') !== null;
 
-/** Unwrap Microsoft Defender Safe Links (and nested redirect wrappers) when pointing to http(s). */
-export const unwrapSafeLink = unwrapRedirectUrl;
 
 function findBodies(doc: Document): BodyHit[] {
   // Prefer bodies with content; then accept an empty one (attachment-only email) rather than skipping the message.

@@ -1,5 +1,4 @@
 import { adapterFor } from '../src/adapters';
-import { bodyText, inlineAttachmentsIn, linksIn } from '../src/adapters/extract';
 import {
   type ICloudSandboxPayload,
   combineICloudThread,
@@ -38,7 +37,6 @@ const CLICK_INTEL_TIMEOUT_MS = 700;
 const SENDER_INTEL_WAIT_MS = 2500;
 // Longest a click in an iCloud message frame waits for the app frame's lock decision before going through.
 const ICLOUD_VERDICT_WAIT_MS = 2500;
-const FALLBACK_SELECTORS = ['div.a3s', '[aria-label="Message body"]', '[role="document"]'];
 
 /** True while this content script still talks to a live extension (false after an update or reload orphans it). */
 function extensionAlive(): boolean {
@@ -155,23 +153,11 @@ function addBounded(set: Set<string>, key: string): void {
   set.add(key);
 }
 
-function fallbackExtract(doc: Document): ExtractedEmail | null {
-  const container = FALLBACK_SELECTORS.map((s) => doc.querySelector<HTMLElement>(s)).find(Boolean);
-  if (!container) return null;
-  const attachments = inlineAttachmentsIn(container);
-  return {
-    senderName: '',
-    senderAddress: '',
-    body: bodyText(container),
-    links: linksIn(container),
-    ...(attachments.length ? { attachments } : {}),
-    container,
-  };
-}
-
+// Every supported host has an adapter (adapters.test.ts checks this); webmail selectors live only in adapters/.
 function extractAll(adapter: WebmailAdapter | undefined, doc: Document): ExtractedEmail[] {
-  if (adapter?.extractAll) return adapter.extractAll(doc);
-  const one = adapter ? adapter.extract(doc) : fallbackExtract(doc);
+  if (!adapter) return [];
+  if (adapter.extractAll) return adapter.extractAll(doc);
+  const one = adapter.extract(doc);
   return one ? [one] : [];
 }
 
@@ -247,7 +233,7 @@ function createScheduler(runScan: () => Promise<void>) {
 }
 
 function matchAttachmentInMessages(
-  messages: readonly ScannableMsg[],
+  messages: readonly { attachments?: AttachmentRef[]; attachmentContainers?: HTMLElement[] }[],
   el: Element,
 ): { element: HTMLElement; name: string } | null {
   for (const m of messages) {
@@ -893,12 +879,7 @@ function runICloudSandbox() {
       document.body && document.body.contains(a)
         ? { container: document.body, senderAddress: '', senderRegistrable: '' }
         : null,
-    findAttachment: (el) => {
-      for (const a of extractICloudSandbox(document).attachments) {
-        if (a.element === el || a.element.contains(el)) return { element: a.element, name: a.name };
-      }
-      return null;
-    },
+    findAttachment: (el) => matchAttachmentInMessages([extractICloudSandbox(document)], el),
     isPending: () => scheduler.isPending() || awaitingVerdict,
     flushScan: async () => {
       await scheduler.flush();
@@ -1050,22 +1031,9 @@ function runICloudApp(kv: typeof browser.storage.local) {
 
   installClickGuard({
     findTarget: () => null,
-    findAttachment: (el) => {
-      const activeHit = matchAttachmentInMessages(activeMessages, el);
-      if (activeHit) return activeHit;
-      if (scheduler.isPending()) {
-        const headers = extractICloudHeaders(document);
-        for (const h of headers) {
-          for (const att of h.attachments) {
-            if (att.element === el || att.element.contains(el)) return { element: att.element, name: att.name };
-          }
-          for (const box of h.attachmentContainers) {
-            if (box === el || box.contains(el)) return { element: box, name: '' };
-          }
-        }
-      }
-      return null;
-    },
+    findAttachment: (el) =>
+      matchAttachmentInMessages(activeMessages, el) ??
+      (scheduler.isPending() ? matchAttachmentInMessages(extractICloudHeaders(document), el) : null),
     isPending: () => scheduler.isPending(),
     flushScan: () => scheduler.flush(),
   });
