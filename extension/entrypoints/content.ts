@@ -16,6 +16,7 @@ import { recordFalsePositive } from '../src/feedback';
 import { icloudFrameRole, WEBMAIL_MATCHES } from '../src/hosts';
 import { analyzeLinkDestination, isSafeHttpUrl, mergeLinkIntel } from '../src/linkGuard';
 import { analyzeSender, canTrustByAllowlist, type SenderInfo } from '../src/sender';
+import { createScheduler } from '../src/scheduler';
 import { getSettings } from '../src/settings';
 import {
   isAttachmentLocked,
@@ -28,7 +29,6 @@ import type { IntelState } from '../src/ui/details';
 import { isLocked, lockLinks, setLinkBlockedHandler, unlockLinks } from '../src/ui/linkLock';
 import { showPausedAttachmentToast, showPausedLinkToast } from '../src/ui/linkToast';
 
-const DEBOUNCE_MS = 400;
 const MAX_THREAD_MESSAGES = 20; // newest messages that get full scoring and domain lookups
 const MAX_SESSION_SET = 200;
 const CLICK_INTEL_TIMEOUT_MS = 700;
@@ -197,40 +197,6 @@ const msgKey = (e: ScannableMsg) => {
   return `${e.senderName}\n${e.senderAddress}\n${e.viaDomain ?? ''}\n${e.unauthenticated ? '1' : '0'}\n${e.body}\nlinks:${links}\natt:${names.join('|')}:${names.length}:${e.attachments?.length ?? 0}:${e.attachmentContainers?.length ?? 0}`;
 };
 
-function createScheduler(runScan: () => Promise<void>) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let pending = false;
-  let inflight: Promise<void> | null = null;
-  const exec = () => {
-    clearTimeout(timer);
-    timer = undefined;
-    if (inflight) return inflight;
-    inflight = (async () => {
-      do {
-        pending = false;
-        clearTimeout(timer);
-        timer = undefined;
-        try {
-          await runScan();
-        } catch {
-          // Keep scheduler loop alive on unexpected DOM mutations
-        }
-      } while (pending);
-    })().finally(() => {
-      inflight = null;
-    });
-    return inflight;
-  };
-  const schedule = () => {
-    pending = true;
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      const run = () => void exec();
-      'requestIdleCallback' in window ? requestIdleCallback(run, { timeout: 250 }) : run();
-    }, DEBOUNCE_MS);
-  };
-  return { schedule, flush: exec, isPending: () => pending || inflight !== null };
-}
 
 function matchAttachmentInMessages(
   messages: readonly { attachments?: AttachmentRef[]; attachmentContainers?: HTMLElement[] }[],
@@ -907,8 +873,16 @@ function runICloudSandbox() {
 
   const target = document.body ?? document.documentElement;
   if (target) new MutationObserver(scheduler.schedule).observe(target, { childList: true, subtree: true });
+  // Only visibility matters (a pooled frame shown or hidden): animated content resizes the document every frame.
   if (typeof ResizeObserver !== 'undefined' && document.documentElement) {
-    new ResizeObserver(scheduler.schedule).observe(document.documentElement);
+    let lastVisible: boolean | null = null;
+    new ResizeObserver((entries) => {
+      const rect = entries[entries.length - 1]?.contentRect;
+      const visible = Boolean(rect && rect.width > 0 && rect.height > 0);
+      if (visible === lastVisible) return;
+      lastVisible = visible;
+      scheduler.schedule();
+    }).observe(document.documentElement);
   }
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) scheduler.schedule();
