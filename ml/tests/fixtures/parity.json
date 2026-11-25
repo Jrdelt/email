@@ -885,5 +885,63 @@
       "urgency_hits": 0,
       "body_len": 1
     }
+  },
+  {
+    "name": "js_whitespace_semantics_in_text_sender_href",
+    "sender": "a@evil.com\u0085",
+    "body": "x",
+    "links": [
+      {
+        "text": "\u0085paypal.com",
+        "href": "https://evil.com/"
+      },
+      {
+        "text": "https://evil.com\u2028login",
+        "href": "https://paypal.com/"
+      },
+      {
+        "text": "x",
+        "href": "\u00a0https://evil.com/login"
+      }
+    ],
+    "expected": {
+      "n_links": 3,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 2,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "bom_and_bracket_trimming",
+    "sender": "a@[[evil.com]]",
+    "body": "x",
+    "links": [
+      {
+        "text": "\ufeffpaypal.com",
+        "href": "https://evil.com/"
+      },
+      {
+        "text": "y",
+        "href": "https://storage.googleapis.com/b/login.html\u00a0"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 2,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
   }
 ]

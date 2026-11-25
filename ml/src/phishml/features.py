@@ -28,7 +28,13 @@ IP_V4_RE = re.compile(r"^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?
 IPV6_CHARS_RE = re.compile(r"^[0-9a-f:.]+\Z", re.IGNORECASE | re.ASCII)
 BRACKETED_IPV6_RE = re.compile(r"^\[([0-9a-f:.]+)\](?::\d{1,5})?\Z", re.IGNORECASE | re.ASCII)
 PORT_SUFFIX_RE = re.compile(r":\d{1,5}\Z", re.ASCII)
-EXPLICIT_URL = re.compile(r"https?://[^\s<>\"'()]+", re.IGNORECASE | re.ASCII)
+# JavaScript's whitespace set (String.prototype.trim and regex \s), so trimming and URL-in-text matching behave
+# exactly like features.ts. Python's own str.strip()/\s differ (they include U+001C-U+001F and U+0085, not U+FEFF).
+JS_WS = "\t\n\x0b\x0c\r \xa0\u1680" + "".join(chr(c) for c in range(0x2000, 0x200B)) + "\u2028\u2029\u202f\u205f\u3000\ufeff"
+JS_WS_RE = re.compile("[" + re.escape(JS_WS) + "]")
+EXPLICIT_URL = re.compile("https?://[^" + re.escape(JS_WS) + "<>\"'()]+", re.IGNORECASE)
+# WHATWG URL parsing trims only C0 controls and space from both ends of an href.
+C0_OR_SPACE = "".join(chr(c) for c in range(0x21))
 DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z", re.ASCII)
 
 CLOUD_STORAGE_HOSTS = frozenset({
@@ -108,7 +114,7 @@ def _is_valid_domain(domain: str) -> bool:
 
 
 def _normalize_http_url(url: str) -> str:
-    s = url.strip()
+    s = url.strip(C0_OR_SPACE)
     if len(s) >= 7 and s[:8].lower().startswith(("http://", "https://")):
         q = min((i for i in (s.find("?"), s.find("#")) if i != -1), default=len(s))
         s = s[:q].replace("\\", "/") + s[q:]
@@ -251,7 +257,9 @@ def _host(url: str) -> str:
 
 
 def _registrable(host: str) -> str:
-    cleaned = host.lower().strip("[]").removesuffix(".")
+    cleaned = host.lower()
+    cleaned = cleaned[1:] if cleaned.startswith("[") else cleaned  # one bracket per end, like the TS regex
+    cleaned = (cleaned[:-1] if cleaned.endswith("]") else cleaned).removesuffix(".")
     if not cleaned or is_ip_host(cleaned):
         return cleaned
     parts = [p for p in cleaned.split(".") if p]
@@ -289,7 +297,7 @@ def _normalize_shown_text(text: str) -> str:
 
 def shown_host(text: str) -> str:
     """Extract a hostname only when link text looks like an explicit URL or bare domain/IP."""
-    t = _normalize_shown_text(text).strip()
+    t = _normalize_shown_text(text).strip(JS_WS)
     if not t:
         return ""
     m = EXPLICIT_URL.search(t)
@@ -297,7 +305,7 @@ def shown_host(text: str) -> str:
         candidate = m.group(0).rstrip(".,;:!?")  # linear; same result as the TS trimTrailingPunct
         h = _host(candidate)
         return h if (_is_valid_domain(h) or is_ip_host(h)) else ""
-    if re.search(r"\s", t):
+    if JS_WS_RE.search(t):
         return ""
     authority = re.split(r"[/?#]", t, maxsplit=1)[0]
     if "@" in authority or "://" in authority or authority.endswith("."):
@@ -319,7 +327,7 @@ def shown_host(text: str) -> str:
 
 
 def _sender_domain(sender: str) -> str:
-    cleaned = sender.strip().rstrip(">").strip()
+    cleaned = sender.strip(JS_WS).rstrip(">").strip(JS_WS)
     if "@" not in cleaned:
         return ""
     return cleaned.rsplit("@", 1)[-1].lower().removesuffix(".")
