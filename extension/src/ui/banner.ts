@@ -428,12 +428,22 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   const actionsBar = doc.createElement('div');
   actionsBar.className = 'actions';
 
-  const button = (label: string, onClick: (b: HTMLButtonElement) => void, extraClass = '') => {
+  const button = (label: string, onClick: (b: HTMLButtonElement) => void | Promise<void>, extraClass = '') => {
     const b = doc.createElement('button');
     b.type = 'button';
     b.className = extraClass ? `btn ${extraClass}` : 'btn';
     b.textContent = label;
-    b.addEventListener('click', () => onClick(b));
+    // A failed action (e.g. storage unavailable) re-enables the button instead of leaving it stuck disabled.
+    b.addEventListener('click', () => {
+      const reenable = () => {
+        b.disabled = false;
+      };
+      try {
+        void Promise.resolve(onClick(b)).catch(reenable);
+      } catch {
+        reenable();
+      }
+    });
     return b;
   };
 

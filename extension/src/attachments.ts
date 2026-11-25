@@ -25,6 +25,14 @@ const EXEC_EXTS = new Set([
 
 const DANGEROUS_EXTS = new Set([...HTML_SVG_EXTS, ...EXEC_EXTS]);
 
+/**
+ * File types a clicked link must not download directly: the attachment danger list minus plain web pages
+ * (.html/.htm are normal link targets) and .com (ambiguous in URL paths). Shared with linkGuard so they can't drift.
+ */
+export const RISKY_DOWNLOAD_EXTS: ReadonlySet<string> = new Set(
+  [...DANGEROUS_EXTS].filter((e) => !['html', 'htm', 'shtml', 'xhtml', 'xht', 'com'].includes(e)),
+);
+
 const ARCHIVE_EXTS = new Set([
   'zip', 'zipx', 'rar', 'r00', '001', '7z', 'tar', 'gz', 'tgz', 'cab', 'xz', 'bz2', 'arj', 'lzh', 'ace', 'uue',
 ]);

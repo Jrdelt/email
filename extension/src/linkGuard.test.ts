@@ -183,3 +183,12 @@ describe('redirect wrappers', () => {
     expect(unwrapRedirectUrl('https://secure-web.cisco.com/1AbC/https%3A%2F%2Fevil.example%2Fy')).toBe('https://evil.example/y');
   });
 });
+
+describe('click-time risky download list', () => {
+  it('covers the attachment danger types but not ordinary web pages', () => {
+    for (const p of ['setup.exe', 'macro.dotm', 'reg.reg', 'x.cpl', 'note.one', 'disk.vhd', 'image.svg', 'a.ps1']) {
+      expect(analyzeLinkDestination(`https://shop.example/${p}`, 'shop.example').level).toBe('danger');
+    }
+    expect(analyzeLinkDestination('https://shop.example/index.html', 'shop.example').level).toBe('safe');
+  });
+});

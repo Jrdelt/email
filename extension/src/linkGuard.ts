@@ -1,3 +1,4 @@
+import { RISKY_DOWNLOAD_EXTS } from './attachments';
 import { isIpHost, isLookupDomain, registrableDomain } from './domain';
 import { destinationIntelWarnings, type DomainIntel } from './domainIntel';
 import { IP_LOGGER_HOSTS, isCloudHtmlLink, safePercentDecode, SHORTENER_HOSTS } from './features';
@@ -15,8 +16,7 @@ export interface LinkRisk {
 
 const MAX_UNWRAP_DEPTH = 4;
 
-const DANGEROUS_EXT_RE =
-  /\.(exe|msi|dmg|pkg|apk|iso|img|lnk|scr|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|hta|jar|mht|mhtml|docm|xlsm|pptm|svg)$/i;
+const PATH_EXT_RE = /\.([a-z0-9-]{1,20})$/i;
 
 /** Returns true strictly for valid http(s) URLs. */
 export function isSafeHttpUrl(raw: string): boolean {
@@ -149,10 +149,10 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
     reasons.push('This link points to a web page hosted on raw cloud storage (commonly abused in phishing)');
   }
   const path = safePercentDecode(u.pathname);
-  const extMatch = path.match(DANGEROUS_EXT_RE);
-  if (extMatch) {
+  const ext = path.match(PATH_EXT_RE)?.[1]?.toLowerCase() ?? '';
+  if (ext && RISKY_DOWNLOAD_EXTS.has(ext)) {
     hasDanger = true;
-    reasons.push(`This link leads directly to a risky file type (.${extMatch[1].toLowerCase()}) that can carry malware or hidden scripts`);
+    reasons.push(`This link leads directly to a risky file type (.${ext}) that can carry malware or hidden scripts`);
   }
 
   if (IP_LOGGER_HOSTS.has(host) || IP_LOGGER_HOSTS.has(registrable)) {
