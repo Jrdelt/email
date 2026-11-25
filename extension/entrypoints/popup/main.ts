@@ -127,10 +127,10 @@ async function renderPrivacySettings() {
   $('privacy-note').textContent = s.managedLocked
     ? s.strictLocalMode
       ? 'Enforced by IT policy: 0 network lookups (HIPAA/enterprise local-only mode).'
-      : 'Managed by IT policy. Email content and full URLs never leave your browser.'
+      : 'Managed by IT policy. Email content and full URLs never leave your browser; only the bare domains of senders and of links you click are checked online.'
     : s.strictLocalMode
       ? 'Strict Local Mode active: 0 network lookups leave your browser.'
-      : 'Email bodies, attachments, addresses, and full URLs stay local; only bare website domains are checked online.';
+      : 'Email bodies, attachments, addresses, and full URLs stay local; only the bare domains of senders and of links you click are checked online.';
 }
 
 ($('strict-local') as HTMLInputElement).addEventListener('change', async (e) => {

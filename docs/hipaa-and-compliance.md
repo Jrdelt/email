@@ -17,7 +17,7 @@ Under **45 CFR § 164.514(b)(2)** (HIPAA Safe Harbor de-identification) and **HH
 | **Link & untrusted-attachment blocking (`data-ped-*`)** | Active locally on untrusted/flagged mail | Active locally on untrusted/flagged mail |
 | **Off-device bare domain lookups (RDAP, Cloudflare/Google DNS, URIBL)** | Queries **only** bare registrable domains (`example.com`), never paths/queries/addresses | **Completely disabled** (`0` `fetch()` calls, `0` bytes leave the device) |
 | **Local UI & `warning.html` behavior** | Shows domain age, registrar, MX/SPF/DMARC, URIBL | Shows `Domain lookup skipped (Strict Local Mode).` & runs all local checks without network traffic |
-| **Third-party BAA needed for extension telemetry/cloud** | None (developer runs no servers; public RDAP/DNS receive bare domain + user IP) | **None** — zero external network connections of any kind |
+| **Third-party BAA needed for extension telemetry/cloud** | Not for ePHI: the developer runs no servers, but public RDAP/DNS operators (no BAA) receive the sender's and clicked links' registrable domains plus the user's IP. Enforce Strict Local Mode where emails may contain PHI. | **None** — zero external network connections of any kind |
 
 ### Technical Safeguards Implemented in Code
 

@@ -39,7 +39,7 @@ DNS lookups are answered by the queried domain's own name servers (through the p
 
 ## 5. Data Sharing and Sale
 
-We do **not** sell, rent, license, or share user data with third parties. Aside from the bare registrable-domain lookups in Section 4 (which are disabled completely when Strict Local Mode is on), zero data leaves your browser.
+We do **not** sell, rent or license user data, and share none with advertisers or analytics providers. The only data shared with third parties is the bare registrable domain of an untrusted email's sender or of a link you click (seen together with your IP address), sent to the public RDAP and DNS services in Section 4; Strict Local Mode turns this off completely. Nothing else leaves your browser.
 
 ## 6. Data Retention and User Controls
 

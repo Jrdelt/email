@@ -1,8 +1,8 @@
 # Chrome Web Store & Microsoft Edge Add-ons Listing — Phishing Email Detector
 
-> Last Updated: 2026-11-23
+> Last Updated: 2026-11-25
 
-> **Important Version Note:** Chrome Web Store version `0.1.0` (ID `bdpnkkpanopdfhnclfcpllnlccphlejp`) was submitted prior to adding **Strict Local Mode (`managed_schema.json`)** and the **Yahoo Mail** & **Proton Mail** adapters (`mail.yahoo.com`, `mail.proton.me`). Leave `0.1.0` in review as-is, and bump `extension/package.json` `"version"` to `0.2.0` before submitting the next update to Chrome Web Store (fresh submissions to Edge Add-ons and Firefox AMO can use the latest `store-upload/` archives immediately). See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md) and [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md) for all browser stores and HIPAA guidance.
+> **Important Version Note:** Chrome Web Store version `0.1.0` (ID `bdpnkkpanopdfhnclfcpllnlccphlejp`) was submitted prior to adding **Strict Local Mode (`managed_schema.json`)** and the **Yahoo Mail** & **Proton Mail** adapters (`mail.yahoo.com`, `mail.proton.me`). Its **Privacy practices** tab was filled in with the earlier answers (*Personal communications: No*, *Web history: No*), which under-declare what 0.1.0 already does (sender and clicked-link domains are looked up). Safest: cancel the 0.1.0 review and resubmit with the corrected answers below; otherwise correct the Privacy practices tab as soon as 0.1.0 is approved, without waiting for the next version. Then bump `extension/package.json` `"version"` to `0.2.0` before submitting the next update to Chrome Web Store (fresh submissions to Edge Add-ons and Firefox AMO can use the latest `store-upload/` archives immediately). See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md) and [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md) for all browser stores and HIPAA guidance.
 
 ---
 
@@ -39,7 +39,7 @@ HOW TO USE
 3. Click "See why" on any banner (or open the extension icon in your toolbar) to inspect sender details, manage your trusted senders list, or open the recovery guide.
 
 PRIVACY
-Your email text, attachments, sender email addresses, and full link addresses never leave your browser. No account is required, and there is no analytics or tracking. To check website age and spam listings, only the bare website domain name is looked up via public domain registration (RDAP) and DNS services and cached locally on your device for 24 hours — or enable Strict Local Mode directly in the popup for zero network lookups.
+Your email text, attachments, sender email addresses, and full link addresses never leave your browser. No account is required, and there is no analytics or tracking. To check website age and spam listings, only the bare website domain name is looked up via public domain registration (RDAP) and DNS services and cached locally on your device for up to 24 hours (15 minutes if a lookup only partly succeeded) — or enable Strict Local Mode directly in the popup for zero network lookups.
 
 PERMISSIONS
 • Webmail site access — used only on supported webmail services so the extension can scan opened emails locally, show warning banners, and pause risky links and untrusted attachments.
@@ -96,7 +96,7 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 ### Data Collection & Off-Device Transmission
 - **Does the extension transmit any data off-device?**
   - **Email content, sender email addresses, attachment files/names, and full URLs:** **No** — processed strictly in memory on the user's device and never transmitted anywhere.
-  - **Registrable website domains (disclosed as `Personal communications`, `Web history` and `Website content`, domain names only):** When an untrusted email is opened or an external link inside an email is clicked, **only the bare registrable domain name** (e.g., `example.com`, never URL paths/queries or email addresses) is queried over HTTPS against public IANA/registry RDAP (`data.iana.org`, registry RDAP / `rdap.org`) and public DNS-over-HTTPS (`cloudflare-dns.com`, `dns.google` fallback) to check domain age, mail setup, and URIBL spam status. No developer backend, analytics, or user tracking exists.
+  - **Registrable website domains (check `Personal communications`, `Web history` and `Website content` in the CWS form, domain names only):** When an untrusted email is opened or an external link inside an email is clicked, **only the bare registrable domain name** (e.g., `example.com`, never URL paths/queries or email addresses) is queried over HTTPS against public IANA/registry RDAP (`data.iana.org`, registry RDAP / `rdap.org`) and public DNS-over-HTTPS (`cloudflare-dns.com`, `dns.google` fallback) to check domain age, mail setup, and URIBL spam status. No developer backend, analytics, or user tracking exists.
 
 | Data Type | Collected / Stored Externally by Developer? | Transmitted Off-Device? | Purpose | Shared with Third Parties? |
 |-----------|---------------------------------------------|------------------------|---------|---------------------------|
@@ -104,11 +104,11 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 | Health info | No | No | N/A | No |
 | Financial info | No | No | N/A | No |
 | Authentication info | No | No | N/A | No |
-| Personal communications | No (emails analyzed locally in browser memory only) | Yes — only the registrable domain of the sender of an opened untrusted email (never the address, content, links or attachments) to public RDAP & DNS resolvers | Check the sender domain's registration age, email records and spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
-| Location | No | No | N/A | No |
-| Web history | No | Yes — only the registrable domain of an external link the user clicks in an email (never the URL path, query or the user's other browsing) to public RDAP & DNS resolvers | Check a clicked destination before it opens | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
+| Personal communications | Domain name only (the sender's registrable domain; emails themselves are analyzed locally in browser memory only) | Yes — only the registrable domain of the sender of an opened untrusted email (never the address, content, full link URLs or attachments; a clicked link's domain is covered under Web history) to public RDAP & DNS resolvers | Check the sender domain's registration age, email records and spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
+| Location | No (the extension never reads, stores or sends an IP address or location; public RDAP/DNS resolvers see the user's IP only as connection metadata of each lookup, see privacy.md §4) | No | N/A | No |
+| Web history | Domain name only (of a clicked external link) | Yes — only the registrable domain of an external link the user clicks in an email (never the URL path, query or the user's other browsing) to public RDAP & DNS resolvers | Check a clicked destination before it opens | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
 | User activity | No | No | N/A | No |
-| Website content | Domain name only (sender / clicked external link registrable domain) | Yes — bare domain name only to public RDAP & DNS resolvers (24 h cached) | Check domain registration age, DNS email records, and URIBL spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
+| Website content | Domain name only (sender / clicked external link registrable domain) | Yes — bare domain name only to public RDAP & DNS resolvers (cached up to 24 h) | Check domain registration age, DNS email records, and URIBL spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
 
 ### Data Use Certification (Check all 3 boxes in CWS Dashboard)
 - [x] I do not sell or transfer user data to third parties, outside of the approved use cases
@@ -142,6 +142,7 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
+| (next) | 2026-11-25 | Privacy practices answers corrected: *Personal communications*, *Web history* and *Website content* are checked (registrable domains only, to public RDAP/DNS). | Pending submission |
 | 0.1.0 | 2026-11-23 | Initial store-ready package: local phishing detection for Gmail, Outlook Web, and iCloud Mail; untrusted attachment locking; click-time link guard & `warning.html` recovery guide; domain RDAP/DNS/URIBL checks. | In Review / Resubmitted |
 
 ### Rejection History
