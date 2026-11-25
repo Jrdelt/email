@@ -1,0 +1,34 @@
+Open your email as usual. If a message looks like a phishing or scam attempt, a banner at the top explains why in plain English and pauses its links until you decide what to do.
+
+WORKS WITH
+Gmail, Outlook on the web and iCloud Mail, in your browser on a computer. It does not run inside phone or desktop mail apps. After installing, reload any webmail tab you already had open.
+
+WHAT IT LOOKS FOR
+• Fake senders: a display name that claims to be a well-known company but comes from a different address, lookalike web addresses, and senders your webmail could not verify.
+• Deceptive links: text that shows one website but goes to another, URL shorteners and IP loggers that hide where you will land, and pages hosted on raw cloud storage.
+• Pressure tactics: urgent threats about your password or account.
+• New or reported sites: whether the sender's domain, or a site you click through to, was registered in the last 30 days, does not exist, or is on a public spam list.
+• Risky attachments: files that disguise their real type or can run code.
+
+WHAT IT DOES
+• Pauses the links and forms in a flagged message until you click "I trust this email". You can always keep reading.
+• Keeps attachments locked on messages you have not trusted yet, even when the text itself looks fine.
+• Double-checks where you are going the moment you click, sees through redirect wrappers, and stops on a warning page if the destination looks dangerous.
+• Already clicked something suspicious? A calm step-by-step recovery guide is one click away in the toolbar popup.
+• Asks you to confirm before "I trust this email" unlocks a high-risk message, and lets you undo trust with one click.
+
+PRIVATE BY DESIGN
+• Your email text, attachments, sender addresses and full links never leave your browser.
+• For the age and spam-list checks, only the bare site name (like example.com) is looked up with public domain registration (RDAP) and DNS services, then cached on your device for up to 24 hours. These lookups are the reason the privacy section of this page lists personal communications, web history and website content.
+• No account, no ads, no analytics, no tracking. It checks a message only when you open it.
+• Free and open source (MIT license). The source code is linked from this page.
+
+GOOD TO KNOW
+No tool catches every scam, and a quiet inbox is not a guarantee. If a message feels wrong, contact the sender another way, such as through their official website or phone number.
+
+WHY IT ASKS FOR ACCESS
+• Your webmail sites: to read the email you open, show the banner, and pause links and attachments. Messages are checked on your computer, not on a server.
+• Storage: to remember your trusted senders and recent lookups on this device.
+
+SUPPORT
+Spotted a false alarm or a bug? Use the Support section on this page. The "Not phishing" button only saves a private note on your device, so it does not reach us.

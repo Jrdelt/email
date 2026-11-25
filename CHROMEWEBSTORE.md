@@ -22,7 +22,8 @@ Phishing Email Detector
 **Short Description** [REQUIRED — 119 / 132 characters]
 Warns about phishing in webmail. Email content stays in your browser; only sender and clicked link domains are checked.
 
-**Detailed Description** [REQUIRED — plain text, copy-paste directly]
+**Detailed Description** [REQUIRED — plain text]
+> Paste from [store/listing/description-0.1.0.txt](store/listing/description-0.1.0.txt) now, and [description-0.2.0.txt](store/listing/description-0.2.0.txt) together with the 0.2.0 package, opened in a plain-text editor (see [store/README.md](store/README.md)). Do not copy the block below from a rendered page: that is how hard line breaks reached the live listing. The block is kept for reference only.
 ```text
 Warns you about phishing emails, deceptive links, and unsafe attachments in Gmail, Outlook on the web, iCloud Mail, Yahoo Mail, and Proton Mail while keeping your email content private on your device.
 
@@ -50,7 +51,7 @@ Found a bug or false alarm? Use the Support link on this listing to report an is
 ```
 
 **Category** [REQUIRED]
-- **Chrome Web Store:** `Productivity` → `Workflow & Planning` (or `Tools`)
+- **Chrome Web Store:** `Privacy & Security` (set on the live listing)
 - **Microsoft Edge Add-ons:** `Security & Privacy`
 
 **Single Purpose** [REQUIRED]
@@ -62,6 +63,8 @@ English
 ---
 
 ## Graphics & Assets
+
+> Current files: [store/graphics/](store/graphics/) (real screenshots of the extension on an invented webmail page, small promo tile, marquee, padded store icon); see [store/README.md](store/README.md) for the upload order. The live 0.1.0 listing still has older mockup screenshots: replace them with screenshots 1-4.
 
 | Asset | Dimensions | Store | Status | Filename |
 |-------|-----------|-------|--------|----------|
@@ -143,7 +146,7 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
 | (next) | 2026-11-25 | Privacy practices answers corrected: *Personal communications*, *Web history* and *Website content* are checked (registrable domains only, to public RDAP/DNS). | Pending submission |
-| 0.1.0 | 2026-11-23 | Initial store-ready package: local phishing detection for Gmail, Outlook Web, and iCloud Mail; untrusted attachment locking; click-time link guard & `warning.html` recovery guide; domain RDAP/DNS/URIBL checks. | In Review / Resubmitted |
+| 0.1.0 | 2026-11-23 | Initial store-ready package: local phishing detection for Gmail, Outlook Web, and iCloud Mail; untrusted attachment locking; click-time link guard & `warning.html` recovery guide; domain RDAP/DNS/URIBL checks. | Published |
 
 ### Rejection History
 
