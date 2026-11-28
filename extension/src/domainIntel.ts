@@ -1,5 +1,5 @@
-// Online domain lookups. ONLY validated registrable domains (sender domains and clicked external
-// link destination domains) are ever sent — never email content, addresses, or full URLs.
+// Online domain lookups. ONLY validated registrable domains (sender domains, and the destination domains of
+// clicked external links and submitted forms) are ever sent — never email content, addresses, or full URLs.
 // Runs in the background script, results cached 24 h. Every lookup is best-effort:
 //   RDAP (registry found via IANA bootstrap data.iana.org; rdap.org fallback): registration date, expiry, registrar
 //   DNS-over-HTTPS (cloudflare-dns.com): MX, SPF, DMARC, NXDOMAIN

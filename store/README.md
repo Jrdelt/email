@@ -6,7 +6,7 @@ Everything the store listing needs, ready to upload or paste. `graphics/preview-
 
 | File | Where it goes | Note |
 |------|---------------|------|
-| `description-0.1.0.txt` | Store listing → Description, **now** | Matches the published 0.1.0 (Gmail, Outlook, iCloud only). |
+| `description-0.1.0.txt` | Store listing → Description, **now** | Matches the 0.1.0 package submitted on 2026-11-23 (Gmail, Outlook, iCloud only; it still describes that package's spam-list check, which later versions removed). |
 | `description-0.2.0.txt` | Store listing → Description, **with the 0.2.0 package** | Adds Yahoo Mail, Proton Mail and Strict Local Mode. Never paste it before 0.2.0 is uploaded. |
 | `name.txt`, `summary.txt` | `extension/wxt.config.ts` (manifest `name` / `description`) | **Not applied yet:** `wxt.config.ts` still has the 0.1.0 name and description. The store takes the name and short description from the package, so copy these in together with the 0.2.0 version bump (`extension/package.json` is still `0.1.0`). |
 

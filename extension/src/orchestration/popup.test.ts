@@ -74,3 +74,15 @@ describe('popup: "Clear all local data"', () => {
     expect(await fakeBrowser.storage.session.get(null)).toEqual({ other: 1 });
   });
 });
+
+describe('popup: the lookup disclosure names every domain that is looked up', () => {
+  // Form submissions in an email are checked like links (their destination's domain is looked up), so the in-product
+  // disclosure must say so, as docs/privacy.md does.
+  it('mentions submitted forms next to senders and clicked links', async () => {
+    await openPopup({ id: 1, url: 'https://mail.google.com/mail/u/0/#inbox' });
+    expect(document.getElementById('privacy-note')!.textContent).toMatch(/links you click or forms you submit/);
+    const notes = [...document.querySelectorAll('p.muted')].map((p) => p.textContent ?? '');
+    expect(notes.some((t) => /submitted form destination domains are checked online/.test(t))).toBe(true);
+  });
+});
+

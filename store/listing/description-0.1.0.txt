@@ -4,10 +4,10 @@ WORKS WITH
 Gmail, Outlook on the web and iCloud Mail, in your browser on a computer. It does not run inside phone or desktop mail apps. After installing, reload any webmail tab you already had open.
 
 WHAT IT LOOKS FOR
-• Fake senders: a display name that claims to be a well-known company but comes from a different address, lookalike web addresses, and (in Gmail set to English) senders Gmail could not verify.
+• Fake senders: a display name that claims to be a well-known company but comes from a different address, lookalike web addresses, and senders your webmail could not verify.
 • Deceptive links: text that shows one website but goes to another, URL shorteners and IP loggers that hide where you will land, and pages hosted on raw cloud storage.
 • Pressure tactics: urgent threats about your password or account.
-• Brand-new sites: whether the sender's domain, or a site you click through to, was registered in the last 30 days or does not exist at all.
+• New or reported sites: whether the sender's domain, or a site you click through to, was registered in the last 30 days, does not exist, or is on a public spam list.
 • Risky attachments: files that disguise their real type or can run code.
 
 WHAT IT DOES
@@ -19,7 +19,7 @@ WHAT IT DOES
 
 PRIVATE BY DESIGN
 • Your email text, attachments, sender addresses and full links never leave your browser.
-• For the website age checks, only the bare site name (like example.com) is looked up with public domain registration (RDAP) and DNS services, then cached on your device for up to 24 hours. These lookups are the reason the privacy section of this page lists personal communications, web history and website content.
+• For the age and spam-list checks, only the bare site name (like example.com) is looked up with public domain registration (RDAP) and DNS services, then cached on your device for up to 24 hours. These lookups are the reason the privacy section of this page lists personal communications, web history and website content.
 • No account, no ads, no analytics, no tracking. It checks a message only when you open it.
 • Free and open source (MIT license). The source code is linked from this page.
 
