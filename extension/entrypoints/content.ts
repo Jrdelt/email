@@ -163,7 +163,7 @@ const stringsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x 
  * tab's Undo) is also dropped from this tab's in-memory session trust, so a cleared email re-locks here too.
  * Trust added elsewhere (another tab with the same email or sender open) rescans too. Only the fingerprints this
  * tab's own "I trust this email" stored (`ownWrites`, consumed here) do not: that action already applied them, and
- * a rescan would tear down its Undo pill. ("Always trust sender" does rescan: its banner is gone anyway.)
+ * a rescan would tear down its Undo pill. ("Always trust sender" has no pill to keep, so it rescans here too.)
  */
 function storageChangeAffectsVerdicts(
   changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
