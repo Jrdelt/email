@@ -51,6 +51,16 @@ export const textOf = (node: Node): string => builtin<string | null>(node, 'text
 export const ownerDocOf = (node: Node): Document => builtin<Document>(node, 'ownerDocument');
 const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;
 
+const NON_TEXT_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'file', 'color', 'range', 'hidden']);
+
+/** A text field or an editable region (a reply being typed): Space and Enter there type text, not activate a control. */
+export function isTextEntry(el: Element): boolean {
+  const tag = tagOf(el);
+  if (tag === 'textarea') return true;
+  if (tag === 'input') return !NON_TEXT_INPUT_TYPES.has((getAttr(el, 'type') ?? '').trim().toLowerCase());
+  return builtin<boolean | undefined>(el, 'isContentEditable') === true;
+}
+
 /** Resolve event.target to an Element even when dispatched on a Text node (clobbering-safe). */
 export function eventElement(e: Event): Element | null {
   const node = e.target as Node | null;

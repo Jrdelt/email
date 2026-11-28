@@ -13,6 +13,7 @@ import {
   eventElement,
   getAttr,
   hasAttr,
+  isTextEntry,
   ownerDocOf,
   queryAll,
   rawLinkTarget,
@@ -528,14 +529,17 @@ function installClickGuard(opts: {
     if (e.type === 'keydown') {
       const key = (e as KeyboardEvent).key;
       if (key !== 'Enter' && key !== ' ') return;
+      // Typed into a text field or a reply: activates no attachment control (only those act on keydown here).
+      if (isTextEntry(el)) return;
     } else if (e.type === 'auxclick') {
       if ((e as MouseEvent).button !== 1) return;
     } else if (e.type === 'click') {
       if ((e as MouseEvent).button !== 0) return;
     }
 
-    const attHit = opts.findAttachment?.(el);
-    if (attHit && !isAttachmentLocked(attHit.element) && opts.isPending()) {
+    // Only while a scan is pending: findAttachment may then have to extract the page (once per DOM change).
+    const attHit = opts.isPending() ? opts.findAttachment?.(el) : null;
+    if (attHit && !isAttachmentLocked(attHit.element)) {
       e.preventDefault();
       e.stopImmediatePropagation();
       if (e.type === 'mousedown' || e.type === 'pointerdown') return;
@@ -951,6 +955,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
 
   const scan = async () => {
     if (document.hidden) return; // never work in background tabs
+    pendingExtraction = null;
     watchFrames();
     const emails = extractAll(adapter, document);
     if (emails.length === 0) {
@@ -1036,6 +1041,14 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   };
 
   const scheduler = createScheduler(scan);
+  // While a scan is pending, click-time lookups of elements the last scan did not see use a fresh extraction, made
+  // at most once per DOM change (not once per press: a press dispatches pointerdown, mousedown and click).
+  let pendingExtraction: ExtractedEmail[] | null = null;
+  const freshEmails = () => (pendingExtraction ??= extractAll(adapter, document));
+  const domChanged = () => {
+    pendingExtraction = null;
+    scheduler.schedule();
+  };
 
   // Gmail's inbox list shows file buttons for emails that were never opened, so never scanned: refuse to open those
   // files there (for every sender: the list shows no sender verification) and point the user to the email itself.
@@ -1096,7 +1109,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
         }
       }
       if (scheduler.isPending()) {
-        const fresh = extractAll(adapter, document).find((m) => m.container.contains(a));
+        const fresh = freshEmails().find((m) => m.container.contains(a));
         if (fresh) {
           const s = analyzeSender(fresh.senderName, fresh.senderAddress, []);
           return { container: fresh.container, senderAddress: s.address, senderRegistrable: s.registrable };
@@ -1106,7 +1119,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     },
     findAttachment: (el) =>
       matchAttachmentInMessages(activeMessages, el) ??
-      (scheduler.isPending() ? matchAttachmentInMessages(extractAll(adapter, document), el) : null),
+      (scheduler.isPending() ? matchAttachmentInMessages(freshEmails(), el) : null),
     isPending: () => scheduler.isPending(),
     flushScan: () => scheduler.flush(),
   });
@@ -1123,7 +1136,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       watchedFrameDocs.add(frameDoc);
       new MutationObserver(() => {
         guardDoc(frameDoc);
-        scheduler.schedule();
+        domChanged();
       }).observe(frameDoc, { childList: true, subtree: true });
     }
   };
@@ -1138,14 +1151,14 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   if (rootTarget) {
     new MutationObserver((records) => {
       if (adapter?.frameDocs && addsFrame(records)) watchFrames();
-      scheduler.schedule();
+      domChanged();
     }).observe(rootTarget, { childList: true, subtree: true });
   }
   // An iframe that (re)loads gets a new document without any top-level DOM change.
   document.addEventListener('load', (e) => {
     if (e.target instanceof HTMLIFrameElement) {
       watchFrames();
-      scheduler.schedule();
+      domChanged();
     }
   }, true);
   watchFrames();
@@ -1268,6 +1281,12 @@ function runICloudSandbox() {
   };
 
   const scheduler = createScheduler(async () => report(false));
+  // Extraction for click-time attachment lookups while a decision is pending, made at most once per DOM change.
+  let pressExtraction: ReturnType<typeof extractICloudSandbox> | null = null;
+  const domChanged = () => {
+    pressExtraction = null;
+    scheduler.schedule();
+  };
   // Pairing: the app frame posts a random token to this frame's window; reporting it back through the background
   // (which adds the verified frame id) lets the app tie this body to its card in every browser.
   window.addEventListener('message', (e) => {
@@ -1285,7 +1304,7 @@ function runICloudSandbox() {
       document.body && document.body.contains(a)
         ? { container: document.body, senderAddress: '', senderRegistrable: '' }
         : null,
-    findAttachment: (el) => matchAttachmentInMessages([extractICloudSandbox(document)], el),
+    findAttachment: (el) => matchAttachmentInMessages([(pressExtraction ??= extractICloudSandbox(document))], el),
     isPending: () => scheduler.isPending() || awaitingVerdict,
     flushScan: async () => {
       await scheduler.flush();
@@ -1323,7 +1342,7 @@ function runICloudSandbox() {
   });
 
   const target = document.body ?? document.documentElement;
-  if (target) new MutationObserver(scheduler.schedule).observe(target, { childList: true, subtree: true });
+  if (target) new MutationObserver(domChanged).observe(target, { childList: true, subtree: true });
   // Only visibility matters (a pooled frame shown or hidden): animated content resizes the document every frame.
   if (typeof ResizeObserver !== 'undefined' && document.documentElement) {
     let lastVisible: boolean | null = null;
@@ -1332,7 +1351,7 @@ function runICloudSandbox() {
       const visible = Boolean(rect && rect.width > 0 && rect.height > 0);
       if (visible === lastVisible) return;
       lastVisible = visible;
-      scheduler.schedule();
+      domChanged(); // a hidden frame extracts as inactive
     }).observe(document.documentElement);
   }
   document.addEventListener('visibilitychange', () => {
@@ -1398,6 +1417,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
 
   const scan = async () => {
     if (document.hidden) return;
+    pendingHeaders = null;
     const headers = extractICloudHeaders(document);
     const headerIds = headers.map((h) => h.id).join('|');
     if (headerIds !== lastHeaderIds) {
@@ -1482,12 +1502,18 @@ function runICloudApp(kv: typeof browser.storage.local) {
   };
 
   const scheduler = createScheduler(scan);
+  // As on standard webmail: a fresh extraction for click-time lookups while a scan is pending, once per DOM change.
+  let pendingHeaders: ReturnType<typeof extractICloudHeaders> | null = null;
+  const domChanged = () => {
+    pendingHeaders = null;
+    scheduler.schedule();
+  };
 
   installClickGuard({
     findTarget: () => null,
     findAttachment: (el) =>
       matchAttachmentInMessages(activeMessages, el) ??
-      (scheduler.isPending() ? matchAttachmentInMessages(extractICloudHeaders(document), el) : null),
+      (scheduler.isPending() ? matchAttachmentInMessages((pendingHeaders ??= extractICloudHeaders(document)), el) : null),
     isPending: () => scheduler.isPending(),
     flushScan: () => scheduler.flush(),
   });
@@ -1542,7 +1568,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
     }
   });
 
-  if (document.body) new MutationObserver(scheduler.schedule).observe(document.body, { childList: true, subtree: true });
+  if (document.body) new MutationObserver(domChanged).observe(document.body, { childList: true, subtree: true });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) scheduler.schedule();
   });

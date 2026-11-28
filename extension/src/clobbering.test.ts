@@ -9,7 +9,7 @@ import { linksIn } from './adapters/extract';
 import { outlook } from './adapters/outlook';
 import { proton } from './adapters/proton';
 import { yahoo } from './adapters/yahoo';
-import { closestEl, eventElement, isFormEl, tagOf, textOf } from './dom';
+import { closestEl, eventElement, isFormEl, isTextEntry, tagOf, textOf } from './dom';
 import { lockLinks } from './ui/linkLock';
 import { lockAttachments } from './ui/attachmentLock';
 
@@ -55,6 +55,17 @@ describe('dom helpers resist <form> clobbering', () => {
     expect(tagOf(f)).toBe('form');
     expect(isFormEl(f)).toBe(true);
     expect(textOf(f)).toBe('Hello');
+  });
+
+  it('isTextEntry: text fields and editable regions, not controls, nor a form whose isContentEditable is shadowed', () => {
+    document.body.innerHTML = `<textarea id="t"></textarea><input id="i"><input id="s" type="search">
+      <input id="b" type="button"><input id="c" type="CHECKBOX"><div id="e" contenteditable="true"><span id="in">x</span></div>
+      <div id="d" role="button">Download</div><form id="f"></form>`;
+    const entry = (id: string) => isTextEntry(document.getElementById(id)!);
+    expect(['t', 'i', 's', 'e', 'in'].map(entry)).toEqual([true, true, true, true, true]);
+    expect(['b', 'c', 'd'].map(entry)).toEqual([false, false, false]);
+    clobber(form(), ['isContentEditable']);
+    expect(entry('f')).toBe(false);
   });
 });
 
