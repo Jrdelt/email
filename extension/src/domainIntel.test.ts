@@ -79,7 +79,7 @@ describe('lookupDomain', () => {
     expect(i.rdap.status).toBe('unsupported');
     expect(intelWarnings(i, NOW)).toEqual([]);
   });
-  it('flags NXDOMAIN on DNS even when RDAP TLD is unsupported (e.g. .itl)', async () => {
+  it('flags NXDOMAIN on DNS even when the TLD has no RDAP service', async () => {
     const nxFetch: FetchFn = vi.fn(async (url: string) => {
       const u = new URL(url);
       if (u.hostname === 'data.iana.org') return json({ services: [] });
@@ -88,10 +88,10 @@ describe('lookupDomain', () => {
       if (name.endsWith('.multi.uribl.com')) return json({ Status: 3 });
       return json({ Status: 3 });
     }) as FetchFn;
-    const i = await lookupDomain('nozfr.itl', nxFetch, NOW);
+    const i = await lookupDomain('lure-sender.example', nxFetch, NOW);
     expect(i.rdap.status).toBe('unsupported');
     expect(i.dns.nxdomain).toBe(true);
-    expect(intelWarnings(i, NOW)).toContain("The sender's website (nozfr.itl) does not exist");
+    expect(intelWarnings(i, NOW)).toContain("The sender's website (lure-sender.example) does not exist");
   });
   it('network failure degrades to error states, never throws', async () => {
     const i = await lookupDomain('example.com', (async () => { throw new Error('offline'); }) as FetchFn, NOW);

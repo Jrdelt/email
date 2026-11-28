@@ -55,8 +55,8 @@ describe('analyzeLinkDestination', () => {
     expect(analyzeLinkDestination('http://1.2.3.4/a').level).toBe('danger');
     expect(analyzeLinkDestination('http://[2001:db8::1]/login').level).toBe('danger');
     expect(analyzeLinkDestination('https://xn--pple-43d.com/verify').level).toBe('danger');
-    expect(analyzeLinkDestination('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl').level).toBe('danger');
-    expect(analyzeLinkDestination('https://storage.googleapis.com./hmdbox/hmd_v2.html').level).toBe('danger');
+    expect(analyzeLinkDestination('https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl').level).toBe('danger');
+    expect(analyzeLinkDestination('https://storage.googleapis.com./example-lure-bucket/lure.html').level).toBe('danger');
     expect(analyzeLinkDestination('https://commondatastorage.googleapis.com/example-bucket/login.html').level).toBe('danger');
     expect(analyzeLinkDestination('https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.dweb.link/login.html').level).toBe('danger');
     for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso', 'docm', 'mhtml', 'jar', 'rdp', 'iqy', 'searchConnector-ms']) {

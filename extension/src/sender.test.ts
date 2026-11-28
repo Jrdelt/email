@@ -23,7 +23,7 @@ describe('analyzeSender', () => {
   });
   it('brand name from the wrong domain (including concatenated names)', () => {
     expect(w('PayPal Support', 'help@gmail.com')[0]).toMatch(/Claims to be PayPal, but was sent from gmail\.com/);
-    expect(w('GmailSupportTeam', 'alert-442-320397@nozfr.itl')[0]).toMatch(/Claims to be Gmail, but was sent from nozfr\.itl/);
+    expect(w('GmailSupportTeam', 'alert-0000@lure-sender.example')[0]).toMatch(/Claims to be Gmail, but was sent from lure-sender\.example/);
     expect(w('gmailsupportteam', 'x@evil.example')[0]).toMatch(/Claims to be Gmail, but was sent from evil\.example/);
     expect(w('PayPalSupport', 'x@evil.example')[0]).toMatch(/Claims to be PayPal, but was sent from evil\.example/);
     expect(w('iCloudSecurity', 'x@evil.example')[0]).toMatch(/Claims to be iCloud, but was sent from evil\.example/);
@@ -41,11 +41,11 @@ describe('analyzeSender', () => {
   });
 
   it('flags suspicious via relays and unauthenticated senders while allowing known ESP relays', () => {
-    const suspicious = analyzeSender('GmailSupportTeam', 'alert@nozfr.itl', [], {
-      viaDomain: '442.320397.jnc7.one.bss0019.narodaro.my.id',
+    const suspicious = analyzeSender('GmailSupportTeam', 'alert@lure-sender.example', [], {
+      viaDomain: '442.0000.relay7.one.bss0019.lure-relay.example',
     });
     expect(suspicious.authIssue).toBe(true);
-    expect(suspicious.warnings.join(' | ')).toMatch(/suspicious relay server \(my\.id\)/);
+    expect(suspicious.warnings.join(' | ')).toMatch(/suspicious relay server \(lure-relay\.example\)/);
     expect(canTrustByAllowlist(suspicious)).toBe(false);
 
     const esp = analyzeSender('Shop Updates', 'news@shop.com', [], { viaDomain: 'em123.sendgrid.net' });

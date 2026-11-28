@@ -80,7 +80,7 @@ describe('scoreEmail', () => {
     expect(sameOrg.level).toBe('safe');
   });
   it('flags cloud-storage HTML lure links while ignoring cloud-hosted images/PDFs', () => {
-    expect(isCloudHtmlLink('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl')).toBe(true);
+    expect(isCloudHtmlLink('https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl')).toBe(true);
     expect(isCloudHtmlLink('https://bucket.s3.amazonaws.com/login.htm')).toBe(true);
     expect(isCloudHtmlLink('https://acct.blob.core.windows.net/c/verify.html')).toBe(true);
     expect(isCloudHtmlLink('https://firebasestorage.googleapis.com/v0/b/x/o/a%2Flogin.html?alt=media')).toBe(true);
@@ -91,13 +91,13 @@ describe('scoreEmail', () => {
     expect(isCloudHtmlLink('https://account.mongodb.com/login.html')).toBe(false);
 
     const phish = scoreEmail(
-      'alert-442-320397@nozfr.itl',
+      'alert-0000@lure-sender.example',
       "We've Blocked Your Account! Your photos and videos will be deleted. Please update your billing details. Expiration date: Today.",
       [
-        { text: 'Cloud Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' },
-        { text: 'Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' },
-        { text: 'Unsubscribe', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=un' },
-        { text: 'here', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=oop' },
+        { text: 'Cloud Review billing', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl' },
+        { text: 'Review billing', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl' },
+        { text: 'Unsubscribe', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=un' },
+        { text: 'here', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=oop' },
       ],
     );
     expect(phish.level).toBe('likely-phishing');

@@ -52,7 +52,7 @@ def test_extracts_embedded_urls_and_handles_multipart_suffixes():
 
 
 def test_cloud_storage_html_links_and_billing_urgency():
-    assert is_cloud_html_link("https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl")
+    assert is_cloud_html_link("https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl")
     assert is_cloud_html_link("https://bucket.s3.amazonaws.com/login.htm")
     assert is_cloud_html_link("https://acct.blob.core.windows.net/c/verify.html")
     assert is_cloud_html_link("https://firebasestorage.googleapis.com/v0/b/x/o/a%2Flogin.html?alt=media")
@@ -62,10 +62,10 @@ def test_cloud_storage_html_links_and_billing_urgency():
     assert not is_cloud_html_link("https://account.mongodb.com/login.html")
 
     f = extract_features(
-        "alert-442-320397@nozfr.itl",
+        "alert-0000@lure-sender.example",
         "Your photos will be deleted. Update billing details before expiration.",
         [
-            Link("Review billing", "https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl"),
+            Link("Review billing", "https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl"),
             Link("Logo", "https://storage.googleapis.com/assets/logo.png"),
         ],
     )

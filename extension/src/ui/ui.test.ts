@@ -623,24 +623,24 @@ describe('gmail adapter', () => {
             <h3 class="iw gFxsud">
               <span class="qu yKyxu">
                 <span class="gD"><span>GmailSupportTeam</span></span>
-                <span class="go gD">alert-442-320397@nozfr.itl</span>
-                <span class="go">via 442.320397.jnc7.one.bss0019.narodaro.my.id</span>
+                <span class="go gD">alert-0000@lure-sender.example</span>
+                <span class="go">via 442.0000.relay7.one.bss0019.lure-relay.example</span>
               </span>
             </h3>
           </div>
           <div><div class="ii gt"><div class="a3s">
             Please update your billing details.
-            <a href="https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl">Review billing</a>
+            <a href="https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl">Review billing</a>
           </div></div></div>
         </div>
       </div>`;
     const e = gmail.extract(document)!;
     expect(e.senderName).toBe('GmailSupportTeam');
-    expect(e.senderAddress).toBe('alert-442-320397@nozfr.itl');
-    expect(e.viaDomain).toBe('442.320397.jnc7.one.bss0019.narodaro.my.id');
+    expect(e.senderAddress).toBe('alert-0000@lure-sender.example');
+    expect(e.viaDomain).toBe('442.0000.relay7.one.bss0019.lure-relay.example');
     expect(e.body).toContain("We've Blocked Your Account!");
     expect(e.body).toContain('Please update your billing details.');
-    expect(e.links).toEqual([{ text: 'Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' }]);
+    expect(e.links).toEqual([{ text: 'Review billing', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl' }]);
   });
 
   it('extracts a.acP viaDomain, unauthenticated warning badge, and ignores spoofed header markup inside div.a3s', () => {

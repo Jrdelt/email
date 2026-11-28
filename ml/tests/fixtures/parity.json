@@ -161,12 +161,12 @@
   },
   {
     "name": "cloud_storage_html_gcs_and_trailing_dot",
-    "sender": "alert@nozfr.itl",
+    "sender": "alert@lure-sender.example",
     "body": "Your photos will be deleted. Update billing details before expiration.",
     "links": [
       {
         "text": "Review billing",
-        "href": "https://storage.googleapis.com./hmdbox/hmd_v2.html#?act=cl"
+        "href": "https://storage.googleapis.com./example-lure-bucket/lure.html#?act=cl"
       },
       {
         "text": "Logo",
