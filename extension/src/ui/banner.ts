@@ -43,6 +43,7 @@ const CHEVRON_MASK = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/20
 const BANNER_CSS = `
   :host{all:initial!important;display:block!important;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif!important;color:#111111!important;font-size:14px!important;line-height:1.4!important;direction:ltr!important;text-align:left!important;visibility:visible!important;opacity:1!important}
   .wrap{position:fixed;top:22px;left:16px;right:16px;z-index:2147483647;display:flex;justify-content:center;pointer-events:none}
+  .frame{position:relative;width:100%;max-width:760px;display:flex;justify-content:center}
   .card{
     pointer-events:auto;position:relative;width:100%;max-width:760px;box-sizing:border-box;
     background:#ffffff;color:#111111;border:2px solid #111111;border-radius:16px;
@@ -50,19 +51,22 @@ const BANNER_CSS = `
     opacity:1;translate:0;
     transition:opacity .2s ease-out,translate .2s ease-out;
   }
+  .card:not(.trusted-pill){
+    max-height:calc(100vh - 44px);max-height:calc(100dvh - 44px);overflow:auto;overscroll-behavior:contain;
+  }
   @starting-style{.card{opacity:0;translate:0 -10px}}
   @media (prefers-reduced-motion: reduce){
     .card{translate:none;transition-duration:.1s}
     @starting-style{.card{translate:none}}
   }
   .sticker-top{
-    position:absolute;top:-15px;right:44px;rotate:4deg;
+    position:absolute;top:-13px;right:46px;rotate:4deg;z-index:1;
     background:#ffd166;color:#111111;border:2px solid #111111;border-radius:999px;
     box-shadow:3px 3px 0 #111111;padding:4px 16px;
     font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
     pointer-events:none;
   }
-  .card.danger .sticker-top{background:#ff563f}
+  .frame.danger .sticker-top{background:#ff563f}
   .x{
     position:absolute;top:14px;right:14px;width:30px;height:30px;padding:0;
     border-radius:50%;background:#ffffff;color:#111111;border:2px solid #111111;
@@ -319,6 +323,10 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
 
   const wrap = doc.createElement('div');
   wrap.className = 'wrap';
+  // The card scrolls (it can be taller than a small or zoomed window, and it is fixed: the page scroll cannot reach
+  // its lower part); the sticker sits outside it, on this frame, so the scroll box does not clip it.
+  const frame = doc.createElement('div');
+  frame.className = `frame ${model.level}`;
 
   const card = doc.createElement('div');
   card.className = `card ${model.level}`;
@@ -600,6 +608,7 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
 
   const renderTrustedPill = () => {
     card.textContent = '';
+    topSticker.remove();
     card.className = 'card trusted-pill';
     card.setAttribute('role', 'status');
     card.removeAttribute('aria-labelledby');
@@ -671,8 +680,9 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
     }
   }
 
-  card.append(topSticker, close, mainRow, actionsBar, ...[emailConfirm, senderConfirm].filter((b) => b !== undefined), drawer);
-  wrap.append(card);
+  card.append(close, mainRow, actionsBar, ...[emailConfirm, senderConfirm].filter((b) => b !== undefined), drawer);
+  frame.append(card, topSticker);
+  wrap.append(frame);
   root.append(style, wrap);
   (documentElementOf(doc) ?? doc.body).appendChild(host);
   hosts.set(doc, host);

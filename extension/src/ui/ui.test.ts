@@ -474,6 +474,31 @@ describe('banner', () => {
     }
   });
 
+  it('lets the card scroll when it is taller than the window (small or zoomed), with the sticker outside the scroll box', () => {
+    // The card is position:fixed, so the page scroll never reaches a part of it below the window: at 200% zoom the
+    // danger confirm buttons and the drawer were off-screen and unreachable. Checked in Chromium at 640x360.
+    document.body.innerHTML = '';
+    const sender = analyzeSender('PayPal Support', 'help@gmail.com', []);
+    let root: ShadowRoot | undefined;
+    const origAttach = HTMLElement.prototype.attachShadow;
+    const spy = vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      root = origAttach.call(this, init);
+      return root;
+    });
+    try {
+      showBanner({ level: 'danger', title: 'Possible phishing.', reasons: sender.warnings, linksLocked: true, sender }, actions());
+      const css = root!.querySelector('style')!.textContent!.replace(/\s+/g, '');
+      expect(css).toMatch(/\.card:not\(\.trusted-pill\)\{[^}]*max-height:calc\(100dvh-44px\)[^}]*overflow:auto/);
+      const card = root!.querySelector('.card')!;
+      expect(card.querySelector('.sticker-top')).toBeNull(); // the scroll box would clip it
+      expect(root!.querySelector('.frame > .sticker-top')?.textContent).toBe('PHISHING ALERT');
+      expect(css).not.toMatch(/\.trusted-pill\{[^}]*overflow:auto/);
+    } finally {
+      spy.mockRestore();
+      removeBanner();
+    }
+  });
+
   it('disables Always trust sender when sender failed authentication or used a suspicious relay', () => {
     document.body.innerHTML = '';
     const unauthSender = analyzeSender('Bank', 'alerts@bank.com', [], { unauthenticated: true });
