@@ -10,6 +10,7 @@ import { hashEmail, listTrusted, listTrustedEmails, trustEmails, trustSender, un
 import { type AttachmentAnalysis, analyzeAttachments } from '../src/attachments';
 import {
   closestEl,
+  defaultViewOf,
   eventElement,
   getAttr,
   hasAttr,
@@ -1193,6 +1194,10 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
         guardDoc(frameDoc);
         domChanged();
       }).observe(frameDoc, { childList: true, subtree: true });
+      // Navigated in place (srcdoc or src set again): the new document changes nothing in the top document, and
+      // the iframe's load event waits for every subresource (forever, if one is never answered). Rescan as the old
+      // document goes; the scan then guards, watches and checks the new one.
+      defaultViewOf(frameDoc)?.addEventListener('pagehide', domChanged, { once: true });
     }
   };
   // Look for new frames only when a mutation adds one (or on an iframe load below); scans also re-check.
