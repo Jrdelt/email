@@ -142,7 +142,14 @@ async function init() {
   applyAlertSeverity(kind);
 
   $('dest-box').hidden = false;
-  $('dest-host').textContent = stored.host || stored.registrable || 'Unknown destination';
+  // The site is the registrable domain: "www.paypal.com.account-review.example" is account-review.example, which the
+  // full host name alone lets read as PayPal. The full host name follows, smaller.
+  const site = stored.registrable || stored.host;
+  $('dest-host').textContent = site || 'Unknown destination';
+  if (stored.host && stored.registrable && stored.host !== stored.registrable) {
+    $('dest-fullhost').textContent = `Full host name: ${stored.host}`;
+    $('dest-fullhost').hidden = false;
+  }
   // The URL as it is navigated to. The stored href is the string unwrapRedirect() returned, which percent-decodes a
   // wrapper's inner target, so it can hold a raw U+202E that reverses the rest of the line ("evil.example/\u202emoc.
   // lapyap.www//:sptth" reads ".../https://www.paypal.com"). The serialisation percent-encodes every non-ASCII
@@ -186,7 +193,7 @@ async function init() {
   const adv = $('advanced-details') as HTMLDetailsElement;
   adv.hidden = false;
   const proceed = $('proceed-btn');
-  proceed.textContent = `I understand the risk — open ${stored.host || 'link'}`;
+  proceed.textContent = `I understand the risk — open ${site || 'link'}`;
   // Through the organisation's link protection when the email's link went through it, so its time-of-click check,
   // block page and click log are not skipped (proceedTarget checks again that it leads exactly to the shown address).
   const target = proceedTarget(stored.href, stored.via);

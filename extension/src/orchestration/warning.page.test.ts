@@ -109,3 +109,41 @@ describe('warning.html: lookup answers in the meta line', () => {
     expect(text('dest-meta')).toContain('Registrar: Good �Registrar');
   });
 });
+
+describe('warning.html: which site the link opens', () => {
+  // A brand-prefixed subdomain reads as the brand when only the full host is shown: the page must name the site
+  // (the registrable domain) on its own, in the headline and in the "open anyway" button.
+  const PHISH = entry({
+    href: 'https://www.paypal.com.account-review.example/signin',
+    host: 'www.paypal.com.account-review.example',
+    registrable: 'account-review.example',
+    level: 'danger',
+    reasons: ['This destination website (account-review.example) is brand new (2 days old)'],
+  });
+
+  it('names the registrable domain in the headline, with the full host name under it', async () => {
+    await openPage(PHISH, { answer: intel({ domain: 'account-review.example' }) });
+    expect(text('dest-host')).toBe('account-review.example');
+    expect(shown('dest-fullhost')).toBe(true);
+    expect(text('dest-fullhost')).toBe('Full host name: www.paypal.com.account-review.example');
+  });
+
+  it('names the registrable domain in the "open anyway" button', async () => {
+    await openPage(PHISH, { answer: intel({ domain: 'account-review.example' }) });
+    expect(text('proceed-btn')).toBe('I understand the risk — open account-review.example');
+  });
+
+  it('shows no second host line when the host is the registrable domain', async () => {
+    await openPage(entry(), { answer: intel() });
+    expect(text('dest-host')).toBe('bit.ly');
+    expect(shown('dest-fullhost')).toBe(false);
+    expect(text('proceed-btn')).toBe('I understand the risk — open bit.ly');
+  });
+
+  it('falls back to the host when the entry has no registrable domain', async () => {
+    await openPage(entry({ href: 'https://news.example.org/x', host: 'news.example.org', registrable: '' }));
+    expect(text('dest-host')).toBe('news.example.org');
+    expect(shown('dest-fullhost')).toBe(false);
+    expect(text('proceed-btn')).toBe('I understand the risk — open news.example.org');
+  });
+});
