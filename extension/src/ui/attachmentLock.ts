@@ -58,7 +58,7 @@ function blockAttachmentEvent(e: Event): void {
   const lockedRoot = el ? closestEl(el, `[${ATT_LOCK_ATTR}]`) : null;
   if (!el || !lockedRoot) return;
 
-  if (e.type === 'keydown') {
+  if (e.type === 'keydown' || e.type === 'keyup') {
     const key = (e as KeyboardEvent).key;
     if (key !== 'Enter' && key !== ' ') return;
   }
@@ -69,7 +69,8 @@ function blockAttachmentEvent(e: Event): void {
   const shouldToast =
     e.type === 'click' ||
     e.type === 'dblclick' ||
-    e.type === 'keydown' ||
+    e.type === 'contextmenu' ||
+    (e.type === 'keydown' && !(e as KeyboardEvent).repeat) ||
     (e.type === 'auxclick' && (e as MouseEvent).button === 1);
   if (shouldToast) {
     const name = lockedAttachmentName(el) ?? '';
@@ -79,10 +80,25 @@ function blockAttachmentEvent(e: Event): void {
   }
 }
 
+/** Touch: keep the page's handlers away from a locked attachment, but do not cancel (scrolls may start on it). */
+function keepTouchAway(e: Event): void {
+  const el = eventElement(e);
+  if (el && closestEl(el, `[${ATT_LOCK_ATTR}]`)) e.stopImmediatePropagation();
+}
+
+// The webmail's own controls decide which event opens a file (a role=button card may act on keyup or pointerup, a
+// custom right-click menu drawn outside the card offers "Download"), so every activation path is refused, as the
+// Gmail inbox-list guard in content.ts does. The tap that follows a touch is a click, refused with the notice.
+const BLOCKED_EVENTS = [
+  'click', 'auxclick', 'dblclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup',
+  'dragstart', 'submit', 'keydown', 'keyup',
+];
+
 /** Idempotent, like the link lock's: document.open() erases listeners but keeps the Document object. */
 function install(doc: Document): void {
-  for (const type of ['click', 'auxclick', 'dblclick', 'mousedown', 'pointerdown', 'dragstart', 'submit', 'keydown']) {
-    doc.addEventListener(type, blockAttachmentEvent, true);
+  for (const type of BLOCKED_EVENTS) doc.addEventListener(type, blockAttachmentEvent, true);
+  for (const type of ['touchstart', 'touchend']) {
+    doc.addEventListener(type, keepTouchAway, { capture: true, passive: true });
   }
   if (styles.get(doc)?.isConnected) return;
   const parent = doc.head ?? doc.documentElement;
