@@ -324,6 +324,20 @@ function clickedLink(
   return index < 0 ? null : { anchor: links[index]!, at: use };
 }
 
+/**
+ * Whether a "#fragment" link stays on its page. It resolves against the document's base URL: a <base href> in the
+ * document (an iCloud message frame is the email itself) can send <a href="#open"> to another site. With such a base
+ * the link stays only if it resolves to this very page. Read through the prototype: email markup can clobber
+ * `document.querySelector` (and a clobbered `URL` only makes the link count as leaving, i.e. checked).
+ */
+function staysOnPage(a: Element): boolean {
+  const doc = ownerDocOf(a);
+  if (!Document.prototype.querySelector.call(doc, 'base[href]')) return true;
+  const page = (u: unknown) => (typeof u === 'string' ? u.split('#')[0] : null);
+  const here = page(doc.URL);
+  return here !== null && page(resolveAnchorHref(a)) === here;
+}
+
 /** Navigate as the click itself would have (used once a held click is cleared by a local-only check). */
 function replayNavigation(anchor: Element, href: string, activeTab: boolean): void {
   const win = ownerDocOf(anchor).defaultView ?? window;
@@ -600,7 +614,7 @@ function installClickGuard(opts: {
     const { anchor: a, at } = clicked;
     // Same-page anchors (#section) do not leave the email. Uses the SMIL-animated value of an SVG <a>, so
     // <a href="#"> retargeted by <set attributeName="href" to="https://..."> is still checked.
-    if (rawLinkTarget(a).startsWith('#')) return;
+    if (rawLinkTarget(a).startsWith('#') && staysOnPage(a)) return;
 
     const hit = opts.findTarget(at) ?? (at === a ? null : opts.findTarget(a));
     if (!hit || isLocked(hit.container)) return;
