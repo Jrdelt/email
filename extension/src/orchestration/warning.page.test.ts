@@ -178,3 +178,92 @@ describe('warning.html: domain age wording', () => {
     expect(text('dest-meta')).not.toContain('Registered');
   });
 });
+
+describe('warning.html: entries it must not act on', () => {
+  const expiredView = () => {
+    expect(text('title')).toBe('This warning link has expired');
+    expect(shown('dest-box')).toBe(false);
+    expect(shown('advanced-details')).toBe(false);
+  };
+
+  it('shows the expired view and removes an entry older than an hour', async () => {
+    await openPage(entry({ createdAt: Date.now() - 3600_000 - 1000 }), { answer: intel() });
+    expiredView();
+    expect(await fakeBrowser.storage.session.get('warn:w1')).toEqual({});
+  });
+
+  it.each(['javascript:alert(document.domain)', 'data:text/html,<script>1</script>', 'file:///etc/passwd'])(
+    'shows the expired view for a stored %s URL and offers no way to open it',
+    async (href) => {
+      const { sent } = await openPage(entry({ href }), { answer: intel() });
+      expiredView();
+      expect(document.body.textContent).not.toContain(href);
+      expect(sent).toEqual([]);
+    },
+  );
+
+  it('shows the expired view for a missing entry or no id, and the recovery guide in help mode', async () => {
+    await openPage(null);
+    expiredView();
+    await openPage(entry(), { query: '' });
+    expiredView();
+    await openPage(entry(), { query: '?mode=help' });
+    expect(text('title')).toBe('Clicked a suspicious link? Stay calm.');
+    expect(shown('dest-box')).toBe(false);
+    expect((document.getElementById('recovery-details') as HTMLDetailsElement).open).toBe(true);
+  });
+});
+
+describe('warning.html: destination lookups', () => {
+  it('asks the background about the registrable domain only', async () => {
+    const { sent } = await openPage(
+      entry({ href: 'https://login.bit.ly/a?b=c#d', host: 'login.bit.ly', registrable: 'bit.ly' }),
+      { answer: intel() },
+    );
+    expect(sent).toEqual([{ type: 'domainIntel', domain: 'bit.ly' }]);
+  });
+
+  it('asks nothing in Strict Local Mode', async () => {
+    const { sent } = await openPage(entry(), { answer: intel(), strict: true });
+    expect(sent).toEqual([]);
+    expect(text('dest-meta')).toBe('Domain lookup skipped (Strict Local Mode).');
+  });
+
+  it("treats the background's null answer as Strict Local Mode", async () => {
+    await openPage(entry(), { answer: null });
+    expect(text('dest-meta')).toBe('Domain lookup skipped (Strict Local Mode).');
+    expect(text('title')).toBe('Check where this link goes');
+  });
+
+  it('asks nothing again when the click guard already looked the domain up', async () => {
+    const { sent } = await openPage(entry({ intel: intel() }), { answer: intel() });
+    expect(sent).toEqual([]);
+    expect(text('dest-meta')).toContain('Not listed on URIBL');
+  });
+
+  it('escalates a "check link" warning to danger when the lookup finds a brand-new domain', async () => {
+    await openPage(entry(), {
+      answer: intel({ rdap: { status: 'ok', registered: new Date(Date.now() - 3600_000).toISOString() } }),
+    });
+    expect(text('title')).toBe('Dangerous link stopped');
+    expect(text('sticker')).toBe('PHISHING RISK');
+    expect(text('reasons')).toContain('This destination website (bit.ly) is brand new (0 days old)');
+    expect(text('reasons')).toContain('URL shortener');
+  });
+});
+
+describe('warning.html: Back and "Open anyway"', () => {
+  it('Back removes the entry (it holds the clicked URL)', async () => {
+    await openPage(entry(), { answer: intel() });
+    document.getElementById('back-btn')!.click();
+    await until(async () => expect(await fakeBrowser.storage.session.get('warn:w1')).toEqual({}));
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('"Open anyway" removes the entry and opens the stored destination', async () => {
+    await openPage(entry(), { answer: intel() });
+    document.getElementById('proceed-btn')!.click();
+    await until(() => expect(replace).toHaveBeenCalledWith('https://bit.ly/3xYz'));
+    expect(await fakeBrowser.storage.session.get('warn:w1')).toEqual({});
+  });
+});
