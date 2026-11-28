@@ -5,7 +5,7 @@ import ipaddress
 import re
 import unicodedata
 from dataclasses import dataclass
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 URGENCY = (
     "urgent", "immediately", "verify", "suspended", "locked", "password", "confirm", "act now", "expires",
@@ -172,7 +172,7 @@ _HTTP_SCHEME_RE = re.compile(r"(https?):", re.IGNORECASE)
 
 
 def _normalize_http_url(url: str) -> str:
-    """Rewrite an http(s) URL the way WHATWG parses it, so urlsplit sees the same host as `new URL()`.
+    """Rewrite an http(s) URL the way WHATWG parses it, so _parse_http sees the same host as `new URL()`.
 
     WHATWG removes tabs/newlines anywhere, ignores any mix of '/' and '\\' (or none) after a special scheme
     ("http:evil.com", "https:\\\\evil.com", "http:///evil.com" all have host evil.com) and treats '\\' as '/'
@@ -228,28 +228,174 @@ def _whatwg_ipv4(host: str) -> str:
     return str(ipaddress.IPv4Address(value))
 
 
-# UTS46 non-transitional (what WHATWG URL uses) keeps these "deviation" characters instead of mapping them
-# (IDNA 2003 turns faß.de into fass.de; browsers produce xn--fa-hia.de).
+# UTS46 ToASCII as WHATWG URL runs it: non-transitional, CheckBidi and CheckJoiners on, no STD3 rules, no DNS
+# length limit. Built on the interpreter's Unicode database (NFKC + full case folding) instead of the stdlib
+# "idna" codec, which implements IDNA 2003: Unicode 3.2 nameprep tables (regenerated between patch releases),
+# RFC 3454 bidi (rejects "دبي2020"), a 63-character label limit, and no ContextJ rules.
+# Deviation characters are kept (IDNA 2003 turns faß.de into fass.de; browsers produce xn--fa-hia.de).
 _DEVIATIONS = frozenset("\u00df\u03c2\u200c\u200d")
+# Code points UTS46 maps to nothing (spelled out; the other default-ignorables are disallowed).
+_UTS46_IGNORED = frozenset(
+    "\u00ad\u034f\u180b\u180c\u180d\u180f\u200b\u2060\u2064\ufeff"
+    + "".join(chr(c) for c in range(0xFE00, 0xFE10))
+    + "".join(chr(c) for c in range(0x1BCA0, 0x1BCA4))
+    + "".join(chr(c) for c in range(0xE0100, 0xE01F0))
+)
+_UTS46_DISALLOWED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zs", "Zl", "Zp"})
+# Assigned code points UTS46 disallows although NFKC + case folding would map them to valid text: Hangul and Khmer
+# fillers, Asomtavruli and other capitals kept for IDNA 2003 stability, ideographic description characters, a few
+# CJK compatibility ideographs, the object/replacement characters.
+_UTS46_DISALLOWED = frozenset(
+    "\u04c0\u1680\u17b4\u17b5\u1806\u2132\u2183\u115f\u1160\u3164\u31ef\uffa0\ufffc\ufffd"
+    "\U0002f868\U0002f874\U0002f91f\U0002f95f\U0002f9bf"
+    + "".join(chr(c) for c in range(0x10A0, 0x10C6))
+    + "".join(chr(c) for c in range(0x2FF0, 0x3000))
+)
+# Full stops UTS46 maps to "."; any other character whose compatibility form contains a dot ("⒈", "…", "㏂") is
+# disallowed rather than split into labels.
+_UTS46_DOTS = frozenset("\u3002\uff0e\uff61")
+_ZWNJ, _ZWJ = "\u200c", "\u200d"
+_RTL_ALLOWED = frozenset({"R", "AL", "AN", "EN", "ES", "CS", "ET", "ON", "BN", "NSM"})
+_LTR_ALLOWED = frozenset({"L", "EN", "ES", "CS", "ET", "ON", "BN", "NSM"})
+_map_cache: dict[str, str | None] = {}
+_MISSING = object()
+
+
+def _uts46_map_char(c: str) -> str | None:
+    """UTS46 mapping of one code point ("" when it is ignored, None when it is disallowed)."""
+    hit = _map_cache.get(c, _MISSING)
+    if hit is not _MISSING:
+        return hit  # type: ignore[return-value]
+    if c in _DEVIATIONS or c.isascii():
+        mapped: str | None = c.lower()
+    elif c in _UTS46_IGNORED:
+        mapped = ""
+    elif c in _UTS46_DISALLOWED or unicodedata.category(c) in _UTS46_DISALLOWED_CATEGORIES:
+        mapped = None
+    elif c in _UTS46_DOTS:
+        mapped = "."
+    else:
+        m = unicodedata.normalize("NFKC", c)
+        for _ in range(4):  # NFKC_Casefold: case folding and NFKC until stable
+            n = unicodedata.normalize("NFKC", m.casefold())
+            if n == m:
+                break
+            m = n
+        mapped = None if ("." in m or "\u3002" in m) else m
+    if len(_map_cache) < 65536:
+        _map_cache[c] = mapped
+    return mapped
+
+
+def _uts46_char_valid(c: str) -> bool:
+    """A code point that may appear in a mapped label as it is (UTS46 status valid or deviation)."""
+    return c in _DEVIATIONS or (c != "." and _uts46_map_char(c) == c)
+
+
+# Arabic letters that join only to the right (Joining_Type R), and the non-joining hamzas; every other Arabic
+# letter joins on both sides (D). Spelled out because the stdlib has no Joining_Type data. Used for the ZWNJ rule.
+_ARABIC_RIGHT_JOINING = frozenset(
+    "\u0622\u0623\u0624\u0625\u0627\u0629\u062f\u0630\u0631\u0632\u0648\u0671\u0672\u0673\u0675\u0676\u0677"
+    + "".join(chr(c) for c in range(0x0688, 0x069A))
+    + "\u06c0\u06c3\u06c4\u06c5\u06c6\u06c7\u06c8\u06c9\u06ca\u06cb\u06cd\u06cf\u06d2\u06d3\u06d5\u06ee\u06ef"
+    + "\u0759\u075a\u075b\u076b\u076c\u0771\u0773\u0774\u0778\u0779"
+)
+_ARABIC_NON_JOINING = frozenset("\u0621\u0674\u06fd\u06fe")
+
+
+def _arabic_letter(c: str) -> bool:
+    o = ord(c)
+    return (0x0620 <= o <= 0x06FF or 0x0750 <= o <= 0x077F) and unicodedata.category(c) == "Lo"
+
+
+def _joins_left_side(c: str) -> bool:  # Joining_Type L or D
+    return _arabic_letter(c) and c not in _ARABIC_RIGHT_JOINING and c not in _ARABIC_NON_JOINING
+
+
+def _joins_right_side(c: str) -> bool:  # Joining_Type R or D
+    return _arabic_letter(c) and c not in _ARABIC_NON_JOINING
+
+
+def _bidi_ok(label: str) -> bool:
+    """RFC 5893 bidi rule as WHATWG URL (ada, Node) applies it: per label, to labels with R, AL or AN characters.
+
+    A label whose first character is L may not contain right-to-left or Arabic-number characters before its last
+    character; any other such label is a right-to-left label (rules 2-4). Labels without R/AL/AN are not checked.
+    """
+    classes = [unicodedata.bidirectional(c) for c in label]
+    if not any(b in ("R", "AL", "AN") for b in classes):
+        return True
+    last = len(classes) - 1
+    while last >= 0 and classes[last] == "NSM":
+        last -= 1
+    if last < 0:
+        return False
+    if classes[0] == "L":
+        return all(b in _LTR_ALLOWED for b in classes[:last])
+    return (
+        all(b in _RTL_ALLOWED for b in classes[:last])
+        and classes[last] in ("R", "AL", "EN", "AN")
+        and not ("EN" in classes and "AN" in classes)
+    )
+
+
+def _label_valid(label: str) -> bool:
+    """UTS46 validity of one mapped label (NFC, no leading mark, valid code points, ContextJ, bidi)."""
+    if not label or label.isascii():
+        return True
+    if not unicodedata.is_normalized("NFC", label) or unicodedata.category(label[0]).startswith("M"):
+        return False
+    if not all(_uts46_char_valid(c) for c in label):
+        return False
+    # ContextJ (RFC 5892 A.1/A.2) as ada applies it: a joiner after a virama makes the label valid; otherwise a ZWNJ
+    # needs a left- or dual-joining letter somewhere before it and a right- or dual-joining one after it.
+    for i, c in enumerate(label):
+        if c in (_ZWNJ, _ZWJ):
+            if i > 0 and unicodedata.combining(label[i - 1]) == 9:
+                return True
+            if c == _ZWJ or i + 1 >= len(label):
+                return False
+            return any(_joins_left_side(x) for x in label[:i]) and any(_joins_right_side(x) for x in label[i + 1 :])
+    return _bidi_ok(label)
+
+
+def _domain_to_ascii(host: str) -> str:
+    """UTS46 ToASCII of a (percent-decoded) host, or "" when it fails."""
+    mapped = []
+    for c in host:
+        m = _uts46_map_char(c)
+        if m is None:
+            return ""
+        mapped.append(m)
+    out = []
+    for label in unicodedata.normalize("NFC", "".join(mapped)).split("."):
+        if label.startswith("xn--"):
+            try:
+                decoded = label[4:].encode("ascii").decode("punycode")
+            except (UnicodeError, ValueError):
+                return ""
+            # A punycode label must decode to a non-empty, valid, already mapped label (rejects xn--zz, U+0080...);
+            # it is then kept as written, like WHATWG URL does.
+            if not decoded or not _label_valid(decoded):
+                return ""
+            if any(_uts46_map_char(c) != c for c in decoded if c not in _DEVIATIONS):
+                return ""
+            out.append(label)
+        elif not _label_valid(label):
+            return ""
+        else:
+            out.append(label if label.isascii() else "xn--" + label.encode("punycode").decode("ascii"))
+    return ".".join(out)
 
 
 def _label_to_ascii(label: str) -> str:
-    if not label:
-        return ""
-    if any(c in _DEVIATIONS for c in label):
-        mapped = unicodedata.normalize("NFKC", label).lower()
-        return "xn--" + mapped.encode("punycode").decode("ascii")
-    return label.encode("idna").decode("ascii").lower()
+    """UTS46 ToASCII of one label, or "" when it fails."""
+    return _domain_to_ascii(label) if label else ""
 
 
 def _valid_punycode(label: str) -> bool:
     """WHATWG rejects hosts whose xn-- labels are not valid punycode (e.g. xn--zz.com)."""
-    try:
-        decoded = label[4:].encode("ascii").decode("punycode")
-        # Must decode to a real non-ASCII label that encodes back to itself (rejects controls like U+0080).
-        return bool(decoded) and not decoded.isascii() and _label_to_ascii(decoded) == label
-    except (UnicodeError, ValueError):
-        return False
+    return _domain_to_ascii(label) == label
 
 
 def _whatwg_ipv6(addr: ipaddress.IPv6Address) -> str:
@@ -273,22 +419,31 @@ def _whatwg_ipv6(addr: ipaddress.IPv6Address) -> str:
     return f"{head}::{tail}"
 
 
+_IPV6_LITERAL_RE = re.compile(r"[0-9a-f:.]+\Z", re.IGNORECASE | re.ASCII)
+
+
+def _ipv6_literal(inner: str) -> str:
+    """WHATWG IPv6 host (the text inside the brackets), serialised, or "" (no zone IDs, no IPvFuture)."""
+    if not _IPV6_LITERAL_RE.match(inner):
+        return ""
+    try:
+        return _whatwg_ipv6(ipaddress.IPv6Address(inner))
+    except ValueError:
+        return ""
+
+
 def _to_ascii_hostname(raw_host: str) -> str:
     """Host as WHATWG URL serialises it (mirror of `new URL(...).hostname` used by features.ts), or "" if invalid."""
-    host = unquote(raw_host).lower()  # WHATWG percent-decodes the host first (ev%69l.com -> evil.com)
+    if raw_host.startswith("["):
+        return _ipv6_literal(raw_host[1:-1]) if raw_host.endswith("]") else ""
+    host = unquote(raw_host)  # WHATWG percent-decodes the host first (ev%69l.com -> evil.com)
     if not host:
         return ""
-    if ":" in host:
-        try:
-            return _whatwg_ipv6(ipaddress.IPv6Address(host))
-        except ValueError:
-            return host
-    if not host.isascii():
-        try:
-            host = ".".join(_label_to_ascii(lbl) for lbl in host.split("."))
-        except UnicodeError:
-            return ""
-    if any(c in FORBIDDEN_DOMAIN_CHARS for c in host):
+    if "\ufffd" in host:  # invalid UTF-8 after percent-decoding
+        return ""
+    host = host.lower() if host.isascii() else _domain_to_ascii(host)
+    # A ':' (also from %3A or a fullwidth colon) or bracket outside an IPv6 literal is a forbidden code point.
+    if not host or any(c in FORBIDDEN_DOMAIN_CHARS for c in host):
         return ""
     if any(lbl.startswith("xn--") and not _valid_punycode(lbl) for lbl in host.split(".")):
         return ""
@@ -300,21 +455,43 @@ def _to_ascii_hostname(raw_host: str) -> str:
     return host.removesuffix(".")
 
 
+_PORT_RE = re.compile(r"\d*\Z", re.ASCII)
+
+
 def _parse_http(url: str) -> tuple[str, str] | None:
-    try:
-        p = urlsplit(_normalize_http_url(url))
-        if p.scheme not in ("http", "https"):
-            return None
-        _ = p.port  # Validates numeric port 0..65535 like WHATWG URL
-        raw_host = p.hostname
-        if not raw_host:
-            return None
-        host = _to_ascii_hostname(raw_host)
-        if not host:
-            return None
-        return host, p.path or "/"
-    except ValueError:
+    """(host, path) of an http(s) URL as WHATWG parses it, or None.
+
+    The authority is split by hand rather than with urlsplit: urlsplit runs its bracket and NFKC checks on the
+    whole netloc, userinfo included, so "http://u[@evil.com/" or "http://a\uff1ab@evil.com/" failed although
+    the host is evil.com.
+    """
+    s = _normalize_http_url(url)
+    m = re.match(r"(https?)://", s)
+    if not m:
         return None
+    rest = s[m.end() :]
+    end = min((i for i in (rest.find("/"), rest.find("?"), rest.find("#")) if i != -1), default=len(rest))
+    authority, after = rest[:end], rest[end:]
+    hostport = authority.rpartition("@")[2]  # userinfo is everything before the last '@'
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        if close == -1:
+            return None
+        raw_host, port = hostport[: close + 1], hostport[close + 1 :]
+        if port and not port.startswith(":"):
+            return None
+        port = port[1:]
+    else:
+        raw_host, _, port = hostport.partition(":")
+    if not _PORT_RE.match(port) or (port and int(port) > 65535):
+        return None
+    if not raw_host:
+        return None
+    host = _to_ascii_hostname(raw_host)
+    if not host:
+        return None
+    path = after[: min((i for i in (after.find("?"), after.find("#")) if i != -1), default=len(after))]
+    return host, path or "/"
 
 
 def _host(url: str) -> str:

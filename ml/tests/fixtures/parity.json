@@ -1389,5 +1389,186 @@
       "urgency_hits": 0,
       "body_len": 14
     }
+  },
+  {
+    "name": "whatwg_authority_syntax",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "click",
+        "href": "http://1%3A2/"
+      },
+      {
+        "text": "click",
+        "href": "http://[v1.abc]/"
+      },
+      {
+        "text": "click",
+        "href": "http://[fe80::1%25eth0]/"
+      },
+      {
+        "text": "click",
+        "href": "http://[::1]x/"
+      },
+      {
+        "text": "click",
+        "href": "http://u[@evil.com/"
+      },
+      {
+        "text": "click",
+        "href": "http://a\uff1ab@evil.com/"
+      },
+      {
+        "text": "click",
+        "href": "http://a@b@evil.com:/"
+      },
+      {
+        "text": "click",
+        "href": "http://evil.com\uff20good.com/"
+      },
+      {
+        "text": "caf\u00e9.com\\x",
+        "href": "https://evil.example/"
+      },
+      {
+        "text": "\\\\caf\u00e9.com",
+        "href": "https://evil.example/"
+      },
+      {
+        "text": "caf\u00e9.com:",
+        "href": "https://evil.example/"
+      }
+    ],
+    "expected": {
+      "n_links": 11,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 6,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "rtl_idns_with_digits_and_joiners",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "click",
+        "href": "https://\u062f\u0628\u064a2020.\u0627\u0645\u0627\u0631\u0627\u062a/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u05d3\u05d5\u05d2\u05de\u05d4123.co.il/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0645\u0648\u0642\u06391.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0915\u094d\u200d\u0937.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u0662b.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0628a.com/"
+      },
+      {
+        "text": "\u062f\u0628\u064a2020.\u0627\u0645\u0627\u0631\u0627\u062a",
+        "href": "https://evil.example/"
+      }
+    ],
+    "expected": {
+      "n_links": 8,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 5,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 6,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "uts46_mapping_and_validity",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "click",
+        "href": "https://\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u200cb.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u200db.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0301abc.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://stra\u1e9ee.de/"
+      },
+      {
+        "text": "click",
+        "href": "https://ab\u2064c.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://xn--p1a-.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u13a3\u13b3\u13a9.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\uab73\uab83\uab79.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u10a0.ge/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u2488b.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u1c90.ge/"
+      }
+    ],
+    "expected": {
+      "n_links": 12,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 5,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 7,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
   }
 ]

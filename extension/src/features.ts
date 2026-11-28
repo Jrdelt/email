@@ -203,6 +203,9 @@ function normalizeShownText(text: string): string {
 /** ASCII (punycode) form of a non-ASCII host such as Cyrillic look-alike text, or '' if it is not a valid host. */
 function asciiHost(host: string): string {
   if (!/[^\x00-\x7f]/.test(host)) return host;
+  // The URL parser would read '\' as '/' and ':' as a port separator ("café.com\x", "\\café.com", "café.com:"), so
+  // the text is not a bare host (as for ASCII text, which isValidDomain rejects; mirrors features.py).
+  if (/[\\:]/.test(host)) return '';
   try {
     return new URL(`http://${host}/`).hostname;
   } catch {
