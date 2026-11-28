@@ -566,14 +566,15 @@ function installClickGuard(opts: {
     const form = closestEl(el, 'form');
     if (!form) return;
     const submitter = (e as SubmitEvent).submitter ?? null;
-    const target = submissionTarget(form, submitter);
-    const href = typeof target === 'object' ? target.href : null;
-    if (href !== null && replaying.get(form) === href) return; // our own replay of a cleared submission
     // A submit button inside an email can submit a form outside it (form="id"): that is the email's submission too.
     const formHit = opts.findTarget(form);
     const at = formHit ? form : submitter;
     const hit = formHit ?? (submitter ? opts.findTarget(submitter) : null);
     if (!at || !hit || isLocked(hit.container)) return; // a locked message's forms are the lock's job
+    // Only now: reading a GET form's fields fires a formdata event, which the webmail's own forms must not see.
+    const target = submissionTarget(form, submitter);
+    const href = typeof target === 'object' ? target.href : null;
+    if (href !== null && replaying.get(form) === href) return; // our own replay of a cleared submission
 
     if (target === 'uncheckable') {
       // Where it goes cannot be worked out: never let it through unchecked.

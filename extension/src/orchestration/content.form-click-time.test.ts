@@ -175,6 +175,23 @@ describe('content.ts: click-time checks of form submissions on an unlocked email
     expect(navigations(sent, mark)[0]).toMatchObject({ type: 'openWarning', href: 'https://files.example/remote.exe' });
   });
 
+  it("never reads the fields of the webmail's own forms (that fires a formdata event at them)", () => {
+    const original = globalThis.FormData;
+    let built = 0;
+    globalThis.FormData = class extends original {
+      constructor(...args: ConstructorParameters<typeof FormData>) {
+        super(...args);
+        built++;
+      }
+    } as typeof FormData;
+    try {
+      expect(submit($('webmail-search'))).toBe(false);
+    } finally {
+      globalThis.FormData = original;
+    }
+    expect(built).toBe(0);
+  });
+
   it('leaves a dialog form alone (it navigates nowhere)', async () => {
     const mark = sent.length;
     expect(submit($('dlg'), $('dlg-go'))).toBe(false);
