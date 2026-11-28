@@ -174,3 +174,46 @@ describe('urgency words spelled with look-alike letters', () => {
     expect(extractFeatures('a@b.example', 'Verify your password', []).urgency_hits).toBe(2);
   });
 });
+
+describe("the sender's own domain shown on an email-service click-tracking link", () => {
+  // ESPs rewrite every link to their click tracker, so 'www.acme.com' in an acme.com newsletter pointed elsewhere and
+  // counted as a text/href mismatch (+0.4), locking ordinary newsletters and verification emails.
+  const tracked = 'https://u1234567.ct.sendgrid.net/ls/click?upn=u001.abc';
+  it('is no mismatch for the sender itself', () => {
+    expect(
+      scoreEmail('news@acme.com', 'Autumn news. www.acme.com', [
+        { text: 'www.acme.com', href: 'https://acme.us12.list-manage.com/track/click?u=a&id=b&e=c' },
+      ]).level,
+    ).toBe('safe');
+    expect(
+      scoreEmail('no-reply@acme.com', 'Reset your password. If the button does not work, paste this link: https://app.acme.com/reset?t=1', [
+        { text: 'Reset password', href: tracked },
+        { text: 'https://app.acme.com/reset?t=1', href: tracked },
+      ]).level,
+    ).toBe('safe');
+    for (const href of [
+      'https://d2abc04.na1.hubspotlinks.com/Ctc/xyz',
+      'https://ctrk.klclick.com/ls/click?upn=abc',
+      'https://abc123.r.us-east-1.awstrack.me/L0/https:%2F%2Fwww.acme.com%2F/1/0100-abc/xyz=',
+      'https://click.pstmrk.it/3s/www.acme.com%2F/abc/def',
+      'https://mandrillapp.com/track/click/30001234/www.acme.com?p=e',
+      'https://r20.rs6.net/tn.jsp?f=001abc&c=xyz',
+    ]) {
+      expect(scoreEmail('news@acme.com', 'Our news', [{ text: 'www.acme.com', href }]).reasons, href).toEqual([]);
+    }
+  });
+  it("still flags anyone else's domain on a tracker, an unknown redirector, and the parity feature is unchanged", () => {
+    const paypal = scoreEmail('alerts@random-shop.com', 'Your account is locked. Verify now.', [
+      { text: 'www.paypal.com', href: tracked },
+    ]);
+    expect(paypal.level).toBe('likely-phishing');
+    expect(scoreEmail('news@acme.com', 'Our news', [{ text: 'www.acme.com', href: 'https://evil.example/r' }]).level).not.toBe(
+      'safe',
+    );
+    expect(scoreEmail('', 'Our news', [{ text: 'www.acme.com', href: tracked }]).level).not.toBe('safe');
+    expect(extractFeatures('news@acme.com', 'x', [{ text: 'www.acme.com', href: tracked }]).n_text_href_mismatch).toBe(1);
+    // Showing its own domain does not hide an urgent tracked link from the external-link rule.
+    const urgent = 'Your password expired. Verify immediately or your account will be suspended.';
+    expect(scoreEmail('it@corp.example', urgent, [{ text: 'corp.example/login', href: tracked }]).level).toBe('suspicious');
+  });
+});

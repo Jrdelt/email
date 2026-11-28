@@ -34,6 +34,14 @@ export const SHORTENER_HOSTS = new Set([
   'lnkd.in', 'mcaf.ee', 'su.pr', 'adf.ly', 'bc.vc', 'ouo.io', 'shrinke.me',
 ]);
 
+// Email services' click-tracking domains (registrable): with link tracking on, every link in a newsletter or
+// verification email points here, whatever its text shows. scoreEmail only (not a feature, so no parity entry).
+// Never generic redirectors or shorteners.
+const ESP_CLICK_TRACKERS = new Set([
+  'sendgrid.net', 'list-manage.com', 'mailgun.org', 'mandrillapp.com', 'hubspotlinks.com', 'hubspotemail.net',
+  'mcsv.net', 'sparkpostmail.com', 'customeriomail.com', 'klclick.com', 'awstrack.me', 'pstmrk.it', 'rs6.net',
+]);
+
 const CLOUD_STORAGE_HOSTS = new Set([
   'storage.googleapis.com',
   'storage.cloud.google.com',
@@ -322,7 +330,11 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
       hasOpaqueUrgentShortToken = true;
     }
     const shown = shownHost(l.text);
-    if (shown && h && registrableDomain(shown) !== reg) {
+    const shownReg = shown ? registrableDomain(shown) : '';
+    // The sender's own domain shown on its email service's click tracker is how tracked mail looks, not a disguise:
+    // the sender could link anywhere with any other text just as well. Anyone else's domain still counts.
+    const ownTracked = Boolean(senderReg) && shownReg === senderReg && ESP_CLICK_TRACKERS.has(reg);
+    if (shown && h && shownReg !== reg && !ownTracked) {
       score += 0.4;
       reasons.push(`A link says ${shown} but actually goes to ${h}`);
     }
