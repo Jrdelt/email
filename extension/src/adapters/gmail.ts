@@ -19,19 +19,35 @@ import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 const extractEmailText = (raw: string): string => capText(raw, MAX_HEADER_CHARS).match(ADDRESS_TOKEN_RE)?.[0]?.trim() ?? '';
 
 const cleanHost = (raw: string): string =>
-  raw.trim().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '').toLowerCase();
+  raw.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase();
+
+// Anything Gmail shows that looks like a host name, including ones isValidDomain rejects (an IDN TLD such as .рф or
+// .xn--p1ai, an underscore): those are kept, so src/sender.ts can refuse auto-trust instead of seeing no relay.
+const HOST_LIKE_RE = /^[\p{L}\p{N}][\p{L}\p{N}_-]*(?:\.[\p{L}\p{N}_-]+)+$/u;
+
+/** Gmail's relay text as an ASCII host (Unicode labels become punycode), or '' when it does not look like a host. */
+function relayHost(raw: string): string {
+  const c = cleanHost(raw);
+  if (!c || c.length > 253 || !HOST_LIKE_RE.test(c)) return '';
+  if (isValidDomain(c) || !/[^\x00-\x7f]/.test(c)) return c;
+  try {
+    return new URL(`http://${c}/`).hostname || c;
+  } catch {
+    return c;
+  }
+}
 
 const DISPLAY_NAME_SEL = 'span.gD:not(.go), [name]';
-const VIA_LABEL_RE = /^via\s+([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)/i;
+const VIA_LABEL_RE = /^via\s+([^\s,;()<>]+)/iu;
 
 function extractViaDomain(scope: Document | HTMLElement, container: HTMLElement): string | undefined {
   for (const anchor of scope.querySelectorAll<HTMLElement>('a.acP, a[href*="support.google.com/mail/answer/1311182"]')) {
     if (container.contains(anchor)) continue;
-    const sib = cleanHost(anchor.parentElement?.nextElementSibling?.textContent ?? '');
-    if (sib && isValidDomain(sib)) return sib;
-    const afterVia = (anchor.parentElement?.textContent ?? '').match(/\bvia\s+([^\s,;()]+)/i)?.[1] ?? '';
-    const candidate = cleanHost(afterVia);
-    if (candidate && isValidDomain(candidate)) return candidate;
+    const sib = relayHost(anchor.parentElement?.nextElementSibling?.textContent ?? '');
+    if (sib) return sib;
+    const afterVia = (anchor.parentElement?.textContent ?? '').match(/\bvia\s+([^\s,;()<>]+)/iu)?.[1] ?? '';
+    const candidate = relayHost(afterVia);
+    if (candidate) return candidate;
   }
   // Only Gmail's own "via <relay>" label counts: never h3.iw as a whole or the display-name chip, whose text
   // the sender controls ("Boss via sendgrid.net" must not hide the real relay).
@@ -39,10 +55,11 @@ function extractViaDomain(scope: Document | HTMLElement, container: HTMLElement)
   for (const el of scope.querySelectorAll<HTMLElement>('span.go')) {
     if (container.contains(el) || el.closest(DISPLAY_NAME_SEL) || el.querySelector(DISPLAY_NAME_SEL)) continue;
     const m = (el.textContent ?? '').trim().match(VIA_LABEL_RE);
-    const candidate = cleanHost(m?.[1] ?? '');
-    if (candidate && isValidDomain(candidate) && !candidates.includes(candidate)) candidates.push(candidate);
+    const candidate = relayHost(m?.[1] ?? '');
+    if (candidate && !candidates.includes(candidate)) candidates.push(candidate);
   }
-  // More than one relay label means one is spoofed: fail closed by reporting a non-ESP relay if there is one.
+  // More than one relay label means one is spoofed: fail closed by reporting a non-ESP relay if there is one (an
+  // unparseable one counts as non-ESP).
   return candidates.find((c) => !KNOWN_ESP_DOMAINS.has(registrableDomain(c))) ?? candidates[0];
 }
 
@@ -97,6 +114,14 @@ function gmailChipName(chip: HTMLElement): string {
   return text.length <= 180 ? cleanAttachmentName(text) : '';
 }
 
+// Gmail's attachment URLs carry the exact query parameter view=att (not view=attendees or preview=att).
+const VIEW_ATT_SEL = (attr: string): string[] => [
+  `a[${attr}*="?view=att&"]`,
+  `a[${attr}*="&view=att&"]`,
+  `a[${attr}$="?view=att"]`,
+  `a[${attr}$="&view=att"]`,
+];
+
 function extractGmailAttachments(
   scope: Document | HTMLElement | null,
   container: HTMLElement,
@@ -108,9 +133,11 @@ function extractGmailAttachments(
 
   if (!scope) return { attachments, attachmentContainers };
 
+  // Shelves and chips are Gmail chrome beside the body, never inside it: in the email HTML, class="hq" or a
+  // ?view=att link is not an attachment (inline downloads come from inlineAttachmentsIn).
   const shouldSkip = (el: Element): boolean =>
     isUnsafeNode(el) ||
-    el === container ||
+    container.contains(el) ||
     el.contains(container) ||
     (el instanceof HTMLElement && isHidden(el)) ||
     el.closest('div.M9, [role="dialog"], [contenteditable="true"]') !== null;
@@ -129,8 +156,8 @@ function extractGmailAttachments(
     'a[data-ped-att-download]',
     'a[href*="mail-attachment.googleusercontent.com"]',
     'a[data-ped-att-href*="mail-attachment.googleusercontent.com"]',
-    'a[href*="view=att"]',
-    'a[data-ped-att-href*="view=att"]',
+    ...VIEW_ATT_SEL('href'),
+    ...VIEW_ATT_SEL('data-ped-att-href'),
   ].join(', ');
 
   for (const chip of scope.querySelectorAll<HTMLElement>(chipSel)) {
@@ -182,9 +209,15 @@ const LIST_FILE_SEL = [
 // Anything the adapter treats as an opened message (and its attachment shelf) is handled by the normal locks.
 const OPENED_EMAIL_SEL = 'div.adn, div.a3s, [role="listitem"], div.hq, div.aQH, [role="dialog"]';
 
+// UI languages whose verification labels the adapter reads (isUnauthenticated, VIA_LABEL_RE are English). In any
+// other language Gmail's localized "couldn't verify" badge is invisible to it, so a forged copy of a trusted address
+// would look verified: report no auth signals there (fail closed). Gmail sets <html lang> to its UI language; a
+// missing lang counts as unreadable.
+const READABLE_LANG_RE = /^en(?:-|$)/i;
+
 export const gmail: WebmailAdapter = {
   name: 'gmail',
-  authSignals: true,
+  authSignals: (doc) => READABLE_LANG_RE.test((doc.documentElement?.getAttribute('lang') ?? '').trim()),
   listAttachmentAt(el: Element): HTMLElement | null {
     const chip = closestEl(el, LIST_FILE_SEL);
     if (!chip || !closestEl(chip, LIST_ROW_SEL) || closestEl(chip, OPENED_EMAIL_SEL)) return null;
@@ -199,9 +232,13 @@ export const gmail: WebmailAdapter = {
     return containers.map((container) => {
       const msg = container.closest<HTMLElement>('.adn, [role="listitem"]');
       const scope = msg ?? (containers.length === 1 ? doc : null);
+      // Sender chips are Gmail's header markup: never one written into a message body (this one or any other
+      // div.a3s), whose HTML the sender controls. Without a card, the last chip outside every body wins.
+      const inBody = (el: Element): boolean => container.contains(el) || closestEl(el, 'div.a3s') !== null;
+      const headerChips = (root: Document | HTMLElement): HTMLElement[] =>
+        [...root.querySelectorAll<HTMLElement>('span.gD[email]')].filter((el) => !inBody(el));
       const emailChip =
-        msg?.querySelector<HTMLElement>('span.gD[email]') ??
-        (containers.length === 1 ? [...doc.querySelectorAll<HTMLElement>('span.gD[email]')].pop() : undefined);
+        (msg ? headerChips(msg)[0] : undefined) ?? (containers.length === 1 ? headerChips(doc).pop() : undefined);
 
       let senderAddress = emailChip?.getAttribute('email')?.trim() ?? '';
       if (!senderAddress && scope) {
@@ -209,7 +246,7 @@ export const gmail: WebmailAdapter = {
         // the sender controls ("service@paypal.com via sendgrid.net").
         for (const sel of ['span.go.gD', 'span.go']) {
           for (const el of scope.querySelectorAll<HTMLElement>(sel)) {
-            if (container.contains(el) || el.closest(DISPLAY_NAME_SEL)) continue;
+            if (inBody(el) || el.closest(DISPLAY_NAME_SEL)) continue;
             senderAddress = extractEmailText(el.textContent ?? '');
             if (senderAddress) break;
           }
@@ -224,7 +261,7 @@ export const gmail: WebmailAdapter = {
       }
       if (!senderName && scope) {
         for (const el of scope.querySelectorAll<HTMLElement>('span.gD')) {
-          if (container.contains(el)) continue;
+          if (inBody(el)) continue;
           const t = (el.textContent ?? '').trim();
           if (t && !t.includes('@')) {
             senderName = t;

@@ -1,7 +1,18 @@
 import { normalizeSender } from './allowlist';
-import { BRANDS, FREEMAIL, KNOWN_ESP_DOMAINS, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
+import {
+  BRAND_ORG_PATTERNS,
+  BRANDS,
+  DOMAIN_LURE_RUN,
+  DOMAIN_LURE_START,
+  FREEMAIL,
+  GENERIC_BRAND_LABELS,
+  KNOWN_ESP_DOMAINS,
+  SERVICE_PREFIX,
+  SERVICE_WORDS,
+  WORD_BRAND_LABELS,
+} from './brands';
 import { hostOf, isInternational, isMultiPartSuffix, isValidDomain, registrableDomain } from './domain';
-import { INVISIBLE_RE, type Link } from './features';
+import { DOT_LOOKALIKE_RE, foldConfusables, INVISIBLE_RE, type Link } from './features';
 import { ellipsizeMiddle, showable } from './text';
 
 export interface SenderInfo {
@@ -23,15 +34,47 @@ export interface SenderInfo {
 const CONFUSABLES: [RegExp, string][] = [[/0/g, 'o'], [/[1i]/g, 'l'], [/3/g, 'e'], [/5/g, 's'], [/rn/g, 'm'], [/vv/g, 'w']];
 const skeleton = (s: string) => CONFUSABLES.reduce((acc, [re, to]) => acc.replace(re, to), s.toLowerCase());
 
-function levenshtein(a: string, b: string): number {
+/** Edit distance counting a swap of two adjacent letters as one edit ("mircosoft", "netfilx"); 3 means "far". */
+function editDistance(a: string, b: string): number {
   if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev2: number[] = [];
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
     const cur = [i];
-    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) cur[j] = Math.min(cur[j]!, prev2[j - 2]! + 1);
+    }
+    prev2 = prev;
     prev = cur;
   }
-  return prev[b.length];
+  return prev[b.length]!;
+}
+
+/**
+ * Whether a sender domain label imitates the brand label `dl`: the label itself is it or a look-alike (digit swaps,
+ * rn/vv, one edit or swap), or it combines the brand with lure words ("paypal-secure", "secure-paypal",
+ * "paypalsupport", "appleid-verify", "amazon-billing").
+ */
+function imitatesBrandLabel(label: string, dl: string): boolean {
+  const same = (t: string) => t === dl || skeleton(t) === skeleton(dl);
+  const oneEdit = (t: string) => dl.length >= 5 && editDistance(t, dl) === 1;
+  if (same(label) || oneEdit(label)) return true;
+  if (GENERIC_BRAND_LABELS.has(dl)) return false;
+  const word = WORD_BRAND_LABELS.has(dl);
+  const glued = (t: string) =>
+    t.length > dl.length &&
+    ((t.startsWith(dl) && (word ? DOMAIN_LURE_RUN : DOMAIN_LURE_START).test(t.slice(dl.length))) ||
+      (!word && t.endsWith(dl) && DOMAIN_LURE_RUN.test(t.slice(0, -dl.length))));
+  if (glued(label)) return true;
+  const tokens = label.split('-').filter(Boolean);
+  if (tokens.length < 2) return false;
+  const lure = (t: string) => DOMAIN_LURE_RUN.test(t);
+  // A token one edit away from the brand ("mircosoft-support") is often an ordinary word ("home-mail" vs gmail,
+  // "venom"), so it only counts when it is not short, not itself a lure word, and sits next to a lure word.
+  const fuzzy = (t: string) => t.length >= 5 && !lure(t) && oneEdit(t) && tokens.some((o) => o !== t && lure(o));
+  const lureToken = tokens.some(lure);
+  return tokens.some((t) => glued(t) || (same(t) && (!word || lureToken)) || fuzzy(t));
 }
 
 /** Local-only sender analysis. Produces warnings; never rejects or blocks. */
@@ -74,6 +117,13 @@ export function analyzeSender(
     warnings.push('Webmail could not verify that this sender is genuine');
   }
 
+  // Webmail showed a relay that is not a checkable hostname (an IDN TLD such as .xn--p1ai or .рф, an underscore...).
+  // Treating it as "no relay" would let a spoofed copy of a trusted address through: fail closed instead.
+  if (via && !validVia) {
+    info.authIssue = true;
+    warnings.push(`Sent through a relay server that could not be checked (${showable(ellipsizeMiddle(via, 120))})`);
+  }
+
   // A relay only counts as the sender's own organisation when the registrable domains match and are not a bare
   // public suffix (two unrelated domains under com.pl must not look like the same organisation).
   const sameOrgVia = viaReg === registrable && !isMultiPartSuffix(registrable);
@@ -97,9 +147,12 @@ export function analyzeSender(
 
   // '@' is excluded from the repeated classes and the input is capped so attacker display names cannot cause
   // catastrophic regex backtracking.
-  // Match on what the reader sees: fullwidth letters fold to ASCII (NFKC) and characters that render as nothing
-  // ("Pay\u00adPal", "Pay\u200bPal") are dropped. The original name is still what warnings display.
-  const seenName = displayName.slice(0, 1000).normalize('NFKC').replace(INVISIBLE_RE, '');
+  // Match on what the reader sees: fullwidth letters fold to ASCII (NFKC), characters that render as nothing
+  // ("Pay\u00adPal", "Pay\u200bPal") are dropped, look-alike dots read as '.', and Cyrillic/Greek letters that look
+  // Latin ("P\u0430yPal") read as those Latin letters. The original name is still what warnings display.
+  const visibleName = displayName.slice(0, 1000).normalize('NFKC').replace(INVISIBLE_RE, '');
+  const seenName = foldConfusables(visibleName.replace(DOT_LOOKALIKE_RE, '.'));
+  const lookalikeLetters = seenName !== visibleName;
   const shownAddr = seenName
     .slice(0, 1000)
     .match(/[^\s<>"'()@]+@[^\s<>"'()@]+\.[a-z]{2,}/i)?.[0]
@@ -123,36 +176,63 @@ export function analyzeSender(
   // form "Pay Pal" does not.
   const plainName = seenName.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
   const compactName = seenName.toLowerCase().replace(/[\s_.-]+/g, '');
-  for (const brand of BRANDS) {
+  // A display name written as a domain ("paypal.com", "www.amazon.co.uk") claims the brand whose label it uses.
+  const nameDomainLabel = seenName.trim().toLowerCase().match(/^(?:www\.)?([a-z0-9-]+)(?:\.[a-z]{2,}){1,2}$/)?.[1];
+  for (const [i, brand] of BRANDS.entries()) {
     const brandCompact = brand.name.toLowerCase().replace(/\s+/g, '');
     const names = [normalizedName, plainName];
+    const orgClaim = BRAND_ORG_PATTERNS[i]!;
     const tokenizedClaim =
       names.some((n) => brand.pattern.test(n)) &&
-      (names.some((n) => SERVICE_WORDS.test(n)) || compactName === brandCompact);
+      (names.some((n) => SERVICE_WORDS.test(n) || orgClaim.test(n)) || compactName === brandCompact);
     const compactClaim =
       compactName.startsWith(brandCompact) && SERVICE_PREFIX.test(compactName.slice(brandCompact.length));
-    if ((tokenizedClaim || compactClaim) && registrable && !brand.domains.includes(registrable)) {
-      warnings.push(`Claims to be ${brand.name}, but was sent from ${registrable}`);
+    const domainClaim = nameDomainLabel === brandCompact;
+    if ((tokenizedClaim || compactClaim || domainClaim) && registrable && !brand.domains.includes(registrable)) {
+      const how = lookalikeLetters ? ' using look-alike letters' : '';
+      warnings.push(`Claims to be ${brand.name}${how}, but was sent from ${registrable}`);
       break;
     }
   }
 
   const label = registrable.split('.')[0] ?? '';
-  outer: for (const brand of BRANDS) {
-    if (brand.domains.includes(registrable)) break;
+  if (label && !BRANDS.some((br) => br.domains.includes(registrable))) {
+    const copied = lookalikeBrandDomain(label);
+    const squatted = copied ? '' : brandDomainInside(domain);
+    if (copied) warnings.push(`The sender's website (${registrable}) looks like a copy of ${copied}`);
+    else if (squatted) {
+      warnings.push(
+        `The sender's website (${showable(ellipsizeMiddle(domain, 120))}) pretends to be ${squatted} but belongs to ${showable(ellipsizeMiddle(registrable, 120))}`,
+      );
+    }
+  }
+  return info;
+}
+
+/** The brand domain a (non-brand) registrable label imitates, or ''. */
+function lookalikeBrandDomain(label: string): string {
+  for (const brand of BRANDS) {
     const seenLabels = new Set<string>();
     for (const d of brand.domains) {
       const dl = d.split('.')[0]!;
       if (seenLabels.has(dl)) continue; // regional domains share the label; the first (primary) domain is named
       seenLabels.add(dl);
-      const lookalike = (label !== dl && skeleton(label) === skeleton(dl)) || (dl.length >= 5 && levenshtein(label, dl) === 1) || label === dl;
-      if (label && lookalike) {
-        warnings.push(`The sender's website (${registrable}) looks like a copy of ${d}`);
-        break outer;
-      }
+      if (imitatesBrandLabel(label, dl)) return d;
     }
   }
-  return info;
+  return '';
+}
+
+/**
+ * A brand domain written as the leading labels of someone else's domain ("paypal.com.evil.xyz",
+ * "appleid.apple.com-verify.info"), or ''. Only called when the registrable domain is not the brand's.
+ */
+function brandDomainInside(domain: string): string {
+  const host = `.${domain}`;
+  for (const brand of BRANDS) {
+    for (const d of brand.domains) if (host.includes(`.${d}.`) || host.includes(`.${d}-`)) return d;
+  }
+  return '';
 }
 
 /** True only when a valid exact sender address has no auth failure or unexpected non-ESP relay. */

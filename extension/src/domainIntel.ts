@@ -3,7 +3,8 @@
 // Runs in the background script, results cached 24 h. Every lookup is best-effort:
 //   RDAP (registry found via IANA bootstrap data.iana.org; rdap.org fallback): registration date, expiry, registrar
 //   DNS-over-HTTPS (cloudflare-dns.com): MX, SPF, DMARC, NXDOMAIN
-//   URIBL via DNS-over-HTTPS (Cloudflare, dns.google if refused): whether the domain has been reported in spam
+// There is no spam-list (URIBL) lookup: URIBL refuses queries from public resolvers (Cloudflare, Google), so it
+// answered "refused" for nearly every domain while the dns.google fallback received every looked-up domain.
 import { isLookupDomain, isValidDomain } from './domain';
 import type { KV } from './storage';
 
@@ -15,7 +16,6 @@ export interface DomainIntel {
   checkedAt: string;
   rdap: { status: Status | 'notfound' | 'unsupported'; registered?: string; expires?: string; registrar?: string; flags?: string[] };
   dns: { status: Status; mx: string[]; spf?: string; dmarc?: string; dmarcPolicy?: string; nxdomain?: boolean };
-  reputation: { status: Status | 'refused'; source: 'URIBL'; listed: string[] };
 }
 
 const TIMEOUT_MS = 5000;
@@ -27,12 +27,22 @@ const PARTIAL_TTL_MS = 15 * 60 * 1000;
 const ttlOf = (i: DomainIntel): number =>
   i.rdap?.status === 'error' || i.dns?.status === 'error' ? PARTIAL_TTL_MS : TTL_MS;
 const MAX_CACHE = 200;
-const DOH = { cloudflare: 'https://cloudflare-dns.com/dns-query', google: 'https://dns.google/resolve' } as const;
+const DOH = 'https://cloudflare-dns.com/dns-query';
 const IANA_RDAP = 'https://data.iana.org/rdap/dns.json';
 const RDAP_FALLBACK = 'https://rdap.org/';
 const BOOTSTRAP_KEY = 'rdapBootstrap';
 const BOOTSTRAP_TTL_MS = 7 * 24 * 3600 * 1000;
 const LABEL_RE = /^[a-z0-9-]{1,63}$/;
+// The sender's own DNS decides how many MX records and how long a TXT record it returns: only a bounded part is
+// kept, so attacker-sized answers cannot fill storage.local (and stop later lookups from being cached).
+const MAX_MX = 10;
+const MAX_HOST = 253;
+const MAX_TXT = 1024;
+const MAX_REGISTRAR = 200;
+const MAX_FLAGS = 20;
+const MAX_FIELD = 64;
+const clip = (v: unknown, max: number): string | undefined =>
+  typeof v === 'string' ? (v.length > max ? v.slice(0, max) : v) : undefined;
 
 async function getJson(fetchFn: FetchFn, url: string, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
   const res = await fetchFn(url, {
@@ -63,8 +73,8 @@ function normalizeSafeRdapBase(rawUrl: unknown): string | null {
 }
 
 interface DohAnswer { type: number; data: string }
-async function doh(fetchFn: FetchFn, name: string, type: 'A' | 'MX' | 'TXT', via: keyof typeof DOH = 'cloudflare'): Promise<{ status: number; answers: DohAnswer[] }> {
-  const { status, body } = await getJson(fetchFn, `${DOH[via]}?name=${encodeURIComponent(name)}&type=${type}`, { accept: 'application/dns-json' });
+async function doh(fetchFn: FetchFn, name: string, type: 'MX' | 'TXT'): Promise<{ status: number; answers: DohAnswer[] }> {
+  const { status, body } = await getJson(fetchFn, `${DOH}?name=${encodeURIComponent(name)}&type=${type}`, { accept: 'application/dns-json' });
   if (status < 200 || status >= 300 || !body || typeof body.Status !== 'number') throw new Error('doh failed');
   return { status: body.Status, answers: Array.isArray(body.Answer) ? body.Answer : [] };
 }
@@ -140,10 +150,13 @@ export async function lookupRdap(fetchFn: FetchFn, domain: string, kv?: KV, now 
       return { status: 'notfound' };
     }
     if (!body || status < 200 || status >= 300) return { status: 'error' };
-    const ev = (a: string) => (body.events ?? []).find((e: any) => e.eventAction === a)?.eventDate as string | undefined;
+    const ev = (a: string) => clip((body.events ?? []).find((e: any) => e.eventAction === a)?.eventDate, MAX_FIELD);
     const reg = (body.entities ?? []).find((e: any) => (e.roles ?? []).includes('registrar'));
     const fn = reg?.vcardArray?.[1]?.find((v: any[]) => v[0] === 'fn')?.[3];
-    return { status: 'ok', registered: ev('registration'), expires: ev('expiration'), registrar: typeof fn === 'string' ? fn : undefined, flags: body.status };
+    const flags = Array.isArray(body.status)
+      ? body.status.filter((f: unknown): f is string => typeof f === 'string').slice(0, MAX_FLAGS).map((f: string) => clip(f, MAX_FIELD)!)
+      : undefined;
+    return { status: 'ok', registered: ev('registration'), expires: ev('expiration'), registrar: clip(fn, MAX_REGISTRAR), flags };
   } catch { return { status: 'error' }; }
 }
 
@@ -158,85 +171,82 @@ export async function lookupDns(fetchFn: FetchFn, domain: string): Promise<Domai
     if ((mx.status !== 0 && mx.status !== 3) || (root.status !== 0 && root.status !== 3)) {
       return { status: 'error', mx: [] };
     }
-    const spf = txt(root.answers).find((t) => t.toLowerCase().startsWith('v=spf1'));
-    const dm = dmarc.status === 0 ? txt(dmarc.answers).find((t) => t.toLowerCase().startsWith('v=dmarc1')) : undefined;
+    const spf = clip(txt(root.answers).find((t) => t.toLowerCase().startsWith('v=spf1')), MAX_TXT);
+    const dm = dmarc.status === 0 ? clip(txt(dmarc.answers).find((t) => t.toLowerCase().startsWith('v=dmarc1')), MAX_TXT) : undefined;
     return {
       status: 'ok',
       mx: mx.answers
         .filter((a) => a.type === 15 && typeof a.data === 'string')
-        .map((a) => a.data.split(' ').pop()!.replace(/\.$/, '')),
+        .map((a) => a.data.split(' ').pop()!.replace(/\.$/, ''))
+        .filter((h) => h.length <= MAX_HOST)
+        .slice(0, MAX_MX),
       spf,
       dmarc: dm,
-      dmarcPolicy: dm?.match(/\bp=([a-z]+)/i)?.[1]?.toLowerCase(),
+      dmarcPolicy: dm?.match(/\bp=([a-z]{1,20})\b/i)?.[1]?.toLowerCase(),
       nxdomain: mx.status === 3 && root.status === 3,
     };
   } catch { return { status: 'error', mx: [] }; }
 }
 
-/**
- * URIBL multi: NXDOMAIN = not listed; 127.0.0.1 = query refused (URIBL limits public resolvers);
- * otherwise 127.0.0.x bitmask 2=black, 4=grey, 8=red. Tries Cloudflare, then dns.google if refused or failed.
- */
-export async function lookupReputation(fetchFn: FetchFn, domain: string): Promise<DomainIntel['reputation']> {
-  const first = await uribl(fetchFn, domain, 'cloudflare');
-  return first.status === 'ok' ? first : uribl(fetchFn, domain, 'google');
-}
-
-async function uribl(fetchFn: FetchFn, domain: string, via: keyof typeof DOH): Promise<DomainIntel['reputation']> {
-  try {
-    const r = await doh(fetchFn, `${domain}.multi.uribl.com`, 'A', via);
-    if (r.status === 3) return { status: 'ok', source: 'URIBL', listed: [] };
-    const ip = r.answers.find((a) => a.type === 1 && typeof a.data === 'string')?.data;
-    if (!ip) return { status: r.status === 0 ? 'ok' : 'error', source: 'URIBL', listed: [] };
-    if (!ip.startsWith('127.0.0.')) return { status: 'error', source: 'URIBL', listed: [] };
-    if (ip === '127.0.0.1') return { status: 'refused', source: 'URIBL', listed: [] };
-    const bits = Number(ip.split('.').pop());
-    if (!Number.isInteger(bits) || bits < 0 || bits > 255) return { status: 'error', source: 'URIBL', listed: [] };
-    const listed = [[2, 'black'], [4, 'grey'], [8, 'red']]
-      .filter(([bit]) => bits & (bit as number))
-      .map(([, n]) => n as string);
-    return { status: 'ok', source: 'URIBL', listed };
-  } catch { return { status: 'error', source: 'URIBL', listed: [] }; }
-}
-
 export async function lookupDomain(domain: string, fetchFn: FetchFn, now = Date.now(), kv?: KV): Promise<DomainIntel> {
   if (!isValidDomain(domain)) throw new Error('invalid domain');
-  const [rdap, dns, reputation] = await Promise.all([
-    lookupRdap(fetchFn, domain, kv, now),
-    lookupDns(fetchFn, domain),
-    lookupReputation(fetchFn, domain),
-  ]);
-  return { domain, checkedAt: new Date(now).toISOString(), rdap, dns, reputation };
+  const [rdap, dns] = await Promise.all([lookupRdap(fetchFn, domain, kv, now), lookupDns(fetchFn, domain)]);
+  return { domain, checkedAt: new Date(now).toISOString(), rdap, dns };
 }
+
+const isFresh = (k: string, v: unknown, now: number): v is DomainIntel =>
+  isValidDomain(k) &&
+  Boolean(v) &&
+  typeof (v as DomainIntel).checkedAt === 'string' &&
+  now - Date.parse((v as DomainIntel).checkedAt) < ttlOf(v as DomainIntel);
+
+/**
+ * Rewrite the cache without its expired entries (adding `add`, keeping the newest 200). Writes are serialized, and
+ * nothing is written when there is nothing to add or delete.
+ */
+function writeCache(kv: KV, now: number, add?: DomainIntel): Promise<void> {
+  const op = cacheWriteChain.then(async () => {
+    const latestRaw = (await kv.get(CACHE_KEY))[CACHE_KEY];
+    const merged = Object.create(null) as Record<string, DomainIntel>;
+    let dropped = false;
+    if (latestRaw && typeof latestRaw === 'object') {
+      for (const [k, v] of Object.entries(latestRaw as Record<string, unknown>)) {
+        if (isFresh(k, v, now)) merged[k] = v;
+        else dropped = true;
+      }
+    }
+    if (add) merged[add.domain] = add;
+    else if (!dropped) return;
+    const entries = Object.entries(merged)
+      .sort((a, b) => b[1].checkedAt.localeCompare(a[1].checkedAt))
+      .slice(0, MAX_CACHE);
+    await kv.set({ [CACHE_KEY]: Object.fromEntries(entries) });
+  });
+  cacheWriteChain = op.catch(() => {});
+  return op;
+}
+
+/**
+ * Delete expired lookups (sender and clicked-link domains) from the cache. The background runs this when it
+ * starts, so a cached domain is not kept past its 24 h (15 min) lifetime just because no new lookup happens.
+ */
+export const pruneIntelCache = (kv: KV, now = Date.now()): Promise<void> => writeCache(kv, now);
 
 /** Cached lookup (24 h, newest 200 domains). Concurrent writes are serialized and expired entries pruned. */
 export async function getIntel(kv: KV, domain: string, fetchFn: FetchFn, now = Date.now()): Promise<DomainIntel> {
   if (!isLookupDomain(domain)) throw new Error('invalid or private domain');
   const rawCache = (await kv.get(CACHE_KEY))[CACHE_KEY];
   if (rawCache && typeof rawCache === 'object' && Object.hasOwn(rawCache, domain)) {
-    const hit = (rawCache as Record<string, DomainIntel>)[domain];
-    if (hit && typeof hit.checkedAt === 'string' && now - Date.parse(hit.checkedAt) < ttlOf(hit)) return hit;
+    const hit = (rawCache as Record<string, unknown>)[domain];
+    if (isFresh(domain, hit, now)) {
+      const all = Object.entries(rawCache as Record<string, unknown>);
+      if (all.some(([k, v]) => !isFresh(k, v, now))) await writeCache(kv, now).catch(() => {});
+      return hit;
+    }
   }
   const intel = await lookupDomain(domain, fetchFn, now, kv);
-  if (intel.rdap.status !== 'error' || intel.dns.status !== 'error' || intel.reputation.status !== 'error') {
-    const writeOp = cacheWriteChain.then(async () => {
-      const latestRaw = (await kv.get(CACHE_KEY))[CACHE_KEY];
-      const merged = Object.create(null) as Record<string, DomainIntel>;
-      if (latestRaw && typeof latestRaw === 'object') {
-        for (const [k, v] of Object.entries(latestRaw as Record<string, DomainIntel>)) {
-          if (!isValidDomain(k) || !v || typeof v.checkedAt !== 'string') continue;
-          if (now - Date.parse(v.checkedAt) < ttlOf(v)) merged[k] = v;
-        }
-      }
-      merged[domain] = intel;
-      const entries = Object.entries(merged)
-        .sort((a, b) => b[1].checkedAt.localeCompare(a[1].checkedAt))
-        .slice(0, MAX_CACHE);
-      await kv.set({ [CACHE_KEY]: Object.fromEntries(entries) });
-    });
-    cacheWriteChain = writeOp.catch(() => {});
-    await writeOp;
-  }
+  // A failed cache write (e.g. storage quota) never discards a good result: the warnings still need it.
+  if (intel.rdap.status !== 'error' || intel.dns.status !== 'error') await writeCache(kv, now, intel).catch(() => {});
   return intel;
 }
 
@@ -246,7 +256,7 @@ export const ageDays = (iso: string | undefined, now = Date.now()) =>
 function buildDomainWarnings(
   i: DomainIntel,
   now: number,
-  opts: { subject: string; spamVerb: string; checkMissingMx: boolean },
+  opts: { subject: string; checkMissingMx: boolean },
 ): string[] {
   const w: string[] = [];
   const age = ageDays(i.rdap.registered, now);
@@ -263,16 +273,13 @@ function buildDomainWarnings(
       w.push(`${opts.subject} (${i.domain}) is not set up to send normal email`);
     }
   }
-  if (i.reputation.listed.some((l) => l === 'black' || l === 'red')) {
-    w.push(`${opts.subject} (${i.domain}) has been reported for ${opts.spamVerb} online`);
-  }
   return w;
 }
 
 /** Sender-domain warnings derived from lookups. Missing DMARC/SPF is shown in details but not warned (too common). */
 export const intelWarnings = (i: DomainIntel, now = Date.now()): string[] =>
-  buildDomainWarnings(i, now, { subject: "The sender's website", spamVerb: 'spam', checkMissingMx: true });
+  buildDomainWarnings(i, now, { subject: "The sender's website", checkMissingMx: true });
 
 /** Destination-domain warnings for clicked links (ignores missing MX on web-only hosts). */
 export const destinationIntelWarnings = (i: DomainIntel, now = Date.now()): string[] =>
-  buildDomainWarnings(i, now, { subject: 'This destination website', spamVerb: 'spam or phishing', checkMissingMx: false });
+  buildDomainWarnings(i, now, { subject: 'This destination website', checkMissingMx: false });

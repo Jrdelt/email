@@ -36,6 +36,35 @@ describe('yahoo adapter', () => {
     expect(all[0].attachmentContainers?.map((el) => el.id)).toEqual(['y-att-list']);
   });
 
+  it('never takes the sender from an attachment tile or the subject, and marks a scope-wide match uncertain', () => {
+    const page = (fromTitle: string, extra: string, subject = '') => `
+      <div data-test-id="message-group-view">${subject}<div data-test-id="message-card">
+        <div data-test-id="message-header"><span data-test-id="message-from"${fromTitle}>Mallory Ops</span></div>
+        <div data-test-id="message-view-body-content">Please pay <a href="https://evil.example/pay">Pay</a></div>
+        ${extra}
+        <a href="mailto:mallory@evil.example" id="reply">mallory@evil.example</a>
+      </div></div>`;
+    const tile = (t: string) =>
+      `<div data-test-id="attachment-list"><div data-test-id="attachment-tile" title="${t}"><span data-test-id="attachment-filename">${t}</span></div></div>`;
+    for (const t of ['boss@corp.example.pdf', 'Invoice (boss@corp.example).pdf']) {
+      document.body.innerHTML = page('', tile(t));
+      expect(yahoo.extract(document), t).toMatchObject({ senderAddress: 'mallory@evil.example', pairingUncertain: true });
+    }
+    document.body.innerHTML = page('', '', '<h1 data-test-id="message-group-subject-text" title="boss@corp.example">Boss</h1>');
+    expect(yahoo.extract(document)).toMatchObject({ senderAddress: 'mallory@evil.example', pairingUncertain: true });
+    // No message card: the conversation view (which holds the subject) is the scope.
+    document.body.innerHTML = `<div data-test-id="message-group-view">
+      <h1 data-test-id="message-group-subject-text" title="boss@corp.example">Boss</h1>
+      <div data-test-id="message-view-body-content">Please pay <a href="https://evil.example/pay">Pay</a></div>
+      <a href="mailto:mallory@evil.example">mallory@evil.example</a></div>`;
+    expect(yahoo.extract(document)).toMatchObject({ senderAddress: 'mallory@evil.example', pairingUncertain: true });
+    // The header's own sender node stays certain.
+    document.body.innerHTML = page(' title="mallory@evil.example"', tile('boss@corp.example.pdf'));
+    const e = yahoo.extract(document)!;
+    expect(e.senderAddress).toBe('mallory@evil.example');
+    expect(e.pairingUncertain).toBeUndefined();
+  });
+
   it('returns null when no Yahoo message is open', () => {
     document.body.innerHTML = '<div data-test-id="virtual-list">Inbox list</div>';
     expect(yahoo.extract(document)).toBeNull();

@@ -10,11 +10,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 0,
-      "body_len": 0,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 0
     }
   },
   {
@@ -33,11 +33,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 0,
-      "body_len": 29,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 29
     }
   },
   {
@@ -56,11 +56,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 0,
-      "body_len": 11,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 11
     }
   },
   {
@@ -79,11 +79,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 0,
-      "body_len": 21,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 21
     }
   },
   {
@@ -106,11 +106,11 @@
       "n_ip_links": 1,
       "n_punycode_links": 1,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 2,
       "urgency_hits": 5,
-      "body_len": 72,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 72
     }
   },
   {
@@ -129,11 +129,11 @@
       "n_ip_links": 1,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 0,
-      "body_len": 7,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 7
     }
   },
   {
@@ -152,21 +152,21 @@
       "n_ip_links": 0,
       "n_punycode_links": 1,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 1,
-      "body_len": 15,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 15
     }
   },
   {
     "name": "cloud_storage_html_gcs_and_trailing_dot",
-    "sender": "alert@nozfr.itl",
+    "sender": "alert@lure-sender.example",
     "body": "Your photos will be deleted. Update billing details before expiration.",
     "links": [
       {
         "text": "Review billing",
-        "href": "https://storage.googleapis.com./hmdbox/hmd_v2.html#?act=cl"
+        "href": "https://storage.googleapis.com./example-lure-bucket/lure.html#?act=cl"
       },
       {
         "text": "Logo",
@@ -179,11 +179,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 1,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 2,
       "urgency_hits": 3,
-      "body_len": 70,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 70
     }
   },
   {
@@ -206,11 +206,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 1,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 2,
       "urgency_hits": 0,
-      "body_len": 4,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 4
     }
   },
   {
@@ -233,11 +233,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 0,
-      "body_len": 5,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 5
     }
   },
   {
@@ -260,11 +260,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 0,
-      "body_len": 10,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 10
     }
   },
   {
@@ -291,11 +291,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 0,
-      "body_len": 10,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 10
     }
   },
   {
@@ -326,11 +326,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 2,
-      "body_len": 67,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 67
     }
   },
   {
@@ -349,11 +349,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 0,
-      "body_len": 6,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 6
     }
   },
   {
@@ -372,11 +372,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 3,
-      "body_len": 47,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 47
     }
   },
   {
@@ -395,11 +395,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 0,
-      "body_len": 5,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 5
     }
   },
   {
@@ -418,11 +418,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 0,
-      "body_len": 4,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 4
     }
   },
   {
@@ -472,11 +472,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 3,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 3,
       "urgency_hits": 0,
-      "body_len": 5,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 5
     }
   },
   {
@@ -499,11 +499,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 1,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 1,
       "urgency_hits": 0,
-      "body_len": 4,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 4
     }
   },
   {
@@ -517,11 +517,11 @@
       "n_ip_links": 0,
       "n_punycode_links": 0,
       "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
       "n_external_links": 0,
       "urgency_hits": 4,
-      "body_len": 71,
-      "n_shortener_links": 0,
-      "n_iplogger_links": 0
+      "body_len": 71
     }
   },
   {
@@ -1178,6 +1178,422 @@
       "n_shortener_links": 0,
       "n_iplogger_links": 0,
       "n_external_links": 3,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "punycode_tld_homoglyph_in_shown_text",
+    "sender": "x@sender.example",
+    "body": "Hello",
+    "links": [
+      {
+        "text": "www.paypal.c\u043em",
+        "href": "https://login-check.example-evil.xyz/s"
+      },
+      {
+        "text": "https://www.paypal.c\u043em/signin",
+        "href": "https://login-check.example-evil.xyz/s"
+      },
+      {
+        "text": "appleid.apple.\u0441om",
+        "href": "https://login-check.example-evil.xyz/s"
+      },
+      {
+        "text": "(paypal.c\u043em).",
+        "href": "https://login-check.example-evil.xyz/s"
+      }
+    ],
+    "expected": {
+      "n_links": 4,
+      "n_text_href_mismatch": 4,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 4,
+      "urgency_hits": 0,
+      "body_len": 5
+    }
+  },
+  {
+    "name": "real_idn_shown_text_and_non_ascii_prose",
+    "sender": "x@sender.example",
+    "body": "Hello",
+    "links": [
+      {
+        "text": "https://\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444/",
+        "href": "https://xn--e1afmkfd.xn--p1ai/"
+      },
+      {
+        "text": "\u041d\u0430\u0436\u043c\u0438\u0442\u0435.\u0437\u0434\u0435\u0441\u044c",
+        "href": "https://login-check.example-evil.xyz/s"
+      },
+      {
+        "text": "\u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444",
+        "href": "https://login-check.example-evil.xyz/s"
+      }
+    ],
+    "expected": {
+      "n_links": 3,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 1,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 3,
+      "urgency_hits": 0,
+      "body_len": 5
+    }
+  },
+  {
+    "name": "urgency_words_with_cyrillic_greek_lookalike_letters",
+    "sender": "it@corp.example",
+    "body": "Your p\u0430ssword expir\u0435d. V\u0435rify imm\u0435diately or your mailbox will be susp\u0435nded. \u0391ct now: c\u03bfnfirm \u03c5rgent",
+    "links": [
+      {
+        "text": "Keep my mailbox",
+        "href": "https://evil.example/owa"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 8,
+      "body_len": 100
+    }
+  },
+  {
+    "name": "cyrillic_and_greek_words_not_folded_for_urgency",
+    "sender": "a@b.example",
+    "body": "\u0421\u0440\u043e\u0447\u043d\u043e \u0441\u043c\u0435\u043d\u0438\u0442\u0435 \u043f\u0430\u0440\u043e\u043b\u044c: \u0441\u043e\u0441\u043d\u0430 \u0440\u043e\u0441 \u0435\u0445\u0435. \u039f\u03c1\u03ad\u03c3\u03c4\u03b7\u03c2",
+    "links": [],
+    "expected": {
+      "n_links": 0,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 45
+    }
+  },
+  {
+    "name": "lookalike_fold_word_boundaries_follow_js_whitespace",
+    "sender": "a@b.example",
+    "body": "\u0440ass\u001cword pass\u0430\u0085word lo\u0441ked\u00a0v\u0435rify\u2028\u0441onfirm\ufeffurg\u0435nt",
+    "links": [],
+    "expected": {
+      "n_links": 0,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 4,
+      "body_len": 49
+    }
+  },
+  {
+    "name": "cloud_ipfs_xht_and_more_shorteners",
+    "sender": "a@shop.example",
+    "body": "See the files.",
+    "links": [
+      {
+        "text": "Review",
+        "href": "https://commondatastorage.googleapis.com/example-bucket/login.html"
+      },
+      {
+        "text": "Open",
+        "href": "https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.dweb.link/login.html"
+      },
+      {
+        "text": "Open",
+        "href": "https://dweb.link/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/index.htm"
+      },
+      {
+        "text": "Open",
+        "href": "https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.w3s.link/a.xht"
+      },
+      {
+        "text": "Open",
+        "href": "https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.nftstorage.link/verify.html"
+      },
+      {
+        "text": "Open",
+        "href": "https://storage.googleapis.com/example-bucket/page.xht"
+      },
+      {
+        "text": "Gateway home",
+        "href": "https://dweb.link/"
+      },
+      {
+        "text": "Page",
+        "href": "https://www.example.com/a.xht"
+      },
+      {
+        "text": "Short",
+        "href": "https://j.mp/3abcd"
+      },
+      {
+        "text": "QR",
+        "href": "https://qrco.de/bfXyz"
+      },
+      {
+        "text": "s",
+        "href": "https://bit.do/fAbc"
+      },
+      {
+        "text": "s",
+        "href": "https://tr.im/abc"
+      },
+      {
+        "text": "s",
+        "href": "https://x.co/abc"
+      },
+      {
+        "text": "s",
+        "href": "https://shorturl.asia/AbCd1"
+      },
+      {
+        "text": "s",
+        "href": "https://tiny.one/abc"
+      },
+      {
+        "text": "s",
+        "href": "https://u.to/AbCd"
+      }
+    ],
+    "expected": {
+      "n_links": 16,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 6,
+      "n_shortener_links": 8,
+      "n_iplogger_links": 0,
+      "n_external_links": 16,
+      "urgency_hits": 0,
+      "body_len": 14
+    }
+  },
+  {
+    "name": "whatwg_authority_syntax",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "click",
+        "href": "http://1%3A2/"
+      },
+      {
+        "text": "click",
+        "href": "http://[v1.abc]/"
+      },
+      {
+        "text": "click",
+        "href": "http://[fe80::1%25eth0]/"
+      },
+      {
+        "text": "click",
+        "href": "http://[::1]x/"
+      },
+      {
+        "text": "click",
+        "href": "http://u[@evil.com/"
+      },
+      {
+        "text": "click",
+        "href": "http://a\uff1ab@evil.com/"
+      },
+      {
+        "text": "click",
+        "href": "http://a@b@evil.com:/"
+      },
+      {
+        "text": "click",
+        "href": "http://evil.com\uff20good.com/"
+      },
+      {
+        "text": "caf\u00e9.com\\x",
+        "href": "https://evil.example/"
+      },
+      {
+        "text": "\\\\caf\u00e9.com",
+        "href": "https://evil.example/"
+      },
+      {
+        "text": "caf\u00e9.com:",
+        "href": "https://evil.example/"
+      }
+    ],
+    "expected": {
+      "n_links": 11,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 6,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "rtl_idns_with_digits_and_joiners",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "click",
+        "href": "https://\u062f\u0628\u064a2020.\u0627\u0645\u0627\u0631\u0627\u062a/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u05d3\u05d5\u05d2\u05de\u05d4123.co.il/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0645\u0648\u0642\u06391.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.ir/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0915\u094d\u200d\u0937.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u0662b.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0628a.com/"
+      },
+      {
+        "text": "\u062f\u0628\u064a2020.\u0627\u0645\u0627\u0631\u0627\u062a",
+        "href": "https://evil.example/"
+      }
+    ],
+    "expected": {
+      "n_links": 8,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 5,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 6,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "uts46_mapping_and_validity",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "click",
+        "href": "https://\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u200cb.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u200db.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u0301abc.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://stra\u1e9ee.de/"
+      },
+      {
+        "text": "click",
+        "href": "https://ab\u2064c.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://xn--p1a-.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u13a3\u13b3\u13a9.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\uab73\uab83\uab79.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u10a0.ge/"
+      },
+      {
+        "text": "click",
+        "href": "https://a\u2488b.com/"
+      },
+      {
+        "text": "click",
+        "href": "https://\u1c90.ge/"
+      }
+    ],
+    "expected": {
+      "n_links": 12,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 5,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 7,
+      "urgency_hits": 0,
+      "body_len": 1
+    }
+  },
+  {
+    "name": "unicode_15_modifier_letter_in_link_text",
+    "sender": "a@shop.example",
+    "body": "x",
+    "links": [
+      {
+        "text": "www.p\ud838\udc30ypal.com",
+        "href": "https://evil.example/login"
+      },
+      {
+        "text": "www.p\ud838\udc30ypal.com",
+        "href": "https://www.p\u0430ypal.com/login"
+      }
+    ],
+    "expected": {
+      "n_links": 2,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 1,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 2,
       "urgency_hits": 0,
       "body_len": 1
     }

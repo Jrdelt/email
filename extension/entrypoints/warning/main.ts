@@ -62,8 +62,7 @@ function describeDestIntel(intel: DomainIntel): string {
   const answered =
     intel.rdap.status === 'ok' ||
     intel.rdap.status === 'notfound' ||
-    intel.dns.status === 'ok' ||
-    intel.reputation.status === 'ok';
+    intel.dns.status === 'ok';
   if (!answered) return 'Domain details unavailable right now.';
   const parts: string[] = [];
   if (intel.rdap.status === 'ok') {
@@ -74,9 +73,6 @@ function describeDestIntel(intel: DomainIntel): string {
     parts.push('Domain does not exist (NXDOMAIN)');
   } else if (intel.rdap.status === 'notfound') {
     parts.push('Domain not registered');
-  }
-  if (intel.reputation.status === 'ok') {
-    parts.push(intel.reputation.listed.length ? 'Reported for spam/phishing online' : 'Not listed on URIBL');
   }
   return parts.join(' • ');
 }

@@ -3,7 +3,8 @@
 // C15: the AGENTS.md allowlist rule. The sender's exact address is in storage.local "trustedSenders", but Gmail shows
 // that it could not verify the sender (a "couldn't verify" label outside the body, src/adapters/gmail.ts
 // isUnauthenticated), or, in the next conversation, that the email came "via" another organisation's relay that is
-// not a known email service (Gmail's span.go label). Auto-trust is refused (src/sender.ts canTrustByAllowlist): the
+// not a known email service (Gmail's span.go label), or one under an IDN TLD the hostname check cannot parse.
+// Auto-trust is refused (src/sender.ts canTrustByAllowlist): the
 // email is scored like any other, the banner says why the trusted address is not trusted, and its links are paused.
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -38,6 +39,13 @@ const UNVERIFIED = page({
 const VIA_RELAY = page({
   header: '<span class="go">via mailer.relay-hub.example</span>',
   body: 'Hi, the <a id="link2" href="https://corp.example/expenses">expense report</a> is ready. Thanks!',
+});
+
+// The same relay trick under an IDN TLD: isValidDomain rejects .xn--p1ai (.рф), which once made the relay vanish.
+const IDN_RELAY = page({
+  header: '<span class="go">via mailer.relay-hub.xn--p1ai</span>',
+  body: `Hi, the <a id="link3" href="https://corp.example/expenses">expense report</a> is ready. Thanks!
+    <a id="dl" download="report.pdf" href="data:application/pdf;base64,JVBERi0xLjQK">report.pdf</a>`,
 });
 
 let sent: Msg[];
@@ -86,6 +94,33 @@ describe('content.ts: an allowlisted address sent through an unexpected relay', 
     expect(body().hasAttribute('data-ped-locked')).toBe(true);
     expect($('link2').hasAttribute('href')).toBe(false);
     expect(click($('link2'))).toBe(true);
+    expect(navigations(sent)).toEqual([]);
+  });
+});
+
+describe('content.ts: an allowlisted address sent through a relay under an IDN TLD', () => {
+  it('is not trusted: the relay that cannot be checked locks links and the inline download', async () => {
+    const mark = sent.length;
+    document.body.innerHTML = IDN_RELAY;
+    await until(() => expect(lastVerdict(sent), 'verdict for the IDN-relayed email').toMatchObject({
+      trusted: false,
+      sender: { address: ADDRESS },
+    }));
+    await settled(sent, mark);
+    expect(lastVerdict(sent)).toMatchObject({
+      verdict: { level: 'safe' },
+      sender: {
+        warnings: [CLAIM, 'Sent through a relay server that could not be checked (mailer.relay-hub.xn--p1ai)'],
+      },
+    });
+    expect(lookups(sent, mark)).toEqual(['corp.example']);
+    expect(body().hasAttribute('data-ped-locked')).toBe(true);
+    expect($('link3').hasAttribute('href')).toBe(false);
+    expect(click($('link3'))).toBe(true);
+    const dl = $('dl');
+    expect(dl.hasAttribute('data-ped-att-locked'), 'download locked').toBe(true);
+    expect(dl.hasAttribute('href')).toBe(false);
+    expect(click(dl)).toBe(true);
     expect(navigations(sent)).toEqual([]);
   });
 });

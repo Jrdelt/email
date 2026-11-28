@@ -1,7 +1,7 @@
 import { isLookupDomain } from '../src/domain';
-import { getIntel, type DomainIntel, type FetchFn } from '../src/domainIntel';
+import { getIntel, pruneIntelCache, type DomainIntel, type FetchFn } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
-import { MAX_ATTACHMENT_NAMES } from '../src/attachments';
+import { MAX_CLASSIFIED_ATTACHMENTS } from '../src/attachments';
 import { MAX_LINKS, capLinkText } from '../src/adapters/extract';
 import { WARN_TTL_MS, isSafeHttpUrl, proceedTarget } from '../src/linkGuard';
 import { clearLookupCaches, getSettings } from '../src/settings';
@@ -77,7 +77,27 @@ export default defineBackground(() => {
     strictNow = strictLocalMode;
     return strictNow;
   };
-  void refreshStrict();
+  // Lookup-cache access for work started in generation `gen`: writes are dropped once Strict Local Mode is on or
+  // the cache was purged since, so they can never bring purged results back.
+  const cacheKV = (gen: number) => {
+    const allowed = () => !strictNow && gen === generation;
+    return {
+      allowed,
+      kv: {
+        get: (k: string) => browser.storage.local.get(k),
+        set: async (items: Record<string, unknown>) => {
+          if (allowed()) await browser.storage.local.set(items);
+        },
+      },
+    };
+  };
+  // Expired data is deleted when the background starts, not only at the next lookup or link warning: cached
+  // sender/clicked-link domains (24 h, 15 min for partial results) and warn:* entries holding a full URL (1 h).
+  const startGen = generation;
+  void refreshStrict()
+    .then((strict) => (strict ? undefined : pruneIntelCache(cacheKV(startGen).kv)))
+    .catch(() => {});
+  void pruneOldWarnings(Date.now());
   browser.storage?.onChanged?.addListener((changes: Record<string, { newValue?: unknown }>, area: string) => {
     if (area === 'managed' || (area === 'local' && 'privacySettings' in changes)) void refreshStrict();
     // Cleared from elsewhere (popup "Clear all local data"): results of lookups already running are discarded.
@@ -90,7 +110,7 @@ export default defineBackground(() => {
   });
   // A tab that starts loading a page of another site drops its stored verdict. Subframe loads and same-site
   // navigations also report 'loading'; there the webmail's content script keeps or replaces the verdict itself.
-  browser.tabs?.onUpdated?.addListener((tabId: number, changeInfo: { status?: string; url?: string }, tab?: { url?: string }) => {
+  const onTabUpdated = (tabId: number, changeInfo: { status?: string; url?: string }, tab?: { url?: string }) => {
     if (changeInfo.status !== 'loading') return;
     const key = `tab:${tabId}`;
     void (async () => {
@@ -100,7 +120,18 @@ export default defineBackground(() => {
       const origin = originOf(changeInfo.url ?? tab?.url);
       if (!origin || !stored || stored.origin !== origin) await store.remove(key);
     })().catch(() => {});
-  });
+  };
+  // This fires for every tab on every site, so ask for status changes only: Firefox then no longer wakes the
+  // background for title and favicon updates. Chrome and Edge throw "This event does not support filters" (a URL
+  // filter would also hide navigations away from webmail), so they get the unfiltered listener.
+  const tabEvents = browser.tabs?.onUpdated as unknown as
+    | { addListener(cb: typeof onTabUpdated, filter?: { properties: string[] }): void }
+    | undefined;
+  try {
+    tabEvents?.addListener(onTabUpdated, { properties: ['status'] });
+  } catch {
+    tabEvents?.addListener(onTabUpdated);
+  }
 
   const handleMessage = (
     msg: unknown,
@@ -148,17 +179,14 @@ export default defineBackground(() => {
         if (await refreshStrict()) return null;
         let p = inflight.get(domain);
         if (!p) {
-          const gen = generation;
-          const allowed = () => !strictNow && gen === generation;
+          const { allowed, kv } = cacheKV(generation);
           const guardedFetch: FetchFn = (u, i) => (allowed() ? fetch(u, i) : Promise.reject(new Error('lookups stopped')));
-          const kv = {
-            get: (k: string) => browser.storage.local.get(k),
-            set: async (items: Record<string, unknown>) => {
-              if (allowed()) await browser.storage.local.set(items);
-            },
-          };
-          p = getIntel(kv, domain, guardedFetch).finally(() => inflight.delete(domain));
-          inflight.set(domain, p);
+          // Delete only this lookup's own entry: after a Strict Local Mode purge the map may hold a newer one.
+          const own: Promise<DomainIntel> = getIntel(kv, domain, guardedFetch).finally(() => {
+            if (inflight.get(domain) === own) inflight.delete(domain);
+          });
+          p = own;
+          inflight.set(domain, own);
         }
         const result = await p;
         return strictNow ? null : result;
@@ -218,7 +246,7 @@ export default defineBackground(() => {
       const attachmentNames = Array.isArray(m.attachmentNames)
         ? m.attachmentNames
             .filter((n): n is string => typeof n === 'string')
-            .slice(0, MAX_ATTACHMENT_NAMES)
+            .slice(0, MAX_CLASSIFIED_ATTACHMENTS) // the app frame classifies every name the message frame found
             .map((n) => (n.length > 1024 ? n.slice(-1024) : n)) // keep the end: the extension decides the risk
         : [];
       const links = Array.isArray(m.links)

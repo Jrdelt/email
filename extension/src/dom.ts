@@ -74,6 +74,7 @@ export function isTextEntry(el: Element): boolean {
   if (tag === 'input') return !NON_TEXT_INPUT_TYPES.has((getAttr(el, 'type') ?? '').trim().toLowerCase());
   return builtin<boolean | undefined>(el, 'isContentEditable') === true;
 }
+export const nodeTypeOf = (node: Node): number => builtin<number>(node, 'nodeType');
 
 /** Resolve event.target to an Element even when dispatched on a Text node (clobbering-safe). */
 export function eventElement(e: Event): Element | null {

@@ -37,14 +37,12 @@ const intel = (o: Partial<DomainIntel> = {}): DomainIntel => ({
   checkedAt: new Date().toISOString(),
   rdap: { status: 'ok', registered: '2008-05-01T00:00:00Z', registrar: 'Example Registrar' },
   dns: { status: 'ok', mx: ['mx.bit.ly'] },
-  reputation: { status: 'ok', source: 'URIBL', listed: [] },
   ...o,
 });
 
 const FAILED: Partial<DomainIntel> = {
   rdap: { status: 'error' },
   dns: { status: 'error', mx: [] },
-  reputation: { status: 'error', source: 'URIBL', listed: [] },
 };
 
 const replace = vi.fn();
@@ -238,7 +236,7 @@ describe('warning.html: destination lookups', () => {
   it('asks nothing again when the click guard already looked the domain up', async () => {
     const { sent } = await openPage(entry({ intel: intel() }), { answer: intel() });
     expect(sent).toEqual([]);
-    expect(text('dest-meta')).toContain('Not listed on URIBL');
+    expect(text('dest-meta')).toContain('Registrar: Example Registrar');
   });
 
   it('escalates a "check link" warning to danger when the lookup finds a brand-new domain', async () => {

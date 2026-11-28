@@ -16,8 +16,8 @@ export const BRANDS: Brand[] = [
   b('OneDrive', ['microsoft.com', 'live.com', 'outlook.com', 'office.com'], /\bone\s*drive\b/i),
   b('Outlook', ['microsoft.com', 'outlook.com', 'live.com', 'office.com']),
   b('Office 365', ['microsoft.com', 'office.com', 'microsoftonline.com']),
-  b('Google', ['google.com', 'gmail.com', 'youtube.com']),
-  b('Gmail', ['google.com', 'gmail.com']),
+  b('Google', ['google.com', 'gmail.com', 'googlemail.com', 'youtube.com']),
+  b('Gmail', ['google.com', 'gmail.com', 'googlemail.com']),
   b('Amazon', [
     'amazon.com', 'amazon.co.uk', 'amazon.ca', 'amazon.de', 'amazon.com.au', 'amazon.fr', 'amazon.it', 'amazon.es',
     'amazon.nl', 'amazon.se', 'amazon.pl', 'amazon.com.be', 'amazon.co.jp', 'amazon.in', 'amazon.com.mx',
@@ -63,6 +63,49 @@ export const SERVICE_WORDS = new RegExp(`\\b(?:${SERVICE_WORD_LIST.join('|')})\\
 
 /** Start-anchored version for all-lowercase concatenated display names like "gmailsupportteam". */
 export const SERVICE_PREFIX = new RegExp(`^(?:${SERVICE_WORD_LIST.map((w) => w.replace(/-/g, '')).join('|')})`, 'i');
+
+// Words a squatted sender domain adds to a brand: "paypal-secure", "appleid-verify", "amazonbilling",
+// "securepaypal". Narrower than SERVICE_WORD_LIST: "center", "drive", "cloud", "storage", "order" and "desk" also
+// name ordinary businesses ("chasecenter.com").
+const DOMAIN_LURE_WORD_LIST = [
+  'support', 'security', 'secure', 'account', 'accounts', 'billing', 'service', 'services', 'alert', 'alerts',
+  'notification', 'notifications', 'customer', 'help', 'helpdesk', 'admin', 'noreply', 'verify', 'verification',
+  'verified', 'payment', 'payments', 'delivery', 'recovery', 'update', 'notice', 'warning', 'subscription',
+  'invoice', 'login', 'signin', 'auth', 'id', 'mail', 'team', 'care', 'official', 'protection', 'unlock', 'confirm',
+  'refund', 'online',
+];
+const LURE_ALT = DOMAIN_LURE_WORD_LIST.join('|');
+/** A whole domain token made of one or two lure words ("secure", "accountverify"). */
+export const DOMAIN_LURE_RUN = new RegExp(`^(?:${LURE_ALT}){1,2}$`);
+/** A domain token that starts with a lure word ("supportcenter"); only used after a distinctive brand. */
+export const DOMAIN_LURE_START = new RegExp(`^(?:${LURE_ALT})`);
+
+/**
+ * Brand labels that are dictionary words or short abbreviations ("apple-orchard", "amazon-tours", "pickups"): in a
+ * longer domain they only count next to a lure word ("apple-support", "dhl-delivery", "appleid").
+ */
+export const WORD_BRAND_LABELS: ReadonlySet<string> = new Set([
+  'apple', 'amazon', 'chase', 'outlook', 'stripe', 'adobe', 'norton', 'meta', 'dhl', 'ups', 'irs', 'bofa',
+]);
+/**
+ * Labels of secondary brand domains that are everyday words (me.com, live.com, office.com, cash.app, block.xyz):
+ * only a domain whose whole label is (a look-alike of) them counts, never one that merely contains them.
+ */
+export const GENERIC_BRAND_LABELS: ReadonlySet<string> = new Set(['me', 'live', 'office', 'cash', 'block']);
+
+/**
+ * Words that, right after a brand, name the brand's own organisation or product rather than a person's surname:
+ * "Amazon.com", "PayPal Inc.", "Apple ID", "DHL Express", "Microsoft 365" (but not "Chase Smith"). Only matched
+ * directly after the brand, so "Chase Smith (Acme Inc)" stays a person.
+ */
+const ORG_WORD_LIST = [
+  'com', 'net', 'org', 'gov', 'inc', 'llc', 'ltd', 'corp', 'id', 'express', 'bank', 'online', 'prime', 'pro', 'pay',
+  '365', 'workspace', 'outlook', 'office', 'teams', 'onedrive', 'icloud', 'gmail', 'wallet',
+];
+const ORG_SUFFIX = `\\s+(?:${ORG_WORD_LIST.join('|')})\\b`;
+
+/** Per brand (same order as BRANDS): the brand followed by an organisation word. */
+export const BRAND_ORG_PATTERNS: readonly RegExp[] = BRANDS.map((br) => new RegExp(br.pattern.source + ORG_SUFFIX, 'i'));
 
 export const FREEMAIL = new Set([
   'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'aol.com',

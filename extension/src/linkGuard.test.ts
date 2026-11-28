@@ -55,16 +55,34 @@ describe('analyzeLinkDestination', () => {
     expect(analyzeLinkDestination('http://1.2.3.4/a').level).toBe('danger');
     expect(analyzeLinkDestination('http://[2001:db8::1]/login').level).toBe('danger');
     expect(analyzeLinkDestination('https://xn--pple-43d.com/verify').level).toBe('danger');
-    expect(analyzeLinkDestination('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl').level).toBe('danger');
-    expect(analyzeLinkDestination('https://storage.googleapis.com./hmdbox/hmd_v2.html').level).toBe('danger');
-    for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso', 'docm', 'mhtml', 'jar']) {
+    expect(analyzeLinkDestination('https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl').level).toBe('danger');
+    expect(analyzeLinkDestination('https://storage.googleapis.com./example-lure-bucket/lure.html').level).toBe('danger');
+    expect(analyzeLinkDestination('https://commondatastorage.googleapis.com/example-bucket/login.html').level).toBe('danger');
+    expect(analyzeLinkDestination('https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.dweb.link/login.html').level).toBe('danger');
+    for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso', 'docm', 'mhtml', 'jar', 'rdp', 'iqy', 'searchConnector-ms']) {
       const risk = analyzeLinkDestination(`https://cdn.example.com/files/doc.${ext}`);
       expect(risk.level).toBe('danger');
-      expect(risk.reasons.join(' ')).toContain(`.${ext}`);
+      expect(risk.reasons.join(' ')).toContain(`.${ext.toLowerCase()}`);
     }
     const wrapped = analyzeLinkDestination('https://www.google.com/url?q=https%3A%2F%2Fevil.example%2Fpayload.svg');
     expect(wrapped.level).toBe('danger');
     expect(wrapped.href).toBe('https://evil.example/payload.svg');
+  });
+
+  it('sends archive downloads (.zip, .rar, .7z...) to the warning page instead of opening them', () => {
+    for (const ext of ['zip', 'rar', '7z', 'tgz', 'cab']) {
+      const r = analyzeLinkDestination(`https://evil.example/files/Invoice_7781.${ext}`, 'attacker.example');
+      expect(r.level).toBe('warning');
+      expect(r.reasons.join(' ')).toContain(`archive (.${ext})`);
+      expect(r.needsDomainCheck).toBe(false);
+    }
+    // Upper case and percent-encoded dots in the path still count; the query string does not.
+    expect(analyzeLinkDestination('https://evil.example/files/INVOICE%2EZIP').level).toBe('warning');
+    expect(analyzeLinkDestination('https://shop.example.com/search?q=a.zip').level).toBe('safe');
+    // IIS ISAPI web apps are served as /app.dll?...: a .dll path is not treated as a risky download.
+    expect(analyzeLinkDestination('https://portal.example.com/scripts/app.dll?login').level).toBe('safe');
+    // A risky type inside a wrapped link still wins over the archive warning.
+    expect(analyzeLinkDestination('https://cdn.example.com/files/setup.exe').level).toBe('danger');
   });
 
   it('flags danger for IP-logger/Grabify links like urlto.me before opening', () => {
@@ -75,7 +93,7 @@ describe('analyzeLinkDestination', () => {
   });
 
   it('flags warning for URL shorteners (including trailing-dot FQDNs) and unencrypted http links', () => {
-    for (const u of ['https://bit.ly/3xyz', 'https://bit.ly./3xyz', 'https://rebrand.ly/abc']) {
+    for (const u of ['https://bit.ly/3xyz', 'https://bit.ly./3xyz', 'https://rebrand.ly/abc', 'https://j.mp/3xyz', 'https://qrco.de/bfXy']) {
       const r = analyzeLinkDestination(u);
       expect(r.level).toBe('warning');
       expect(r.needsDomainCheck).toBe(false);
@@ -113,11 +131,10 @@ describe('mergeLinkIntel & destinationIntelWarnings', () => {
     checkedAt: '2026-11-22T00:00:00Z',
     rdap: { status: 'ok', registered: '2010-01-01T00:00:00Z' },
     dns: { status: 'ok', mx: ['mx.dest.example'] },
-    reputation: { status: 'ok', source: 'URIBL', listed: [] },
     ...overrides,
   });
 
-  it('upgrades to danger on brand-new (<30d), NXDOMAIN, notfound, or URIBL black/red destinations', () => {
+  it('upgrades to danger on brand-new (<30d), NXDOMAIN or notfound destinations', () => {
     const base = analyzeLinkDestination('https://dest.example/login', 'sender.com');
 
     const brandNew = mergeLinkIntel(
@@ -135,10 +152,6 @@ describe('mergeLinkIntel & destinationIntelWarnings', () => {
     const notFound = mergeLinkIntel(base, baseIntel({ rdap: { status: 'notfound' }, dns: { status: 'ok', mx: [] } }), NOW);
     expect(notFound.level).toBe('danger');
     expect(notFound.reasons[0]).toMatch(/not registered/);
-
-    const spam = mergeLinkIntel(base, baseIntel({ reputation: { status: 'ok', source: 'URIBL', listed: ['black'] } }), NOW);
-    expect(spam.level).toBe('danger');
-    expect(spam.reasons[0]).toMatch(/reported for spam or phishing/);
   });
 
   it('does not false-positive on web-only domains without MX records or unsupported RDAP TLDs', () => {
@@ -156,7 +169,8 @@ describe('mergeLinkIntel & destinationIntelWarnings', () => {
 describe('private-use domains are never looked up online', () => {
   it('does not request a domain check for intranet TLDs but still does for public ones', async () => {
     const { isLookupDomain } = await import('./domain');
-    for (const d of ['hospital.lan', 'ehr.corp', 'printer.local', 'svc.internal', 'x.onion']) {
+    // .mail is permanently undelegated by ICANN with .corp and .home (name collision): on-prem Exchange uses it.
+    for (const d of ['hospital.lan', 'ehr.corp', 'printer.local', 'svc.internal', 'x.onion', 'hospital.mail', 'ehr.hospital.mail']) {
       expect(isLookupDomain(d)).toBe(false);
       expect(analyzeLinkDestination(`https://${d}/patient/123`).needsDomainCheck).toBe(false);
     }
@@ -200,6 +214,96 @@ describe('redirect wrappers', () => {
     for (let i = 0; i < 6; i++) href = `https://www.google.com/url?q=${encodeURIComponent(href)}`;
     const r = analyzeLinkDestination(href, 'shop.example');
     expect(r.level).not.toBe('safe');
+  });
+});
+
+describe('Google /url with an empty or non-URL q=', () => {
+  // Real search-result redirects carry q= empty (or the search words) and the target in url=; the first present name
+  // used to win, so the destination checks saw www.google.com.
+  it('falls through to url= and warns when q= and url= name different targets', () => {
+    const exe = analyzeLinkDestination('https://www.google.com/url?q=&url=https%3A%2F%2Fevil.example%2Fpayload.exe', 'shop.example');
+    expect(exe.host).toBe('evil.example');
+    expect(exe.level).toBe('danger');
+    expect(exe.reasons.join(' ')).toMatch(/risky file type \(\.exe\)/);
+    expect(
+      unwrapRedirectUrl('https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=1&url=https://evil.example/login&usg=x'),
+    ).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://www.google.com/url?sa=t&q=invoice+portal&url=https%3A%2F%2Fevil.example%2F')).toBe(
+      'https://evil.example/',
+    );
+    const both = analyzeLinkDestination(
+      'https://www.google.com/url?q=https%3A%2F%2Fpaypal.com%2F&url=https%3A%2F%2Fevil.example%2Flogin',
+      'shop.example',
+    );
+    expect(both.level).not.toBe('safe');
+    expect(both.reasons.join(' ')).toMatch(/more than one destination/);
+    // Same target in both: not ambiguous.
+    const same = analyzeLinkDestination('https://www.google.com/url?q=https://shop.example/a&url=https://shop.example/a', 'shop.example');
+    expect(same).toMatchObject({ host: 'shop.example', level: 'safe' });
+  });
+});
+
+describe('redirectors that carry their target in the URL', () => {
+  const b64 = (s: string) =>
+    btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  it('unwraps Google /url on Google country domains', () => {
+    expect(unwrapRedirectUrl('https://www.google.co.uk/url?q=https%3A%2F%2Fevil.example%2Flogin')).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://google.com.au/url?url=https://evil.example/login')).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://www.google.de/url?sa=t&q=&url=https://evil.example/x')).toBe('https://evil.example/x');
+    // Not Google's: a look-alike wrapper host is never unwrapped (only its target would be checked).
+    for (const fake of ['https://www.google.evil/url?q=https://shop.example/', 'https://google.co.zz/url?q=https://shop.example/',
+      'https://www.google.com.evil.example/url?q=https://shop.example/']) {
+      expect(unwrapRedirectUrl(fake)).toBe(fake);
+    }
+  });
+
+  it('unwraps the Google AMP viewer', () => {
+    expect(unwrapRedirectUrl('https://www.google.com/amp/s/evil.example/login')).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://www.google.co.uk/amp/s/evil.example/a/b?x=1')).toBe('https://evil.example/a/b?x=1');
+    expect(unwrapRedirectUrl('https://www.google.com/amp/evil.example/page')).toBe('http://evil.example/page');
+    const r = analyzeLinkDestination('https://www.google.com/amp/s/evil.example/invoice.exe', 'shop.example');
+    expect(r).toMatchObject({ host: 'evil.example', level: 'danger' });
+  });
+
+  it("decodes Bing's /ck/a click tracker and fails closed on a target it cannot decode", () => {
+    const href = `https://www.bing.com/ck/a?!&&p=1b2c3d&u=a1${b64('https://evil.example/login')}&ntb=1`;
+    expect(unwrapRedirectUrl(href)).toBe('https://evil.example/login');
+    const r = analyzeLinkDestination(href, 'shop.example');
+    expect(r).toMatchObject({ host: 'evil.example', registrable: 'evil.example', needsDomainCheck: true });
+    expect(unwrapRedirectUrl(`https://bing.com/ck/a?u=a1${b64('https://café.example/é')}`)).toBe('https://café.example/é');
+    for (const bad of ['https://www.bing.com/ck/a?u=zz' + b64('https://evil.example/'), 'https://www.bing.com/ck/a?u=a1%%%%']) {
+      const risk = analyzeLinkDestination(bad, 'shop.example');
+      expect(risk.level, bad).not.toBe('safe');
+      expect(risk.reasons.join(' ')).toMatch(/more than one destination|could not be read/);
+    }
+    // Without a u= target it is just a Bing page.
+    expect(analyzeLinkDestination('https://www.bing.com/ck/a?p=1', 'shop.example').level).toBe('safe');
+  });
+});
+
+describe('sites on free hosting services', () => {
+  // The registrable domain of <anything>.pages.dev is pages.dev: its years-old, clean record used to vouch for every
+  // site anyone publishes there, so the click opened silently.
+  it.each([
+    ['https://account-verify-demo.pages.dev/login', 'pages.dev'],
+    ['https://m365-login-demo.web.app/', 'web.app'],
+    ['https://demo-portal.firebaseapp.com/__/auth', 'firebaseapp.com'],
+    ['https://docs-share-demo.netlify.app/a', 'netlify.app'],
+    ['https://invoice-demo.vercel.app/', 'vercel.app'],
+    ['https://someone.github.io/page', 'github.io'],
+    ['https://w.someone.workers.dev/', 'workers.dev'],
+    ['https://abc123.lambda-url.us-east-1.on.aws/', 'on.aws'],
+    ['https://site-demo.blogspot.com/', 'blogspot.com'],
+  ])('%s warns and does not look up the platform domain', (href, suffix) => {
+    const r = analyzeLinkDestination(href, 'shop.example');
+    expect(r.level).toBe('warning');
+    expect(r.needsDomainCheck).toBe(false);
+    expect(r.reasons.join(' ')).toContain(`free hosting service (${suffix})`);
+  });
+  it('leaves the platform itself and look-alike names alone', () => {
+    for (const href of ['https://pages.dev/', 'https://evilpages.dev/x', 'https://pages.dev.shop-files.example/', 'https://github.com/a/b']) {
+      expect(analyzeLinkDestination(href, 'shop.example').reasons.join(' '), href).not.toContain('free hosting');
+    }
   });
 });
 

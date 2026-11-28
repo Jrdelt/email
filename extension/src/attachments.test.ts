@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeAttachments, cleanAttachmentName } from './attachments';
+import { MAX_ATTACHMENTS } from './adapters/extract';
+import { analyzeAttachments, cleanAttachmentName, MAX_ATTACHMENT_NAMES, MAX_CLASSIFIED_ATTACHMENTS } from './attachments';
 import { ellipsizeMiddle } from './text';
 
 describe('cleanAttachmentName', () => {
@@ -95,6 +96,42 @@ describe('attachment classification hardening', () => {
     const a = analyzeAttachments(['invoice‮fdp.exe']);
     expect(a.level).toBe('danger');
     expect(a.reasons.join(' ')).not.toMatch(/[‪-‮⁦-⁩]/);
+  });
+});
+
+describe('current attack file types and long attachment lists', () => {
+  it('flags rogue RDP files, macro slideshows, search connectors, Excel web queries and other code-running types', () => {
+    for (const ext of [
+      'rdp', 'ppsm', 'sldm', 'searchConnector-ms', 'iqy', 'slk', 'diagcab', 'msp', 'scf', 'xla', 'ps1xml', 'msh',
+      'dll', 'appref-ms', 'msu',
+    ]) {
+      const a = analyzeAttachments([`Q3.${ext}`]);
+      expect(a.level, ext).toBe('danger');
+      expect(a.reasons[0]).toMatch(/high-risk file type/);
+    }
+  });
+
+  it('classifies a dangerous file listed after 50 harmless ones, but shows at most 50 names', () => {
+    const photos = Array.from({ length: 60 }, (_, i) => `IMG_${i}.jpg`);
+    for (const late of ['invoice.html', 'Q3.rdp']) {
+      const a = analyzeAttachments([...photos, late]);
+      expect(a.level, late).toBe('danger');
+      expect(a.count).toBe(61);
+      expect(a.names).toHaveLength(MAX_ATTACHMENT_NAMES);
+      expect(a.reasons.join(' ')).toContain(late);
+    }
+  });
+
+  it('lists the danger reasons first and keeps the reason list bounded', () => {
+    const many = [...Array.from({ length: 80 }, (_, i) => `backup_${i}.zip`), 'payload.exe'];
+    const a = analyzeAttachments(many);
+    expect(a.level).toBe('danger');
+    expect(a.reasons[0]).toContain('payload.exe');
+    expect(a.reasons.length).toBeLessThanOrEqual(MAX_ATTACHMENT_NAMES);
+  });
+
+  it('classifies as many names as the adapters collect', () => {
+    expect(MAX_CLASSIFIED_ATTACHMENTS).toBe(MAX_ATTACHMENTS);
   });
 });
 

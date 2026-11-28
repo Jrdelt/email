@@ -21,6 +21,7 @@ const ATT_HREF_ATTR = 'data-ped-att-href';
 const ATT_DL_ATTR = 'data-ped-att-download';
 const ATT_DLURL_ATTR = 'data-ped-att-download-url';
 const ATT_FA_ATTR = 'data-ped-att-formaction';
+const ATT_ACTION_ATTR = 'data-ped-att-action';
 const ATT_STYLE_ID = 'ped-att-lock-style';
 
 const STASHED_PAIRS: readonly [attr: string, stashAttr: string][] = [
@@ -28,6 +29,7 @@ const STASHED_PAIRS: readonly [attr: string, stashAttr: string][] = [
   ['download', ATT_DL_ATTR],
   ['download_url', ATT_DLURL_ATTR],
   ['formaction', ATT_FA_ATTR],
+  ['action', ATT_ACTION_ATTR], // a <form> submitting to a data:/blob: download
 ];
 
 const styles = new WeakMap<Document, HTMLStyleElement>();
@@ -123,7 +125,7 @@ const XLINK_STASH_ATTR = 'data-ped-att-xlink-href';
 const ANIM_STASH_ATTR = 'data-ped-att-anim-attr';
 const ANIMATED_LINK_ATTRS = new Set(['href', 'xlink:href']);
 // Local names, matched in the callback: attributeFilter never reports namespaced attributes such as xlink:href.
-const WATCHED_ATTRS = new Set(['href', 'xlink:href', 'download', 'download_url', 'formaction', 'attributename']);
+const WATCHED_ATTRS = new Set(['href', 'xlink:href', 'download', 'download_url', 'formaction', 'action', 'attributename']);
 const MIN_PRUNE = 256;
 const pruneAt = new WeakMap<HTMLElement, number>();
 
@@ -137,7 +139,7 @@ function stashTarget(root: HTMLElement): void {
   const targets = [
     root,
     ...root.querySelectorAll<Element>(
-      `a, area, button, [href], [download], [download_url], [formaction], [${ATT_HREF_ATTR}], [${ATT_DL_ATTR}], [${ATT_DLURL_ATTR}], [${ATT_FA_ATTR}], [${XLINK_STASH_ATTR}]`,
+      `a, area, button, form, [href], [download], [download_url], [formaction], [${ATT_HREF_ATTR}], [${ATT_DL_ATTR}], [${ATT_DLURL_ATTR}], [${ATT_FA_ATTR}], [${ATT_ACTION_ATTR}], [${XLINK_STASH_ATTR}]`,
     ),
   ];
   let set = stashedIn.get(root);

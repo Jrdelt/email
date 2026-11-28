@@ -13,6 +13,8 @@ import {
   sameOriginFrameDocs,
   isUnsafeNode,
   linkFields,
+  inExcludedRegion,
+  conversationPairingUncertain,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
@@ -36,21 +38,24 @@ const isCompose = (el: HTMLElement): boolean =>
 function findBodies(doc: Document): BodyHit[] {
   // A direct body that merely wraps the content iframe is not itself the message.
   const excludedDirect = (el: HTMLElement) => isCompose(el) || el.querySelector('iframe[data-testid="content-iframe"]') !== null;
-  // The first source with content wins, keeping its empty bodies (attachment-only messages in a conversation).
+  // Direct and iframe bodies merged; empty ones kept (attachment-only messages in a conversation).
   return chooseBodies(
     pickFrameBodies(doc, CONTENT_IFRAMES, isCompose),
     pickBodies(doc, DIRECT_BODY_SELECTORS, excludedDirect),
   );
 }
 
-/** The message view around the body (never the body itself: message-view:body also matches ^="message-view"). */
-function findScope(doc: Document, hostEl: HTMLElement): HTMLElement {
+/**
+ * The message view around the body (never the body itself: message-view:body also matches ^="message-view").
+ * `perMessage` is false for the conversation-level fallback (no message view matched), which may hold others.
+ */
+function findScope(doc: Document, hostEl: HTMLElement): { scope: HTMLElement; perMessage: boolean } {
   const start = hostEl.parentElement ?? hostEl;
-  return (
-    start.closest<HTMLElement>('[data-testid^="message-view"]:not([data-testid="message-view:body"]), article, [role="listitem"]') ??
-    start.closest<HTMLElement>('[data-testid="conversation-view"], main, [role="main"]') ??
-    doc.body
+  const view = start.closest<HTMLElement>(
+    '[data-testid^="message-view"]:not([data-testid="message-view:body"]), article, [role="listitem"]',
   );
+  if (view) return { scope: view, perMessage: true };
+  return { scope: start.closest<HTMLElement>('[data-testid="conversation-view"], main, [role="main"]') ?? doc.body, perMessage: false };
 }
 
 const FROM_BLOCK_SELECTORS = [
@@ -59,13 +64,34 @@ const FROM_BLOCK_SELECTORS = [
   '[data-testid="message-header"]',
 ];
 
-function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
-  const scope = findScope(doc, hostEl);
+const SUBJECT_SEL = '[data-testid="conversation-header:subject"], [data-testid="message-column:subject"], h1[title]';
+const ATTACHMENT_ITEM_SEL =
+  '[data-testid^="attachment-item"]:not([data-testid="attachment-item:name"]), a[download], a[data-ped-att-download]';
+// Regions that never hold the sender: the attachment list and items (attacker-chosen file names) and the subject.
+const SENDER_EXCLUDE_SEL = `[data-testid^="attachment-list"], [data-testid^="attachment-item"], ${ATTACHMENT_ITEM_SEL}, ${SUBJECT_SEL}`;
+
+const ADDRESS_SEL =
+  '[data-testid="recipient-address"], [data-testid="message-header:from"], [title*="@"], [aria-label*="@"], a[href^="mailto:"]';
+
+/**
+ * The sender of the message view around `hostEl`. `uncertain` marks an address found without a From block: it may
+ * come from anywhere in the message view, so it is never allowlist-trusted. A From block found in the
+ * conversation-level fallback is uncertain too when that scope holds another body or another sender address
+ * (conversationPairingUncertain): it may belong to a different message of the thread.
+ */
+function findSender(
+  doc: Document,
+  container: HTMLElement,
+  hostEl: HTMLElement,
+  bodies: readonly BodyHit[],
+): { senderName: string; senderAddress: string; uncertain?: true } {
+  const { scope, perMessage } = findScope(doc, hostEl);
   const skip = (el: Element): boolean =>
     isUnsafeNode(el) ||
     el === container ||
     container.contains(el) ||
-    el.closest('[data-testid*="recipients:to"], [data-testid*="recipients:cc"], [data-testid*="recipients:bcc"]') !== null;
+    el.closest('[data-testid*="recipients:to"], [data-testid*="recipients:cc"], [data-testid*="recipients:bcc"]') !== null ||
+    inExcludedRegion(el, scope, hostEl, SENDER_EXCLUDE_SEL);
 
   // Most specific first: the outer header also contains the display name and the recipients.
   const fromBlock =
@@ -75,25 +101,28 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
     (searchRoot.querySelector<HTMLElement>('[data-testid="recipient-name"], [data-testid="message-header:from-name"]')?.textContent ?? '')
       .trim();
 
+  const fromBlockHit = (hit: { senderName: string; senderAddress: string }) =>
+    perMessage || !conversationPairingUncertain(scope, hostEl, bodies, ADDRESS_SEL, skip) ? hit : { ...hit, uncertain: true as const };
+
   if (fromBlock) {
-    const direct = extractSenderFromElement(fromBlock, fallbackName);
-    if (direct) return direct;
+    // The From block's own text is the sender's. A whole header's text also holds the recipients, and its last
+    // address (which parseSenderHeader takes) is a recipient's: read only that header's attributes here and let the
+    // loop below, which skips the recipients, find the address.
+    const isFromNode = fromBlock.matches(FROM_BLOCK_SELECTORS[0]!);
+    const direct = extractSenderFromElement(fromBlock, fallbackName, isFromNode ? {} : { text: false });
+    if (direct) return fromBlockHit(direct);
   }
 
-  for (const el of searchRoot.querySelectorAll(
-    '[data-testid="recipient-address"], [data-testid="message-header:from"], [title*="@"], [aria-label*="@"], a[href^="mailto:"]',
-  )) {
+  for (const el of searchRoot.querySelectorAll(ADDRESS_SEL)) {
     if (skip(el)) continue;
     const hit = extractSenderFromElement(el, fallbackName);
-    if (hit) return hit;
+    if (hit) return fromBlock ? fromBlockHit(hit) : { ...hit, uncertain: true };
   }
   return { senderName: fallbackName, senderAddress: '' };
 }
 
 function findSubject(doc: Document, container: HTMLElement): string {
-  for (const el of doc.querySelectorAll<HTMLElement>(
-    '[data-testid="conversation-header:subject"], [data-testid="message-column:subject"], h1[title]',
-  )) {
+  for (const el of doc.querySelectorAll<HTMLElement>(SUBJECT_SEL)) {
     if (isUnsafeNode(el) || container.contains(el) || isHidden(el)) continue;
     const t = (el.textContent ?? '').trim();
     if (t && t.length <= 300) return t;
@@ -123,11 +152,13 @@ function extractProtonAttachments(
   const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
   const inlineCount = attachments.length; // the chip cap below counts this adapter's own chips only
   const attachmentContainers: HTMLElement[] = [];
-  const scope = findScope(doc, hostEl);
+  const { scope } = findScope(doc, hostEl);
 
+  // Native attachment lists and tiles are webmail chrome beside the body, never inside it (inline downloads in the
+  // email HTML come from inlineAttachmentsIn). Node.contains is inclusive, so this also skips the body itself.
   const shouldSkip = (el: Element): boolean =>
     isUnsafeNode(el) ||
-    el === container ||
+    container.contains(el) ||
     el.contains(container) ||
     (el instanceof HTMLElement && (isHidden(el) || isCompose(el)));
 
@@ -136,9 +167,7 @@ function extractProtonAttachments(
     attachmentContainers.push(list);
   }
 
-  for (const item of scope.querySelectorAll<HTMLElement>(
-    '[data-testid^="attachment-item"]:not([data-testid="attachment-item:name"]), a[download], a[data-ped-att-download]',
-  )) {
+  for (const item of scope.querySelectorAll<HTMLElement>(ATTACHMENT_ITEM_SEL)) {
     if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (shouldSkip(item)) continue;
     if (attachments.some((p) => p.element === item || p.element.contains(item))) continue;
@@ -163,14 +192,16 @@ export const proton: WebmailAdapter = {
   name: 'proton',
   matches: (url) => url.hostname.toLowerCase().replace(/\.$/, '') === 'mail.proton.me',
   extractAll(doc): ExtractedEmail[] {
-    return findBodies(doc).map(({ container, hostEl }) => {
-      const { senderName, senderAddress } = findSender(doc, container, hostEl);
+    const bodies = findBodies(doc);
+    return bodies.map(({ container, hostEl }) => {
+      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl, bodies);
       const subject = findSubject(doc, container);
       const body = withSubject(subject, bodyText(container));
       const { attachments, attachmentContainers } = extractProtonAttachments(doc, container, hostEl);
       return {
         senderName,
         senderAddress,
+        ...(uncertain ? { pairingUncertain: true } : {}),
         body,
         ...linkFields(container),
         ...(attachments.length ? { attachments } : {}),

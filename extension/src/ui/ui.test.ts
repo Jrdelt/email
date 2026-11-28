@@ -553,7 +553,6 @@ describe('decideBanner', () => {
     domain: 'mongodb.com', checkedAt: '2026-11-22T00:00:00Z',
     rdap: { status: 'ok' as const, registered: '2008-07-08T00:00:00Z' },
     dns: { status: 'ok' as const, mx: ['aspmx.l.google.com'] },
-    reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: [] },
   };
 
   it('returns null for safe email with urgency wording and clean sender/intel', () => {
@@ -576,19 +575,18 @@ describe('decideBanner', () => {
     expect(unlocked.linksLocked).toBe(false);
   });
 
-  it('shows warning banner and locks links on async spam-listed domain intel', () => {
+  it('shows warning banner and locks links on async domain intel (domain does not exist)', () => {
     const sender = analyzeSender('Someone', 'a@evil.example', []);
-    const spamIntel = {
+    const missingIntel = {
       domain: 'evil.example', checkedAt: '2026-11-22T00:00:00Z',
-      rdap: { status: 'ok' as const, registered: '2015-01-01T00:00:00Z' },
-      dns: { status: 'ok' as const, mx: ['mx.evil.example'] },
-      reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: ['black'] },
+      rdap: { status: 'notfound' as const },
+      dns: { status: 'ok' as const, mx: [], nxdomain: true },
     };
-    const banner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, spamIntel, false)!;
+    const banner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, missingIntel, false)!;
     expect(banner.level).toBe('warning');
     expect(banner.tag).toBe('DOMAIN WARNING');
     expect(banner.linksLocked).toBe(true);
-    expect(banner.reasons[0]).toMatch(/reported for spam online/);
+    expect(banner.reasons[0]).toMatch(/does not exist/);
   });
 
   it('shows danger banner and unlocks only when unlockedThisSession is true', () => {
@@ -643,7 +641,6 @@ describe('details', () => {
     domain: 'bank.com', checkedAt: new Date().toISOString(),
     rdap: { status: 'ok' as const, registered: '2001-01-01T00:00:00Z', registrar: 'Example Registrar', expires: '2030-01-01T00:00:00Z' },
     dns: { status: 'ok' as const, mx: ['mx.bank.com'], spf: 'v=spf1 -all', dmarcPolicy: 'reject' },
-    reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: [] },
   };
 
   it('renderSimpleDetails shows plain-English rows without technical jargon and escapes HTML', () => {
@@ -654,8 +651,7 @@ describe('details', () => {
     expect(text).toContain('Bank <script> (alerts@mail.bank.com)');
     expect(text).toContain('Website');
     expect(text).toContain('bank.com — ');
-    expect(text).toContain('Spam check');
-    expect(text).toContain('No spam reports found');
+    expect(text).not.toContain('Spam');
     expect(text).toContain('Links go to');
     expect(text).not.toMatch(/\b(MX|SPF|DMARC|URIBL|Registrar)\b/);
     expect(dl.querySelector('script')).toBeNull();
@@ -672,7 +668,7 @@ describe('details', () => {
     expect(text).toContain('Example Registrar');
     expect(text).toContain('mx.bank.com');
     expect(text).toContain('policy reject');
-    expect(text).toContain('not listed');
+    expect(text).not.toContain('URIBL');
     expect(details.querySelector('button.copy-it')?.textContent).toBe('Copy details for IT');
   });
 
@@ -755,24 +751,24 @@ describe('gmail adapter', () => {
             <h3 class="iw gFxsud">
               <span class="qu yKyxu">
                 <span class="gD"><span>GmailSupportTeam</span></span>
-                <span class="go gD">alert-442-320397@nozfr.itl</span>
-                <span class="go">via 442.320397.jnc7.one.bss0019.narodaro.my.id</span>
+                <span class="go gD">alert-0000@lure-sender.example</span>
+                <span class="go">via 442.0000.relay7.one.bss0019.lure-relay.example</span>
               </span>
             </h3>
           </div>
           <div><div class="ii gt"><div class="a3s">
             Please update your billing details.
-            <a href="https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl">Review billing</a>
+            <a href="https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl">Review billing</a>
           </div></div></div>
         </div>
       </div>`;
     const e = gmail.extract(document)!;
     expect(e.senderName).toBe('GmailSupportTeam');
-    expect(e.senderAddress).toBe('alert-442-320397@nozfr.itl');
-    expect(e.viaDomain).toBe('442.320397.jnc7.one.bss0019.narodaro.my.id');
+    expect(e.senderAddress).toBe('alert-0000@lure-sender.example');
+    expect(e.viaDomain).toBe('442.0000.relay7.one.bss0019.lure-relay.example');
     expect(e.body).toContain("We've Blocked Your Account!");
     expect(e.body).toContain('Please update your billing details.');
-    expect(e.links).toEqual([{ text: 'Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' }]);
+    expect(e.links).toEqual([{ text: 'Review billing', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl' }]);
   });
 
   it('extracts a.acP viaDomain, unauthenticated warning badge, and ignores spoofed header markup inside div.a3s', () => {

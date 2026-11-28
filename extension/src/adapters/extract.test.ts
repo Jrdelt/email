@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
+import { scoreEmail } from '../features';
 import { analyzeSender } from '../sender';
 import {
   MAX_ATTACHMENTS,
@@ -49,6 +50,31 @@ describe('inlineAttachmentsIn', () => {
   });
 });
 
+
+describe('form submissions to data:/blob: URLs are inline downloads', () => {
+  const html = `<form id="f" action="data:application/zip;base64,TVqQ" method="post"><button id="fb">Get</button></form>
+    <form id="g"><button id="b" formaction=" BLOB:https://x.example/1">Get</button><input type="image" id="i" formaction="da&#10;ta:x"></form>
+    <form id="ok" action="https://x.example/data:y"><button formaction="/blob:z">Search</button></form>`;
+
+  it('finds the form for a data: action and the control for a data:/blob: formaction, not ordinary forms', () => {
+    expect(inlineAttachmentsIn(body(html)).map((a) => a.element.id)).toEqual(['f', 'b', 'i']);
+  });
+
+  it('keeps finding them, and scores the same links, once the attachment lock has stashed the targets', async () => {
+    const { lockAttachments, unlockAttachments } = await import('../ui/attachmentLock');
+    const m = body(html);
+    const before = scanLinks(m).links;
+    const found = inlineAttachmentsIn(m).map((a) => a.element);
+    lockAttachments(found);
+    expect(document.getElementById('f')!.hasAttribute('action')).toBe(false);
+    expect(document.getElementById('b')!.hasAttribute('formaction')).toBe(false);
+    expect(inlineAttachmentsIn(m).map((a) => a.element)).toEqual(found);
+    expect(scanLinks(m).links).toEqual(before);
+    unlockAttachments(found);
+    expect(document.getElementById('f')!.getAttribute('action')).toBe('data:application/zip;base64,TVqQ');
+    expect(document.getElementById('b')!.getAttribute('formaction')).toBe(' BLOB:https://x.example/1');
+  });
+});
 
 describe('decoy body markers inside the email cannot replace the real body', () => {
   const PHISH = '<a id="evil" href="http://192.168.4.20/login">https://www.paypal.com/signin</a>';
@@ -109,6 +135,47 @@ describe('gmail via relay', () => {
         <span class="go">via 12.relay.evil.example</span>
       </span></h3><div class="a3s">Please wire the payment today.</div></div>`;
     expect(gmail.extract(document)!.viaDomain).toBe('12.relay.evil.example');
+  });
+
+  it('keeps a relay under an IDN TLD or with non-hostname characters, so the sender check can fail closed', async () => {
+    const { gmail } = await import('./gmail');
+    const via = (header: string) => {
+      document.body.innerHTML = `<div class="adn"><span class="gD" email="alex@corp.example" name="Alex Kim">Alex Kim</span>
+        ${header}<div class="a3s">Report attached.</div></div>`;
+      return gmail.extract(document)!.viaDomain;
+    };
+    expect(via('<span class="go">via mailer.relay-hub.рф</span>')).toBe('mailer.relay-hub.xn--p1ai');
+    expect(via('<span class="go">via mailer.relay-hub.xn--p1ai</span>')).toBe('mailer.relay-hub.xn--p1ai');
+    expect(via('<span class="go">via relay_hub.example</span>')).toBe('relay_hub.example');
+    expect(via('<span class="go">via em1.sendgrid.net</span><span class="go">via mailer.relay-hub.рф</span>')).toBe(
+      'mailer.relay-hub.xn--p1ai',
+    );
+    expect(
+      via(`<span><a class="acP" href="https://support.google.com/mail/answer/1311182">via</a></span>
+        <span>mailer.relay-hub.xn--p1ai</span>`),
+    ).toBe('mailer.relay-hub.xn--p1ai');
+    expect(via('<span><a class="acP" href="#">via</a> mailer.relay-hub.рф</span>')).toBe('mailer.relay-hub.xn--p1ai');
+    // Not a host at all: still no relay.
+    expect(via('<span class="go">via Google Groups</span>')).toBeUndefined();
+    expect(via('<span class="go">via sendgrid.net</span>')).toBe('sendgrid.net');
+  });
+
+  it('reports sender-verification signals only for a Gmail UI language whose labels it reads', async () => {
+    const { gmail } = await import('./gmail');
+    const html = document.documentElement;
+    const prev = html.getAttribute('lang');
+    const signals = (lang: string | null) => {
+      if (lang === null) html.removeAttribute('lang');
+      else html.setAttribute('lang', lang);
+      return gmail.authSignals!(document);
+    };
+    try {
+      expect([signals('en'), signals('en-GB'), signals('EN-us')]).toEqual([true, true, true]);
+      expect([signals('de'), signals('fr-CA'), signals('eng'), signals(''), signals(null)]).toEqual([false, false, false, false, false]);
+    } finally {
+      if (prev === null) html.removeAttribute('lang');
+      else html.setAttribute('lang', prev);
+    }
   });
 });
 
@@ -186,7 +253,8 @@ describe('filler cannot hide content past the work caps', () => {
     const t = bodyText(body(`<div style="display:none">${'a '.repeat(150_000)}</div><p>URGENT verify your password</p>`));
     expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
     expect(t).toContain('URGENT verify your password');
-    expect(t.startsWith('a a a')).toBe(true);
+    // The shown text comes first; the hidden filler only fills the room it leaves.
+    expect(t.startsWith('URGENT verify your password\na a a')).toBe(true);
   });
 
   it('returns short bodies whole and joins head and tail without a gap when they meet', () => {
@@ -357,5 +425,147 @@ describe('Gmail inbox-list file buttons', () => {
     expect(at('icon')?.id).toBe('chip');
     expect(at('dlattr')?.id).toBe('dlattr');
     expect(at('shelf')).toBeNull();
+  });
+});
+
+describe('link text is read once per element, within a work budget', () => {
+  const timed = <T>(f: () => T): [T, number] => {
+    const t = performance.now();
+    const v = f();
+    return [v, performance.now() - t];
+  };
+  const filler = (n: number) => 'lorem ipsum '.repeat(Math.ceil(n / 12)).slice(0, n);
+
+  it('thousands of SMIL <set> in one <a> do not re-read its large text', () => {
+    const sets = Array.from({ length: 1000 }, (_, i) => `<set attributeName="href" to="#n${i}"/>`).join('');
+    const m = body(`<svg><a href="#top"><text>${filler(50_000)}</text>${sets}</a></svg>`);
+    const [r, ms] = timed(() => scanLinks(m));
+    expect(ms).toBeLessThan(150);
+    expect(r.links.some((l) => l.href.endsWith('#n999'))).toBe(true);
+  });
+
+  it('an animated link whose rendered text NFKC expands 18-fold is not re-normalised for every <set> target', () => {
+    const sets = Array.from({ length: 1900 }, (_, i) => `<set attributeName="href" to="https://n${i}.example/"/>`).join('');
+    const m = body(
+      `<svg><a href="https://top.example/"><text><tspan style="display:none">x</tspan>${'\ufdfa'.repeat(2000)}</text>${sets}</a></svg>`,
+    );
+    const [r, ms] = timed(() => scanLinks(m));
+    expect(ms).toBeLessThan(150);
+    expect(r.links.some((l) => l.href === 'https://n1899.example/')).toBe(true);
+  });
+
+  it('link elements nested hundreds deep around one large text fail closed instead of re-reading it', () => {
+    let html = `<span>${filler(100_000)}</span>`;
+    for (let i = 0; i < 400; i++) html = `<div data-ped-formaction="#n${i}">${html}</div>`;
+    const m = body(html);
+    const [r, ms] = timed(() => scanLinks(m));
+    expect(ms).toBeLessThan(150);
+    expect(r.truncated).toBe(true);
+    expect(r.links.length).toBeGreaterThan(0);
+  });
+
+  it('nested SVG data: downloads around one large text are named from both ends of it', () => {
+    // Built through the DOM: browsers nest SVG <a> from markup too (foreign content), happy-dom's parser does not.
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const m = body('<svg></svg>');
+    let parent: Element = m.firstElementChild!;
+    for (let i = 0; i < 300; i++) {
+      const a = document.createElementNS(svgNS, 'a');
+      a.setAttribute('href', 'data:application/octet-stream;base64,AA==');
+      parent = parent.appendChild(a);
+    }
+    parent.appendChild(document.createElementNS(svgNS, 'text')).textContent = `Statement ${filler(100_000)} invoice.html`;
+    const [atts, ms] = timed(() => inlineAttachmentsIn(m));
+    expect(ms).toBeLessThan(150);
+    expect(atts).toHaveLength(300);
+    for (const a of [atts[0], atts[299]]) {
+      expect(a.name.startsWith('Statement lorem')).toBe(true);
+      expect(a.name.endsWith('invoice.html')).toBe(true);
+      expect(a.name.length).toBeLessThanOrEqual(1024);
+    }
+  });
+
+  it('keeps the full text of ordinary links', () => {
+    const m = body(`<a href="https://a.example/1"><b>Sign</b> in to <i>https://www.paypal.com</i></a>
+      <a href="https://a.example/2">${'x'.repeat(MAX_LINK_TEXT_CHARS - 1)}</a>`);
+    const r = scanLinks(m);
+    expect(r.truncated).toBe(false);
+    expect(r.links.map((l) => l.text)).toEqual(['Sign in to https://www.paypal.com', 'x'.repeat(MAX_LINK_TEXT_CHARS - 1)]);
+  });
+});
+
+describe('text hidden by CSS cannot push the shown message out of the sample', () => {
+  const PHISH = `<p>URGENT: we noticed unusual activity on your account and it has been suspended.</p>
+    <p>Verify your password immediately to restore access within 24 hours.</p>
+    <p><a href="https://login-review.example/Xk3Pq9">Verify now</a></p>`;
+  const FILL = 'Thanks for being a valued member of our community. We hope you enjoy the newsletter this season. '.repeat(135);
+  const sandwich = (open: string, close = '</div>', css = '') =>
+    body(`${css}${open}${FILL}${close}${PHISH}${open}${FILL}${close}`);
+  const shown = (t: string) => {
+    expect(t.trimStart().startsWith('URGENT: we noticed unusual activity')).toBe(true); // shown text first
+    expect(t).toContain('Verify your password immediately to restore access within 24 hours.');
+    expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+  };
+
+  it('keeps the shown text whole between ~13 KB of hidden filler on each side', () => {
+    shown(bodyText(sandwich('<div style="display:none;font-size:0">')));
+  });
+
+  it('passes a hidden node of any length cheaply (over a million characters on each side)', () => {
+    const huge = 'Thanks for being a valued member. '.repeat(35_000);
+    shown(bodyText(body(`<div style="display:none">${huge}</div>${PHISH}<div style="display:none">${huge}</div>`)));
+  });
+
+  it('covers each common way of hiding the filler, inline or from a stylesheet', () => {
+    for (const open of [
+      '<div style="font-size:0">',
+      '<div style="visibility:hidden">',
+      '<div style="opacity:0">',
+      '<div style="max-height:0;overflow:hidden">',
+      '<div style="width:0;height:0;overflow:hidden">',
+      '<div hidden>',
+      '<div style="display:none"><span>',
+    ]) {
+      shown(bodyText(sandwich(open, open.includes('<span>') ? '</span></div>' : '</div>')));
+    }
+    shown(bodyText(sandwich('<div class="f">', '</div>', '<style>.f{display:none}</style>')));
+  });
+
+  it('scores the sandwiched phishing email as it scores without the filler', () => {
+    const plain = body(PHISH);
+    const before = scoreEmail('security@acct-notice.example', bodyText(plain), scanLinks(plain).links);
+    const m = sandwich('<div style="display:none;max-height:0;overflow:hidden;font-size:0">');
+    const after = scoreEmail('security@acct-notice.example', bodyText(m), scanLinks(m).links);
+    expect(before.level).not.toBe('safe');
+    expect(after.level).toBe(before.level);
+  });
+
+  it('counts text a stylesheet shows again as shown (responsive display:none overrides)', () => {
+    const css = '<style>.v{display:block!important}</style>';
+    const t = bodyText(body(`${css}<div style="display:none;font-size:0">${FILL}</div>
+      <div class="v" style="display:none">URGENT verify your password now</div><div style="display:none;font-size:0">${FILL}</div>`));
+    expect(t.trimStart().startsWith('URGENT verify your password now\nThanks')).toBe(true);
+  });
+
+  it('returns a body that fits whole and in document order, hidden parts included (as before)', () => {
+    const t = bodyText(body('<div style="display:none">Your March statement</div>\n<p>Hello Sam, your statement is ready.</p>'));
+    expect(t).toBe('Your March statement Hello Sam, your statement is ready.');
+  });
+
+  it('still samples hidden text into the room the shown text leaves', () => {
+    const t = bodyText(body(`<p>Hello</p><div style="display:none">${'hidden words '.repeat(3000)}</div>`));
+    expect(t.startsWith('Hello\nhidden words')).toBe(true);
+    expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+  });
+
+  it('reads a form-hidden filler through the prototype (named controls cannot shadow nodeType)', () => {
+    const m = sandwich('<form style="display:none"><input name="nodeType"><input name="parentElement">', '</form>');
+    // happy-dom does not clobber; emulate what a browser does with the named controls (see src/clobbering.test.ts).
+    for (const form of m.querySelectorAll('form')) {
+      for (const input of form.querySelectorAll('input')) {
+        Object.defineProperty(form, input.name, { value: input, configurable: true });
+      }
+    }
+    shown(bodyText(m));
   });
 });

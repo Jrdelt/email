@@ -24,7 +24,6 @@ const NXDOMAIN = {
   checkedAt: new Date().toISOString(),
   rdap: { status: 'notfound' },
   dns: { status: 'ok', mx: [], nxdomain: true },
-  reputation: { status: 'ok', source: 'URIBL', listed: [] },
 };
 
 const PAGE = gmailMessage({

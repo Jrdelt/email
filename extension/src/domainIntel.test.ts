@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getIntel, intelWarnings, lookupDomain, resetRdapBootstrap, type FetchFn } from './domainIntel';
+import { getIntel, intelWarnings, lookupDomain, pruneIntelCache, resetRdapBootstrap, type FetchFn } from './domainIntel';
 
 beforeEach(() => resetRdapBootstrap());
 import { memoryKV } from './storage';
@@ -7,7 +7,7 @@ import { memoryKV } from './storage';
 const NOW = Date.parse('2026-11-22T00:00:00Z');
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-function fakeFetch(opts: { registered?: string; urible?: string | null; uribleGoogle?: string; mx?: boolean; rdap404?: boolean; rdapTitle?: string } = {}): FetchFn {
+function fakeFetch(opts: { registered?: string; mx?: boolean; rdap404?: boolean; rdapTitle?: string } = {}): FetchFn {
   return vi.fn(async (url: string) => {
     const u = new URL(url);
     if (u.hostname === 'data.iana.org') return json({ services: [[['com', 'net'], ['https://rdap.verisign.com/com/v1/']]] });
@@ -21,10 +21,6 @@ function fakeFetch(opts: { registered?: string; urible?: string | null; uribleGo
     }
     const name = u.searchParams.get('name')!;
     const type = u.searchParams.get('type');
-    if (name.endsWith('.multi.uribl.com')) {
-      const ip = u.hostname === 'dns.google' && opts.uribleGoogle !== undefined ? opts.uribleGoogle : opts.urible;
-      return ip ? json({ Status: 0, Answer: [{ type: 1, data: ip }] }) : json({ Status: 3 });
-    }
     if (type === 'MX') return json({ Status: 0, Answer: opts.mx === false ? [] : [{ type: 15, data: '10 mx.example.com.' }] });
     if (name.startsWith('_dmarc.')) return json({ Status: 0, Answer: [{ type: 16, data: '"v=DMARC1; p=reject"' }] });
     return json({ Status: 0, Answer: [{ type: 16, data: '"v=spf1 " "-all"' }] });
@@ -32,19 +28,16 @@ function fakeFetch(opts: { registered?: string; urible?: string | null; uribleGo
 }
 
 describe('lookupDomain', () => {
-  it('parses RDAP, DNS and URIBL', async () => {
+  it('parses RDAP and DNS', async () => {
     const i = await lookupDomain('example.com', fakeFetch(), NOW);
     expect(i.rdap).toMatchObject({ status: 'ok', registrar: 'Example Registrar', registered: '2010-01-01T00:00:00Z' });
     expect(i.dns).toMatchObject({ status: 'ok', mx: ['mx.example.com'], spf: 'v=spf1 -all', dmarcPolicy: 'reject' });
-    expect(i.reputation).toEqual({ status: 'ok', source: 'URIBL', listed: [] });
     expect(intelWarnings(i, NOW)).toEqual([]);
   });
-  it('warns on new, spam-listed, mail-less domains', async () => {
-    const i = await lookupDomain('evil.example', fakeFetch({ registered: '2026-11-20T00:00:00Z', urible: '127.0.0.10', mx: false }), NOW);
-    expect(i.reputation.listed).toEqual(['black', 'red']);
+  it('warns on new, mail-less domains', async () => {
+    const i = await lookupDomain('evil.example', fakeFetch({ registered: '2026-11-20T00:00:00Z', mx: false }), NOW);
     const w = intelWarnings(i, NOW).join(' | ');
     expect(w).toMatch(/brand new \(2 days old\)/);
-    expect(w).toMatch(/reported for spam online/);
     expect(w).toMatch(/not set up to send normal email/);
   });
   it('uses the registry from IANA bootstrap for known TLDs, rdap.org otherwise', async () => {
@@ -55,15 +48,6 @@ describe('lookupDomain', () => {
     expect(urls).toContain('https://rdap.verisign.com/com/v1/domain/example.com');
     expect(urls).toContain('https://rdap.org/domain/example.xyz');
     expect(urls.filter((u: string) => u.includes('data.iana.org'))).toHaveLength(1); // bootstrap fetched once
-  });
-  it('falls back to dns.google when Cloudflare is refused by URIBL', async () => {
-    const i = await lookupDomain('evil.example', fakeFetch({ urible: '127.0.0.1', uribleGoogle: '127.0.0.2' }), NOW);
-    expect(i.reputation).toEqual({ status: 'ok', source: 'URIBL', listed: ['black'] });
-  });
-  it('treats URIBL 127.0.0.1 from both resolvers as refused, not listed', async () => {
-    const i = await lookupDomain('example.com', fakeFetch({ urible: '127.0.0.1' }), NOW);
-    expect(i.reputation.status).toBe('refused');
-    expect(intelWarnings(i, NOW)).toEqual([]);
   });
   it('unregistered domain on supported TLD', async () => {
     const i = await lookupDomain('nope.com', fakeFetch({ rdap404: true, mx: false }), NOW);
@@ -79,26 +63,34 @@ describe('lookupDomain', () => {
     expect(i.rdap.status).toBe('unsupported');
     expect(intelWarnings(i, NOW)).toEqual([]);
   });
-  it('flags NXDOMAIN on DNS even when RDAP TLD is unsupported (e.g. .itl)', async () => {
+  it('flags NXDOMAIN on DNS even when the TLD has no RDAP service', async () => {
     const nxFetch: FetchFn = vi.fn(async (url: string) => {
       const u = new URL(url);
       if (u.hostname === 'data.iana.org') return json({ services: [] });
       if (u.hostname === 'rdap.org') return json({ errorCode: 404, title: 'No RDAP service is available for this resource' }, 404);
-      const name = u.searchParams.get('name')!;
-      if (name.endsWith('.multi.uribl.com')) return json({ Status: 3 });
       return json({ Status: 3 });
     }) as FetchFn;
-    const i = await lookupDomain('nozfr.itl', nxFetch, NOW);
+    const i = await lookupDomain('lure-sender.example', nxFetch, NOW);
     expect(i.rdap.status).toBe('unsupported');
     expect(i.dns.nxdomain).toBe(true);
-    expect(intelWarnings(i, NOW)).toContain("The sender's website (nozfr.itl) does not exist");
+    expect(intelWarnings(i, NOW)).toContain("The sender's website (lure-sender.example) does not exist");
   });
   it('network failure degrades to error states, never throws', async () => {
     const i = await lookupDomain('example.com', (async () => { throw new Error('offline'); }) as FetchFn, NOW);
-    expect([i.rdap.status, i.dns.status, i.reputation.status]).toEqual(['error', 'error', 'error']);
+    expect([i.rdap.status, i.dns.status]).toEqual(['error', 'error']);
   });
   it('refuses invalid domains (never builds a URL from junk)', async () => {
     await expect(lookupDomain('evil.com/../x', fakeFetch(), NOW)).rejects.toThrow();
+  });
+  it('never contacts dns.google or URIBL (URIBL refuses public resolvers, so the check cannot work)', async () => {
+    const f = fakeFetch();
+    await lookupDomain('example.com', f, NOW);
+    const urls = (f as any).mock.calls.map((c: any[]) => new URL(c[0]));
+    expect(urls.length).toBeGreaterThan(0);
+    for (const u of urls) {
+      expect(u.hostname, u.href).not.toBe('dns.google');
+      expect(u.searchParams.get('name') ?? '', u.href).not.toMatch(/uribl/i);
+    }
   });
   it('sends only the domain', async () => {
     const f = fakeFetch();
@@ -112,7 +104,6 @@ describe('lookupDomain', () => {
       if (u.hostname === 'rdap.org') {
         return json({ events: [{ eventAction: 'registration', eventDate: '2015-01-01T00:00:00Z' }] });
       }
-      if (u.searchParams.get('name')?.endsWith('.multi.uribl.com')) return json({ Status: 3 });
       return json({ Status: 2 }); // SERVFAIL
     }) as FetchFn;
     const i = await lookupDomain('example.org', servfailFetch, NOW);
@@ -134,7 +125,6 @@ describe('lookupDomain', () => {
       if (u.hostname === 'rdap.org') {
         return json({ events: [{ eventAction: 'registration', eventDate: '2012-05-01T00:00:00Z' }] });
       }
-      if (u.searchParams.get('name')?.endsWith('.multi.uribl.com')) return json({ Status: 3 });
       return json({ Status: 0, Answer: [{ type: 15, data: '10 mx.example.com.' }] });
     }) as FetchFn;
 
@@ -146,10 +136,15 @@ describe('lookupDomain', () => {
     const calledUrls = (fallbackFetch as any).mock.calls.map((c: any[]) => String(c[0]));
     expect(calledUrls.some((u: string) => u.startsWith('http://') || u.includes('127.0.0.1'))).toBe(false);
   });
-  it('ignores non-127.0.0.x captive-portal IPs returned for URIBL queries', async () => {
-    const i = await lookupDomain('example.com', fakeFetch({ urible: '198.51.100.42' }), NOW);
-    expect(i.reputation).toEqual({ status: 'error', source: 'URIBL', listed: [] });
-    expect(intelWarnings(i, NOW)).toEqual([]);
+});
+
+describe('getIntel private names', () => {
+  it('never sends an intranet name on an undelegated TLD (.mail, .corp, .home) to any lookup service', async () => {
+    const f = fakeFetch();
+    for (const d of ['hospital.mail', 'ehr.corp', 'nas.home']) {
+      await expect(getIntel(memoryKV(), d, f, NOW)).rejects.toThrow();
+    }
+    expect((f as any).mock.calls).toEqual([]);
   });
 });
 
@@ -188,5 +183,74 @@ describe('getIntel cache', () => {
     await Promise.all([getIntel(kv, 'alpha.com', f, NOW), getIntel(kv, 'beta.com', f, NOW)]);
     const cached = (await kv.get('domainIntelCache')).domainIntelCache as Record<string, unknown>;
     expect(Object.keys(cached).sort()).toEqual(['alpha.com', 'beta.com']);
+  });
+  it('deletes expired entries on a cache hit too, not only when a new domain is looked up', async () => {
+    const kv = memoryKV();
+    const f = fakeFetch();
+    await getIntel(kv, 'old.com', f, NOW);
+    await getIntel(kv, 'recent.com', f, NOW + 23 * 3600_000);
+    await getIntel(kv, 'recent.com', f, NOW + 25 * 3600_000); // a hit: old.com expired an hour ago
+    const cached = (await kv.get('domainIntelCache')).domainIntelCache as Record<string, unknown>;
+    expect(Object.keys(cached)).toEqual(['recent.com']);
+  });
+});
+
+describe('attacker-sized lookup answers', () => {
+  // The sender's own DNS (and, in principle, an RDAP server) decides how big an answer is.
+  const hugeFetch = (async (url: string) => {
+    const u = new URL(url);
+    if (u.hostname === 'data.iana.org') return json({ services: [] });
+    if (u.hostname === 'rdap.org') {
+      return json({
+        events: [{ eventAction: 'registration', eventDate: '2010-01-01T00:00:00Z' }],
+        entities: [{ roles: ['registrar'], vcardArray: ['vcard', [['fn', {}, 'text', 'R'.repeat(5000)]]] }],
+        status: [...Array.from({ length: 500 }, (_, i) => `flag ${i} ${'f'.repeat(200)}`), { nested: 'x'.repeat(5000) }],
+      });
+    }
+    if (u.searchParams.get('type') === 'MX') {
+      return json({ Status: 0, Answer: Array.from({ length: 3000 }, (_, i) => ({ type: 15, data: `10 mx${i}.${'m'.repeat(40)}.attacker.example.` })) });
+    }
+    const big = `"${'a'.repeat(250)}"`.repeat(232);
+    const name = u.searchParams.get('name')!;
+    return json({ Status: 0, Answer: [{ type: 16, data: name.startsWith('_dmarc.') ? `"v=DMARC1; p=reject; " ${big}` : `"v=spf1 " ${big}` }] });
+  }) as FetchFn;
+
+  it('keeps only a bounded part of MX, SPF, DMARC and RDAP answers', async () => {
+    const i = await lookupDomain('attacker.example', hugeFetch, NOW);
+    expect(i.dns.status).toBe('ok');
+    expect(i.dns.mx.length).toBeLessThanOrEqual(10);
+    expect(i.dns.spf!.length).toBeLessThanOrEqual(1024);
+    expect(i.dns.dmarc!.length).toBeLessThanOrEqual(1024);
+    expect(i.dns.dmarcPolicy).toBe('reject');
+    expect(i.rdap.registrar!.length).toBeLessThanOrEqual(200);
+    expect(i.rdap.flags!.length).toBeLessThanOrEqual(20);
+    expect(i.rdap.flags!.every((f) => typeof f === 'string' && f.length <= 64)).toBe(true);
+    expect(JSON.stringify(i).length).toBeLessThan(8 * 1024);
+  });
+
+  it('a failed cache write (storage quota full) still returns the lookup result', async () => {
+    const kv = { get: async () => ({}), set: async () => { throw new Error('QUOTA_BYTES quota exceeded'); } };
+    const i = await getIntel(kv, 'example.com', fakeFetch({ registered: '2026-11-20T00:00:00Z' }), NOW);
+    expect(intelWarnings(i, NOW).join(' ')).toMatch(/brand new/);
+  });
+});
+
+describe('pruneIntelCache', () => {
+  it('deletes expired and malformed entries and keeps fresh ones, without a lookup', async () => {
+    const kv = memoryKV();
+    const at = (ms: number) => new Date(ms).toISOString();
+    const ok = { rdap: { status: 'ok' }, dns: { status: 'ok', mx: [] } };
+    await kv.set({
+      domainIntelCache: {
+        'old.com': { domain: 'old.com', checkedAt: at(NOW - 25 * 3600_000), ...ok },
+        'partial.com': { domain: 'partial.com', checkedAt: at(NOW - 20 * 60_000), rdap: { status: 'error' }, dns: { status: 'ok', mx: [] } },
+        'fresh.com': { domain: 'fresh.com', checkedAt: at(NOW - 3600_000), ...ok },
+        'junk.com': { domain: 'junk.com' },
+      },
+    });
+    const f = fakeFetch();
+    await pruneIntelCache(kv, NOW);
+    expect(Object.keys((await kv.get('domainIntelCache')).domainIntelCache as object)).toEqual(['fresh.com']);
+    expect((f as any).mock.calls).toEqual([]);
   });
 });

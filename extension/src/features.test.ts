@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { MAX_LINK_TEXT_CHARS, MAX_LINKS } from './adapters/extract';
 import { extractFeatures, FEATURE_NAMES, isCloudHtmlLink, type Link, scoreEmail, shownHost } from './features';
 
 interface ParityCase {
@@ -13,12 +14,21 @@ interface ParityCase {
 const PARITY_CASES = JSON.parse(
   readFileSync(new URL('../../ml/tests/fixtures/parity.json', import.meta.url), 'utf8'),
 ) as ParityCase[];
+// The order is the index of each weight in the exported model (shared with ml/tests/test_features.py).
+const SHARED_FEATURE_NAMES = JSON.parse(
+  readFileSync(new URL('../../ml/tests/fixtures/feature_names.json', import.meta.url), 'utf8'),
+) as string[];
 
 describe('parity.json contract (TS <-> Python)', () => {
-  it('contains at least 20 cross-language parity cases covering all FEATURE_NAMES', () => {
+  it('lists the features in the same order as features.py (the model weight index)', () => {
+    expect(FEATURE_NAMES).toEqual(SHARED_FEATURE_NAMES);
+    expect(Object.keys(extractFeatures('a@b.example', 'x', [{ text: 't', href: 'https://c.example/' }]))).toEqual(FEATURE_NAMES);
+  });
+
+  it('contains at least 20 cross-language parity cases covering all FEATURE_NAMES in order', () => {
     expect(PARITY_CASES.length).toBeGreaterThanOrEqual(20);
     for (const c of PARITY_CASES) {
-      expect(Object.keys(c.expected).sort()).toEqual([...FEATURE_NAMES].sort());
+      expect(Object.keys(c.expected), c.name).toEqual(FEATURE_NAMES);
     }
   });
 
@@ -80,7 +90,7 @@ describe('scoreEmail', () => {
     expect(sameOrg.level).toBe('safe');
   });
   it('flags cloud-storage HTML lure links while ignoring cloud-hosted images/PDFs', () => {
-    expect(isCloudHtmlLink('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl')).toBe(true);
+    expect(isCloudHtmlLink('https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl')).toBe(true);
     expect(isCloudHtmlLink('https://bucket.s3.amazonaws.com/login.htm')).toBe(true);
     expect(isCloudHtmlLink('https://acct.blob.core.windows.net/c/verify.html')).toBe(true);
     expect(isCloudHtmlLink('https://firebasestorage.googleapis.com/v0/b/x/o/a%2Flogin.html?alt=media')).toBe(true);
@@ -91,13 +101,13 @@ describe('scoreEmail', () => {
     expect(isCloudHtmlLink('https://account.mongodb.com/login.html')).toBe(false);
 
     const phish = scoreEmail(
-      'alert-442-320397@nozfr.itl',
+      'alert-0000@lure-sender.example',
       "We've Blocked Your Account! Your photos and videos will be deleted. Please update your billing details. Expiration date: Today.",
       [
-        { text: 'Cloud Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' },
-        { text: 'Review billing', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl' },
-        { text: 'Unsubscribe', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=un' },
-        { text: 'here', href: 'https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=oop' },
+        { text: 'Cloud Review billing', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl' },
+        { text: 'Review billing', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl' },
+        { text: 'Unsubscribe', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=un' },
+        { text: 'here', href: 'https://storage.googleapis.com/example-lure-bucket/lure.html#?act=oop' },
       ],
     );
     expect(phish.level).toBe('likely-phishing');
@@ -129,11 +139,137 @@ describe('scoreEmail', () => {
   });
 });
 
+describe('scoring an email at the MAX_LINKS cap stays within the 10 ms budget', () => {
+  // Link text as the adapters cap it (MAX_LINK_TEXT_CHARS), full of characters NFKC has to decompose.
+  const filler = ('ｗｗｗ．ｐａｙｐａｌ．ｃｏｍ／' + 'ａ'.repeat(120)).repeat(12).slice(0, MAX_LINK_TEXT_CHARS - 8);
+  const accented = 'àéîõüçñ'.repeat(300).slice(0, MAX_LINK_TEXT_CHARS - 40);
+  const medianMs = (fn: () => unknown): number => {
+    for (let i = 0; i < 3; i++) fn();
+    const times: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const t = performance.now();
+      fn();
+      times.push(performance.now() - t);
+    }
+    return times.sort((a, b) => a - b)[4]!;
+  };
+
+  it.each([
+    ['full-width look-alike text', (i: number) => ({ text: `${filler}${i}`, href: `https://e${i}.example/` })],
+    ['accented prose with an IDN URL', (i: number) => ({ text: `${accented} https://www.pаypal.com/${i}`, href: `https://xn--80ak6aa92e.com/p/${i}` })],
+    // U+FDFA expands 18-fold under NFKC: the budget counts normalised text, not raw text.
+    ['ligatures NFKC expands 18 times', (i: number) => ({ text: `${'\ufdfa'.repeat(MAX_LINK_TEXT_CHARS - 8)}${i}`, href: `https://e${i}.example/` })],
+  ])('%s', (_, mk) => {
+    const links = Array.from({ length: MAX_LINKS }, (_, i) => mk(i));
+    expect(medianMs(() => scoreEmail('alerts@shop.example', 'Please verify your password', links))).toBeLessThan(10);
+  });
+
+  it('fails closed, keeping the findings it made, when the link text is too long to read in full', () => {
+    const padding = Array.from({ length: MAX_LINKS - 1 }, (_, i) => ({ text: `${accented}${i}`, href: `https://shop.example/${i}` }));
+    const unchecked = scoreEmail('news@shop.example', 'Hello', padding);
+    expect(unchecked).toMatchObject({ level: 'suspicious', unchecked: true });
+    expect(unchecked.reasons.join(' ')).toMatch(/too much link text/);
+
+    const finding = scoreEmail('news@shop.example', 'Hello', [{ text: 'www.paypal.com', href: 'https://evil.example/login' }, ...padding]);
+    expect(finding.level).toBe('suspicious');
+    expect(finding.unchecked).toBeUndefined();
+    expect(finding.reasons.join(' ')).toContain('A link says www.paypal.com but actually goes to evil.example');
+    expect(finding.reasons.join(' ')).toMatch(/too much link text/);
+  });
+
+  it('reads repeated link text once and still scores every link', () => {
+    const links = Array.from({ length: MAX_LINKS }, (_, i) => ({ text: filler, href: `https://shop.example/${i}` }));
+    const v = scoreEmail('news@shop.example', 'Hello', links);
+    expect(v.unchecked).toBeUndefined();
+    expect(v.reasons).toEqual(['A link says www.paypal.com but actually goes to shop.example']);
+  });
+});
+
 describe('shownHost stays linear on long punctuation runs', () => {
   it('handles 90k dots inside link text quickly and still trims trailing punctuation', () => {
     const t = performance.now();
     shownHost(`https://a.com/${'.'.repeat(90_000)}x`);
     expect(performance.now() - t).toBeLessThan(100);
     expect(shownHost('Visit https://www.paypal.com/login.')).toBe('www.paypal.com');
+  });
+});
+
+describe('a look-alike letter in the TLD of shown link text', () => {
+  // 'www.paypal.cоm' (Cyrillic о) reads as www.paypal.com, but its punycode TLD failed isValidDomain, so the text was
+  // treated as prose and the mismatch rule never ran.
+  const href = 'https://login-check.example-evil.xyz/s';
+  it.each(['www.paypal.cоm', 'https://www.paypal.cоm/signin', 'appleid.apple.сom', 'paypal.cоm', '(www.paypal.cоm).'])(
+    '%s is a shown domain that mismatches its link',
+    (text) => {
+      expect(shownHost(text)).toMatch(/\.xn--[a-z0-9-]+$/);
+      expect(extractFeatures('x@sender.example', 'Hello', [{ text, href }]).n_text_href_mismatch).toBe(1);
+      expect(scoreEmail('x@sender.example', 'Hello', [{ text, href }]).level).not.toBe('safe');
+    },
+  );
+  it('a real IDN address matching its link is no mismatch, and all-non-ASCII bare text stays prose', () => {
+    const f = extractFeatures('x@sender.example', 'Hello', [{ text: 'https://пример.рф/', href: 'https://xn--e1afmkfd.xn--p1ai/' }]);
+    expect(f.n_text_href_mismatch).toBe(0);
+    expect(shownHost('https://пример.рф/')).toBe('xn--e1afmkfd.xn--p1ai');
+    expect(shownHost('Нажмите.здесь')).toBe('');
+    expect(shownHost('пример.рф')).toBe('');
+  });
+});
+
+describe('urgency words spelled with look-alike letters', () => {
+  // NFKC keeps Cyrillic/Greek letters, so 'pаssword expirеd' (Cyrillic а, е) used to count no urgency words.
+  const body = 'Your pаssword expirеd. Vеrify immеdiately or your mailbox will be suspеnded.';
+  it('counts them as the reader reads them', () => {
+    expect(extractFeatures('it@corp.example', body, []).urgency_hits).toBe(5);
+    expect(scoreEmail('it@corp.example', body, [{ text: 'Keep my mailbox', href: 'https://evil.example/owa' }]).level).toBe(
+      'suspicious',
+    );
+  });
+  it('leaves words written wholly in Cyrillic or Greek alone', () => {
+    expect(extractFeatures('a@b.example', 'Срочно смените пароль: аккаунт заблокирован. Ορέστης', []).urgency_hits).toBe(0);
+    expect(extractFeatures('a@b.example', 'сосна рос ехе', []).urgency_hits).toBe(0);
+    expect(extractFeatures('a@b.example', 'Verify your password', []).urgency_hits).toBe(2);
+  });
+});
+
+describe("the sender's own domain shown on an email-service click-tracking link", () => {
+  // ESPs rewrite every link to their click tracker, so 'www.acme.com' in an acme.com newsletter pointed elsewhere and
+  // counted as a text/href mismatch (+0.4), locking ordinary newsletters and verification emails.
+  const tracked = 'https://u1234567.ct.sendgrid.net/ls/click?upn=u001.abc';
+  it('is no mismatch for the sender itself', () => {
+    expect(
+      scoreEmail('news@acme.com', 'Autumn news. www.acme.com', [
+        { text: 'www.acme.com', href: 'https://acme.us12.list-manage.com/track/click?u=a&id=b&e=c' },
+      ]).level,
+    ).toBe('safe');
+    expect(
+      scoreEmail('no-reply@acme.com', 'Reset your password. If the button does not work, paste this link: https://app.acme.com/reset?t=1', [
+        { text: 'Reset password', href: tracked },
+        { text: 'https://app.acme.com/reset?t=1', href: tracked },
+      ]).level,
+    ).toBe('safe');
+    for (const href of [
+      'https://d2abc04.na1.hubspotlinks.com/Ctc/xyz',
+      'https://ctrk.klclick.com/ls/click?upn=abc',
+      'https://abc123.r.us-east-1.awstrack.me/L0/https:%2F%2Fwww.acme.com%2F/1/0100-abc/xyz=',
+      'https://click.pstmrk.it/3s/www.acme.com%2F/abc/def',
+      'https://mandrillapp.com/track/click/30001234/www.acme.com?p=e',
+      'https://r20.rs6.net/tn.jsp?f=001abc&c=xyz',
+    ]) {
+      expect(scoreEmail('news@acme.com', 'Our news', [{ text: 'www.acme.com', href }]).reasons, href).toEqual([]);
+    }
+  });
+  it("still flags anyone else's domain on a tracker, an unknown redirector, and the parity feature is unchanged", () => {
+    const paypal = scoreEmail('alerts@random-shop.com', 'Your account is locked. Verify now.', [
+      { text: 'www.paypal.com', href: tracked },
+    ]);
+    expect(paypal.level).toBe('likely-phishing');
+    expect(scoreEmail('news@acme.com', 'Our news', [{ text: 'www.acme.com', href: 'https://evil.example/r' }]).level).not.toBe(
+      'safe',
+    );
+    expect(scoreEmail('', 'Our news', [{ text: 'www.acme.com', href: tracked }]).level).not.toBe('safe');
+    expect(extractFeatures('news@acme.com', 'x', [{ text: 'www.acme.com', href: tracked }]).n_text_href_mismatch).toBe(1);
+    // Showing its own domain does not hide an urgent tracked link from the external-link rule.
+    const urgent = 'Your password expired. Verify immediately or your account will be suspended.';
+    expect(scoreEmail('it@corp.example', urgent, [{ text: 'corp.example/login', href: tracked }]).level).toBe('suspicious');
   });
 });

@@ -34,7 +34,8 @@ let contentBooted = false;
 
 /**
  * Boot entrypoints/content.ts on the current happy-dom page. The page URL comes from the test file's
- * `@vitest-environment-options` docblock. `beforeMain` runs after the page HTML is in place and before main().
+ * `@vitest-environment-options` docblock; the UI language (<html lang>) is English unless the test set one before.
+ * `beforeMain` runs after the page HTML is in place and before main().
  * The background is simulated: every runtime message is recorded; domain lookups answer `intel` (default
  * undefined, i.e. "lookup unavailable"; null is the background's Strict Local Mode answer). A function `intel` is
  * called with the looked-up domain and may return a promise, so a test can answer each lookup when it chooses.
@@ -55,6 +56,8 @@ export async function bootContent(
     return typeof opts.intel === 'function' ? (opts.intel as (domain: unknown) => unknown)(msg.domain) : opts.intel;
   });
   (fakeBrowser.runtime as unknown as { sendMessage: typeof sendMessage }).sendMessage = sendMessage;
+  // Webmail UIs set <html lang> to their UI language; English unless the test chose another one.
+  if (!document.documentElement.hasAttribute('lang')) document.documentElement.setAttribute('lang', 'en');
   document.body.innerHTML = html;
   await opts.beforeMain?.();
   const { default: script } = await import('../../entrypoints/content');

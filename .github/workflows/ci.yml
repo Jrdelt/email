@@ -46,9 +46,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # No python-version here: uv uses ml/.python-version, the interpreter whose Unicode database the parity
+      # fixture was generated with (test_unicode_database_is_the_pinned_one).
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          python-version: "3.11"
           enable-cache: true
       - run: uv sync --locked
       - run: uv run pytest

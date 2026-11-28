@@ -18,16 +18,17 @@ const ICLOUD_APP_URL = 'https://www.icloud.com/applications/mail2/current/en-us/
 const ICLOUD_SANDBOX_URL = 'https://p55-mail.icloud-sandbox.com/applications/mail2-message/current/en-us/index.html';
 // The only hosts docs/privacy.md allows the background to contact (registry RDAP servers come from the IANA
 // bootstrap file, which these tests never serve).
-const ALLOWED_LOOKUP_HOSTS = new Set(['data.iana.org', 'rdap.org', 'cloudflare-dns.com', 'dns.google']);
+const ALLOWED_LOOKUP_HOSTS = new Set(['data.iana.org', 'rdap.org', 'cloudflare-dns.com']);
 
 const gmailTop = (tabId = 7): Sender => ({ id: EXT_ID, tab: { id: tabId }, frameId: 0, url: GMAIL_URL });
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0)); // fake storage settles in microtasks
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-async function boot(opts: { fetch?: Fetch } = {}) {
+async function boot(opts: { fetch?: Fetch; seed?: () => Promise<void> } = {}) {
   vi.resetModules();
   fakeBrowser.reset();
+  await opts.seed?.(); // storage as the browser holds it when the service worker starts
   vi.stubGlobal('browser', fakeBrowser);
   vi.stubGlobal('defineBackground', (main: () => void) => main);
   const fetchSpy = vi.fn<Fetch>(opts.fetch ?? (async () => new Response('{}', { status: 404 })));
@@ -317,6 +318,14 @@ describe('B4 iCloud relays are stateless and trust only the browser-verified sen
     expect(relayed).not.toHaveProperty('sig');
   });
 
+  it('relays every attachment name the frame collected, so a dangerous file after 50 harmless ones is classified', async () => {
+    const { send, tabsSend } = await boot();
+    const names = [...Array.from({ length: 60 }, (_, i) => `IMG_${i}.jpg`), 'Q3.rdp'];
+    await send({ type: 'icloudBody', active: true, body: 'hi', links: [], attachmentNames: names }, sandbox(9));
+    const [, relayed] = tabsSend.mock.calls[0]! as [number, Record<string, unknown>];
+    expect(relayed.attachmentNames).toEqual(names);
+  });
+
   it('relays icloudBody and icloudPair only from iCloud message frames', async () => {
     const { send, tabsSend } = await boot();
     const nonce = '0f8fad5b-d9cb-469f-a165-70867728950e';
@@ -387,5 +396,112 @@ describe('B5 warn:* entries (the full clicked URL for warning.html) expire', () 
     });
     await (fakeBrowser.tabs.onRemoved as unknown as { trigger: (...a: unknown[]) => Promise<unknown> }).trigger(41, {});
     await until(async () => expect(await keys(), 'warn:* entries after tab 41 closed').toEqual(['warn:open']));
+  });
+});
+
+describe('B6 expired data is deleted when the background starts, not only at the next lookup or warning', () => {
+  const HOUR = 3_600_000;
+  const intel = (domain: string, ageMs: number) => ({
+    domain,
+    checkedAt: new Date(Date.now() - ageMs).toISOString(),
+    rdap: { status: 'ok' },
+    dns: { status: 'ok', mx: [] },
+  });
+
+  it('drops expired lookup-cache entries (sender and clicked-link domains) and expired warn:* entries', async () => {
+    await boot({
+      seed: async () => {
+        await fakeBrowser.storage.local.set({
+          domainIntelCache: { 'old.example': intel('old.example', 25 * HOUR), 'fresh.example': intel('fresh.example', HOUR) },
+        });
+        await fakeBrowser.storage.session.set({
+          'warn:stale': { href: 'https://old.example/login', createdAt: Date.now() - WARN_TTL_MS - 60_000 },
+          'warn:fresh': { href: 'https://recent.example/login', createdAt: Date.now() - 60_000 },
+        });
+      },
+    });
+    await until(async () => {
+      expect(Object.keys((await local('domainIntelCache')) as object)).toEqual(['fresh.example']);
+      expect((await warnEntries()).map(([k]) => k)).toEqual(['warn:fresh']);
+    });
+  });
+
+  it('in Strict Local Mode deletes the whole cache instead (and never writes it back)', async () => {
+    await boot({
+      seed: async () => {
+        await fakeBrowser.storage.local.set({
+          privacySettings: { strictLocalMode: true },
+          domainIntelCache: { 'fresh.example': intel('fresh.example', HOUR) },
+        });
+      },
+    });
+    await until(async () => expect(await local('domainIntelCache')).toBeUndefined());
+    await flush();
+    expect(await local('domainIntelCache')).toBeUndefined();
+  });
+});
+
+describe('B7 browsing other sites wakes the background as little as the browser allows', () => {
+  type AddListener = (cb: (...a: unknown[]) => unknown, filter?: unknown) => void;
+  const onUpdated = () => fakeBrowser.tabs.onUpdated as unknown as { addListener: AddListener };
+
+  it('asks only for tab status changes where the browser can filter (Firefox), not title or favicon updates', async () => {
+    const add = vi.spyOn(onUpdated(), 'addListener');
+    await boot();
+    expect(add).toHaveBeenCalledWith(expect.any(Function), { properties: ['status'] });
+  });
+
+  it('still registers the listener where filters throw (Chrome, Edge), and keeps every other listener', async () => {
+    const original = onUpdated().addListener.bind(onUpdated());
+    vi.spyOn(onUpdated(), 'addListener').mockImplementation((cb, filter) => {
+      if (filter !== undefined) throw new Error('This event does not support filters');
+      original(cb);
+    });
+    const { send } = await boot();
+    await send({ type: 'verdict', payload: { level: 'danger' } }, gmailTop(7));
+    await until(async () => expect(await session('tab:7')).toBeDefined());
+    await tabUpdated(7, { status: 'loading', url: 'https://evil.example/' });
+    await until(async () => expect(await session('tab:7')).toBeUndefined());
+  });
+
+  it('a restart in Strict Local Mode does not rewrite storage when there is no lookup cache to purge', async () => {
+    let remove: ReturnType<typeof vi.spyOn> | undefined;
+    await boot({
+      seed: async () => {
+        await fakeBrowser.storage.local.set({ privacySettings: { strictLocalMode: true } });
+        remove = vi.spyOn(fakeBrowser.storage.local, 'remove');
+      },
+    });
+    await flush();
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+describe('B8 a lookup that settles late never drops the newer lookup of the same domain', () => {
+  it('after Strict Local Mode was turned on and off mid-lookup, a third request joins the running lookup', async () => {
+    const held: (() => void)[] = [];
+    const { send, fetchSpy } = await boot({
+      fetch: () => new Promise((resolve) => held.push(() => resolve(new Response('{}', { status: 404 })))),
+    });
+    const first = send({ type: 'domainIntel', domain: 'example.com' }, gmailTop());
+    await until(() => expect(held.length).toBeGreaterThan(0));
+    await fakeBrowser.storage.local.set({ privacySettings: { strictLocalMode: true } });
+    await flush();
+    await fakeBrowser.storage.local.set({ privacySettings: { strictLocalMode: false } });
+    await flush();
+    const firstHeld = held.splice(0);
+
+    void send({ type: 'domainIntel', domain: 'example.com' }, gmailTop()); // a new lookup, still running
+    await until(() => expect(held.length).toBeGreaterThan(0));
+    for (const release of firstHeld) release(); // the first lookup settles now
+    await first;
+    await flush();
+
+    const requests = fetchSpy.mock.calls.length;
+    void send({ type: 'domainIntel', domain: 'example.com' }, gmailTop());
+    await flush();
+    await flush();
+    expect(fetchSpy.mock.calls.length, 'requests sent for a lookup that is already running').toBe(requests);
+    for (const release of held.splice(0)) release();
   });
 });

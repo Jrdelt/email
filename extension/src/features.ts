@@ -32,13 +32,27 @@ export const SHORTENER_HOSTS = new Set([
   'bit.ly', 'tinyurl.com', 't.co', 'rebrand.ly', 'rb.gy', 'cutt.ly', 'shorturl.at', 'is.gd',
   'ow.ly', 'goo.gl', 'buff.ly', 'tiny.cc', 'bl.ink', 's.id', 'v.gd', 'clck.ru', 't.ly', 'surl.li',
   'lnkd.in', 'mcaf.ee', 'su.pr', 'adf.ly', 'bc.vc', 'ouo.io', 'shrinke.me',
+  // bit.ly's own alias, QR-code phishing's usual shortener, and other public shorteners.
+  'j.mp', 'qrco.de', 'bit.do', 'tr.im', 'x.co', 'shorturl.asia', 'tiny.one', 'u.to',
+]);
+
+// Email services' click-tracking domains (registrable): with link tracking on, every link in a newsletter or
+// verification email points here, whatever its text shows. scoreEmail only (not a feature, so no parity entry).
+// Never generic redirectors or shorteners.
+const ESP_CLICK_TRACKERS = new Set([
+  'sendgrid.net', 'list-manage.com', 'mailgun.org', 'mandrillapp.com', 'hubspotlinks.com', 'hubspotemail.net',
+  'mcsv.net', 'sparkpostmail.com', 'customeriomail.com', 'klclick.com', 'awstrack.me', 'pstmrk.it', 'rs6.net',
 ]);
 
 const CLOUD_STORAGE_HOSTS = new Set([
   'storage.googleapis.com',
+  'commondatastorage.googleapis.com', // legacy GCS endpoint
   'storage.cloud.google.com',
   'firebasestorage.googleapis.com',
   'ipfs.io',
+  'dweb.link', // IPFS path gateways (/ipfs/<cid>/...)
+  'w3s.link',
+  'nftstorage.link',
   'cloudflare-ipfs.com',
   'gateway.pinata.cloud',
   's3.amazonaws.com',
@@ -51,6 +65,9 @@ const CLOUD_STORAGE_SUFFIXES = [
   '.digitaloceanspaces.com',
   '.storage.googleapis.com', // GCS virtual-hosted buckets
   '.web.core.windows.net', // Azure Storage static websites
+  '.ipfs.dweb.link', // IPFS subdomain gateways (<cid>.ipfs.<gateway>)
+  '.ipfs.w3s.link',
+  '.ipfs.nftstorage.link',
 ];
 const REGIONAL_S3_HOST = /^s3[.-][a-z0-9-]+\.amazonaws\.com$/;
 // <bucket>.s3.<region>, .s3-<region>, .s3-website-<region>, .s3.dualstack.<region> (AWS's default URL shapes)
@@ -95,18 +112,29 @@ function isCloudStorageHost(host: string): boolean {
   );
 }
 
-/** True when a link points to an HTML page hosted directly on raw cloud object storage. */
-export function isCloudHtmlLink(href: string): boolean {
+/** An http(s) URL parsed once, or null (scoreEmail reads host, path and query from the same parse). */
+function parseHttpUrl(href: string): URL | null {
   try {
     const u = new URL(href);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-    if (!isCloudStorageHost(host)) return false;
-    const path = safePercentDecode(u.pathname);
-    return !path.endsWith('\n') && /\.(?:html?|shtml|xhtml)$/i.test(path);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Lowercase hostname without IPv6 brackets or a trailing dot (same as domain.ts hostOf). */
+const hostOfUrl = (u: URL): string => u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+
+function isCloudHtmlUrl(u: URL): boolean {
+  if (!isCloudStorageHost(hostOfUrl(u))) return false;
+  const path = safePercentDecode(u.pathname);
+  return !path.endsWith('\n') && /\.(?:html?|shtml|xhtml|xht)$/i.test(path);
+}
+
+/** True when a link points to an HTML page hosted directly on raw cloud object storage. */
+export function isCloudHtmlLink(href: string): boolean {
+  const u = parseHttpUrl(href);
+  return u !== null && isCloudHtmlUrl(u);
 }
 
 /** Drop trailing . , ; : ! ? in linear time (an anchored regex retries at every position of a long run). */
@@ -122,7 +150,47 @@ function trimTrailingPunct(s: string): string {
 // reader. The class is spelled out (not \p{...}) so it cannot drift with the Unicode version of the runtime.
 export const INVISIBLE_RE =
   /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb\u{1bca0}-\u{1bca3}\u{1d173}-\u{1d17a}\u{e0000}-\u{e0fff}]/gu;
-const DOT_LOOKALIKE_RE = /[\u0660\u06f0\u0701\u0702\u3002\ua4f8\uff0e\uff61]/g;
+export const DOT_LOOKALIKE_RE = /[\u0660\u06f0\u0701\u0702\u3002\ua4f8\uff0e\uff61]/g;
+
+// Cyrillic, Greek and other letters that NFKC keeps but that look like Latin ones ("pаssword" with a Cyrillic а).
+// Spelled out (mirrored in features.py CONFUSABLE_LATIN) so it cannot drift with the runtime's Unicode data.
+const CONFUSABLE_LATIN: Readonly<Record<string, string>> = {
+  // Cyrillic lower case
+  '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
+  '\u0456': 'i', '\u0458': 'j', '\u0455': 's', '\u0501': 'd', '\u04bb': 'h', '\u04cf': 'l', '\u051b': 'q',
+  '\u051d': 'w',
+  // Cyrillic upper case
+  '\u0410': 'A', '\u0412': 'B', '\u0415': 'E', '\u041a': 'K', '\u041c': 'M', '\u041d': 'H', '\u041e': 'O',
+  '\u0420': 'P', '\u0421': 'C', '\u0422': 'T', '\u0425': 'X', '\u0406': 'I', '\u0408': 'J', '\u0405': 'S',
+  // Greek lower case
+  '\u03bf': 'o', '\u03b1': 'a', '\u03bd': 'v', '\u03c1': 'p', '\u03c4': 't', '\u03b9': 'i', '\u03ba': 'k',
+  '\u03c5': 'u',
+  // Greek upper case
+  '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I', '\u039a': 'K',
+  '\u039c': 'M', '\u039d': 'N', '\u039f': 'O', '\u03a1': 'P', '\u03a4': 'T', '\u03a5': 'Y', '\u03a7': 'X',
+  // Latin IPA / dotless and Armenian
+  '\u0131': 'i', '\u0251': 'a', '\u0261': 'g', '\u0585': 'o',
+};
+const CONFUSABLE_CLASS = `[${Object.keys(CONFUSABLE_LATIN).join('')}]`;
+const CONFUSABLE_RE = new RegExp(CONFUSABLE_CLASS, 'g');
+const HAS_CONFUSABLE_RE = new RegExp(CONFUSABLE_CLASS);
+
+/** Replace every look-alike letter with the Latin letter it imitates (for matching only; never for display). */
+export const foldConfusables = (s: string): string => s.replace(CONFUSABLE_RE, (c) => CONFUSABLE_LATIN[c]!);
+
+/**
+ * Fold look-alike letters only inside words that mix them with ASCII letters ("pаssword", "Vеrify"), so text
+ * written in Cyrillic or Greek keeps its own words (mirror of features.py _fold_mixed_script_words).
+ */
+function foldMixedScriptWords(text: string): string {
+  return text.replace(/\S+/g, (w) => (/[A-Za-z]/.test(w) && HAS_CONFUSABLE_RE.test(w) ? foldConfusables(w) : w));
+}
+
+/** Count urgency phrases as the reader reads them (look-alike letters inside Latin words folded). */
+const urgencyHits = (body: string): number => {
+  const lower = foldMixedScriptWords(body).toLowerCase();
+  return URGENCY.reduce((n, w) => n + lower.split(w).length - 1, 0);
+};
 // Quotes and parentheses around a bare domain, and sentence punctuation after it: "(www.paypal.com)." shows paypal.com.
 const WRAP_OPEN = '"\'(<{\u00ab\u201c\u2018'; // not '[': bracketed IPv6 literals
 const WRAP_CLOSE = '"\')>}\u00bb\u201d\u2019.,;:!?';
@@ -146,6 +214,9 @@ function normalizeShownText(text: string): string {
 /** ASCII (punycode) form of a non-ASCII host such as Cyrillic look-alike text, or '' if it is not a valid host. */
 function asciiHost(host: string): string {
   if (!/[^\x00-\x7f]/.test(host)) return host;
+  // The URL parser would read '\' as '/' and ':' as a port separator ("café.com\x", "\\café.com", "café.com:"), so
+  // the text is not a bare host (as for ASCII text, which isValidDomain rejects; mirrors features.py).
+  if (/[\\:]/.test(host)) return '';
   try {
     return new URL(`http://${host}/`).hostname;
   } catch {
@@ -153,19 +224,39 @@ function asciiHost(host: string): string {
   }
 }
 
+// A host whose TLD is punycode: 'www.paypal.cоm' (Cyrillic о) becomes 'www.paypal.xn--cm-...', which isValidDomain
+// rejects (its TLD rule is [a-z]{2,63}), yet the reader sees www.paypal.com. Kept local to shownHost so the
+// isValidDomain gate for network lookups and relays stays as it is.
+const PUNY_TLD_HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?$/;
+const isPunyTldHost = (h: string): boolean => h.length <= 253 && PUNY_TLD_HOST_RE.test(h);
+
+const HOST_CHAR_RE = /[.:]|[^\x00-\x7f]/;
+
 /**
  * Extract a hostname only when the link text looks like an explicit URL or bare domain/IP,
  * so prose like "please reset your password immediately." or filenames like "report.pdf" return ''.
  */
 export function shownHost(text: string): string {
-  const t = normalizeShownText(text).trim();
+  return readShownHost(text).host;
+}
+
+/** shownHost plus the work it took: the length of the normalised text (NFKC can expand text up to 18 times). */
+function readShownHost(text: string): { host: string; cost: number } {
+  // ASCII text without a dot or a colon cannot show a URL, domain or IP (NFKC and the folds leave ASCII alone).
+  if (!HOST_CHAR_RE.test(text)) return { host: '', cost: 0 };
+  const normalized = normalizeShownText(text);
+  return { host: shownHostOf(normalized.trim()), cost: Math.max(text.length, normalized.length) };
+}
+
+/** shownHost of already normalised, trimmed link text. */
+function shownHostOf(t: string): string {
   if (!t) return '';
   const m = t.match(EXPLICIT_URL);
   if (m) {
     const candidate = trimTrailingPunct(m[0]);
     if (candidate.slice(candidate.indexOf('://') + 3).split(/[/?#\\]/)[0]!.length > MAX_SHOWN_AUTHORITY) return '';
     const h = hostOf(candidate);
-    return isValidDomain(h) || isIpHost(h) ? h : '';
+    return isValidDomain(h) || isIpHost(h) || isPunyTldHost(h) ? h : '';
   }
   const bare = stripWrapping(t);
   if (!bare || /\s/.test(bare)) return '';
@@ -176,6 +267,9 @@ export function shownHost(text: string): string {
   if (bracketedIpv6 && isIpHost(bracketedIpv6)) return bracketedIpv6;
   const rawHost = asciiHost(authority.replace(/:\d{1,5}$/, '').toLowerCase());
   if (isIpHost(rawHost)) return rawHost;
+  // A non-ASCII TLD after an ASCII label (paypal.cоm, appleid.apple.сom) imitates a Latin TLD; bare text whose labels
+  // are all non-ASCII ("Нажмите.здесь") stays prose.
+  if (isPunyTldHost(rawHost)) return rawHost.split('.').slice(0, -1).some((l) => !l.startsWith('xn--')) ? rawHost : '';
   if (!isValidDomain(rawHost)) return '';
   const tld = rawHost.slice(rawHost.lastIndexOf('.') + 1);
   return rawHost.startsWith('www.') || COMMON_TLDS.has(tld) ? rawHost : '';
@@ -187,21 +281,46 @@ function senderDomainOf(sender: string): string {
   return cleaned.slice(cleaned.lastIndexOf('@') + 1).toLowerCase().replace(/\.$/, '');
 }
 
-function isOpaqueShortTokenLink(link: Link): boolean {
-  try {
-    const u = new URL(link.href);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    if (u.search || u.hash) return false;
-    if (!SHORT_TOKEN_PATH_RE.test(u.pathname) || !/\d/.test(u.pathname)) return false;
-    return SHORT_CTA_TEXT_RE.test(link.text);
-  } catch {
-    return false;
-  }
+function isOpaqueShortTokenUrl(u: URL, text: string): boolean {
+  if (u.search || u.hash) return false;
+  if (!SHORT_TOKEN_PATH_RE.test(u.pathname) || !/\d/.test(u.pathname)) return false;
+  return SHORT_CTA_TEXT_RE.test(text);
+}
+
+/**
+ * Normalised link text read per email (NFKC is the cost; ~3 ms at worst), far above real mail: a large newsletter
+ * has some 20k characters of link text, and the adapters already fail closed past 500k raw characters
+ * (LINK_TEXT_BUDGET in adapters/extract.ts). Past it, shown hosts are not read and the caller fails closed.
+ */
+const SHOWN_TEXT_BUDGET = 250_000;
+
+/**
+ * shownHost for the links of one email: each distinct text is read once (newsletters and SVG animations repeat
+ * theirs), within SHOWN_TEXT_BUDGET of normalised text. Past the budget `read` returns '' and `exceeded` is true.
+ */
+export function shownHostReader(): { read(text: string): string; exceeded(): boolean } {
+  const memo = new Map<string, string>();
+  let left = SHOWN_TEXT_BUDGET;
+  let over = false;
+  return {
+    read(text) {
+      const hit = memo.get(text);
+      if (hit !== undefined) return hit;
+      if (left <= 0) {
+        over = true;
+        return '';
+      }
+      const { host, cost } = readShownHost(text);
+      left -= cost;
+      memo.set(text, host);
+      return host;
+    },
+    exceeded: () => over,
+  };
 }
 
 /** Extract numerical feature vector matching ml/src/phishml/features.py extract_features(). */
 export function extractFeatures(sender: string, body: string, links: readonly Link[]): Record<string, number> {
-  const lower = body.toLowerCase();
   const senderReg = registrableDomain(senderDomainOf(sender));
   let mismatch = 0;
   let ipLinks = 0;
@@ -222,7 +341,6 @@ export function extractFeatures(sender: string, body: string, links: readonly Li
     if (shown && h && registrableDomain(shown) !== reg) mismatch += 1;
     if (senderReg && reg && reg !== senderReg) external += 1;
   }
-  const urgencyHits = URGENCY.reduce((n, w) => n + lower.split(w).length - 1, 0);
   const codePointLen = [...body].length;
   return {
     n_links: links.length,
@@ -233,7 +351,7 @@ export function extractFeatures(sender: string, body: string, links: readonly Li
     n_shortener_links: shortenerLinks,
     n_iplogger_links: ipLoggerLinks,
     n_external_links: external,
-    urgency_hits: urgencyHits,
+    urgency_hits: urgencyHits(body),
     body_len: codePointLen,
   };
 }
@@ -243,14 +361,16 @@ export const FEATURE_NAMES = Object.keys(extractFeatures('', '', []));
 export function scoreEmail(sender: string, body: string, links: Link[]): Verdict {
   const reasons: string[] = [];
   let score = 0;
-  const lower = body.toLowerCase();
   const senderReg = registrableDomain(senderDomainOf(sender));
-  const hits = URGENCY.reduce((n, w) => n + lower.split(w).length - 1, 0);
+  const hits = urgencyHits(body);
   let hasExternalOrUnknownLink = false;
   let hasOpaqueUrgentShortToken = false;
 
+  const shownText = shownHostReader();
+
   for (const l of links) {
-    const h = hostOf(l.href);
+    const u = parseHttpUrl(l.href); // parsed once for host, cloud page and short-token checks
+    const h = u ? hostOfUrl(u) : '';
     const reg = registrableDomain(h);
     const isExternal = Boolean(reg) && (!senderReg || reg !== senderReg);
     if (isExternal) hasExternalOrUnknownLink = true;
@@ -262,7 +382,7 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
       score += 0.3;
       reasons.push('A link uses lookalike characters in its web address');
     }
-    if (isCloudHtmlLink(l.href)) {
+    if (u && isCloudHtmlUrl(u)) {
       score += 0.4;
       reasons.push('A link points to a web page hosted on raw cloud storage');
     }
@@ -272,11 +392,15 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
     } else if ((SHORTENER_HOSTS.has(h) || SHORTENER_HOSTS.has(reg)) && isExternal) {
       score += 0.25;
       reasons.push(`A link uses a URL shortener (${h}) that hides its real destination`);
-    } else if (isExternal && hits >= 2 && isOpaqueShortTokenLink(l)) {
+    } else if (u && isExternal && hits >= 2 && isOpaqueShortTokenUrl(u, l.text)) {
       hasOpaqueUrgentShortToken = true;
     }
-    const shown = shownHost(l.text);
-    if (shown && h && registrableDomain(shown) !== reg) {
+    const shown = shownText.read(l.text);
+    const shownReg = shown ? registrableDomain(shown) : '';
+    // The sender's own domain shown on its email service's click tracker is how tracked mail looks, not a disguise:
+    // the sender could link anywhere with any other text just as well. Anyone else's domain still counts.
+    const ownTracked = Boolean(senderReg) && shownReg === senderReg && ESP_CLICK_TRACKERS.has(reg);
+    if (shown && h && shownReg !== reg && !ownTracked) {
       score += 0.4;
       reasons.push(`A link says ${shown} but actually goes to ${h}`);
     }
@@ -295,5 +419,10 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
   }
   score = Math.min(1, score);
   const level = score >= 0.6 ? 'likely-phishing' : score >= 0.3 ? 'suspicious' : 'safe';
-  return { score, level, reasons: [...new Set(reasons)] };
+  const verdict: Verdict = { score, level, reasons: [...new Set(reasons)] };
+  if (!shownText.exceeded()) return verdict;
+  // Past the link text budget, not every link's text was read: keep a real finding as is; otherwise never let the
+  // email score safe.
+  verdict.reasons.push('This email has too much link text to check it all, so its links are paused');
+  return level === 'safe' ? { ...verdict, score: 0.3, level: 'suspicious', unchecked: true } : verdict;
 }

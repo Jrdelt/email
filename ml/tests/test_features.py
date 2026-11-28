@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -7,12 +8,26 @@ from phishml.features import FEATURE_NAMES, Link, extract_features, is_cloud_htm
 
 PARITY_PATH = Path(__file__).parent / "fixtures" / "parity.json"
 PARITY_CASES = json.loads(PARITY_PATH.read_text(encoding="utf-8"))
+# The order is the index of each weight in the exported model (shared with extension/src/features.test.ts).
+FEATURE_NAMES_PATH = Path(__file__).parent / "fixtures" / "feature_names.json"
+
+
+def test_feature_order_matches_the_shared_fixture():
+    assert FEATURE_NAMES == json.loads(FEATURE_NAMES_PATH.read_text(encoding="utf-8"))
+    assert list(extract_features("a@b.example", "x", [Link("t", "https://c.example/")])) == FEATURE_NAMES
+
+
+def test_unicode_database_is_the_pinned_one():
+    # features.py normalises and classifies text with the interpreter's Unicode database (NFKC, case folding, bidi
+    # classes), which changes with every minor Python version (3.11: 14.0, 3.12: 15.0, 3.13: 15.1). Training features
+    # are only reproducible, and only match parity.json, on the interpreter pinned in ml/.python-version.
+    assert unicodedata.unidata_version == "15.1.0", "run the ML pipeline with the Python version in ml/.python-version"
 
 
 def test_parity_fixture_count_and_schema():
     assert len(PARITY_CASES) >= 20
     for case in PARITY_CASES:
-        assert sorted(case["expected"].keys()) == sorted(FEATURE_NAMES)
+        assert list(case["expected"].keys()) == FEATURE_NAMES, case["name"]
 
 
 @pytest.mark.parametrize("case", PARITY_CASES, ids=[c["name"] for c in PARITY_CASES])
@@ -52,7 +67,7 @@ def test_extracts_embedded_urls_and_handles_multipart_suffixes():
 
 
 def test_cloud_storage_html_links_and_billing_urgency():
-    assert is_cloud_html_link("https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl")
+    assert is_cloud_html_link("https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl")
     assert is_cloud_html_link("https://bucket.s3.amazonaws.com/login.htm")
     assert is_cloud_html_link("https://acct.blob.core.windows.net/c/verify.html")
     assert is_cloud_html_link("https://firebasestorage.googleapis.com/v0/b/x/o/a%2Flogin.html?alt=media")
@@ -62,12 +77,28 @@ def test_cloud_storage_html_links_and_billing_urgency():
     assert not is_cloud_html_link("https://account.mongodb.com/login.html")
 
     f = extract_features(
-        "alert-442-320397@nozfr.itl",
+        "alert-0000@lure-sender.example",
         "Your photos will be deleted. Update billing details before expiration.",
         [
-            Link("Review billing", "https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl"),
+            Link("Review billing", "https://storage.googleapis.com/example-lure-bucket/lure.html#?act=cl"),
             Link("Logo", "https://storage.googleapis.com/assets/logo.png"),
         ],
     )
     assert f["n_cloud_html_links"] == 1
     assert f["urgency_hits"] >= 3
+
+
+def test_lookalike_letter_in_shown_tld_mismatches():
+    href = "https://login-check.example-evil.xyz/s"
+    for text in ("www.paypal.cоm", "https://www.paypal.cоm/signin", "appleid.apple.сom", "paypal.cоm"):
+        assert shown_host(text).rsplit(".", 1)[-1].startswith("xn--"), text
+        assert extract_features("x@sender.example", "Hello", [Link(text, href)])["n_text_href_mismatch"] == 1, text
+    assert shown_host("https://пример.рф/") == "xn--e1afmkfd.xn--p1ai"
+    assert shown_host("Нажмите.здесь") == ""
+
+
+def test_urgency_words_with_lookalike_letters_are_counted():
+    body = "Your pаssword expirеd. Vеrify immеdiately or your mailbox will be suspеnded."
+    assert extract_features("it@corp.example", body, [])["urgency_hits"] == 5
+    russian = "Срочно смените пароль"
+    assert extract_features("a@b.example", russian, [])["urgency_hits"] == 0

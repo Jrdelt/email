@@ -64,6 +64,34 @@ describe('proton adapter', () => {
     expect(e.container).toBe(fdoc.body);
   });
 
+  it('without a From block, never takes the sender from an attachment and marks a scope-wide match uncertain', () => {
+    document.body.innerHTML = `
+      <div data-testid="conversation-view">
+        <article data-testid="message-view-0">
+          <div data-testid="attachment-list">
+            <button data-testid="attachment-item-0" title="Boss &lt;boss@corp.example&gt;.pdf">
+              <span data-testid="attachment-item:name">Boss &lt;boss@corp.example&gt;.pdf</span>
+            </button>
+          </div>
+          <span title="mallory@evil.example">Mallory Ops</span>
+          <div data-testid="message-content:body">Please pay <a href="https://evil.example/pay">Pay</a></div>
+        </article>
+      </div>`;
+    expect(proton.extract(document)).toMatchObject({ senderAddress: 'mallory@evil.example', pairingUncertain: true });
+  });
+
+  it('without a From block, never takes a recipient (the last address in the whole header text) as the sender', () => {
+    const page = (header: string) => `<div data-testid="conversation-view"><article data-testid="message-view-0">
+      <header data-testid="message-header-expanded">${header}</header>
+      <div data-testid="message-content:body">Please pay <a href="https://evil.example/pay">Pay</a></div></article></div>`;
+    document.body.innerHTML = page(`<span data-testid="recipient-name">Mallory</span>
+      <span data-testid="recipient-address" title="mallory@evil.example">&lt;mallory@evil.example&gt;</span>
+      <div data-testid="recipients:to"><span>To:</span><span>me@corp.example</span></div>`);
+    expect(proton.extract(document)).toMatchObject({ senderName: 'Mallory', senderAddress: 'mallory@evil.example' });
+    document.body.innerHTML = page('Mallory &lt;mallory@evil.example&gt; To: me@corp.example');
+    expect(proton.extract(document)!.senderAddress).not.toBe('me@corp.example');
+  });
+
   it('returns null when no Proton message is open', () => {
     document.body.innerHTML = '<main>Inbox</main>';
     expect(proton.extract(document)).toBeNull();
