@@ -23,9 +23,15 @@ const PAGE = gmailMessage({
       <g id="gap"><a><rect width="1" height="1"/></a><a href="${EVIL}"><rect width="400" height="100"/></a></g>
       <a id="one" href="${EVIL}"><rect width="400" height="100"/></a>
       <a id="own" href="https://shop.example/sale"><rect width="400" height="100"/></a>
+      <use id="via" href="#one"/>${Array.from({ length: 5 }, (_, i) => `<use id="c${i + 1}" href="#${i ? `c${i}` : 'one'}"/>`).join('')}
+      <g id="mixed"><a href="https://mail.google.com/mail/u/0/#x"><rect width="400" height="50"/></a><rect y="80" width="400" height="20"/></g>
     </defs>
     <use id="wide21" href="#wide"/><use id="deep5" href="#d4"/><use id="hrefless" href="#gap"/>
-    <use id="use1" href="#one"/><use id="same" href="#own"/></svg>`,
+    <use id="use1" href="#one"/><use id="same" href="#own"/><use id="useuse" href="#via"/><use id="chain6" href="#c5"/>
+    <a><use id="wrapNoHref" href="#one"/></a><a href="#top"><use id="wrapHash" href="#one"/></a>
+    <a href="https://mail.google.com/mail/u/0/#x"><use id="wrapSameOrigin" href="#one"/></a>
+    <a href="${EVIL}"><use id="outerEvilInnerSafe" href="#mixed"/></a></svg>
+    <a><svg><use id="wrapHtmlNoHref" href="#one"/></svg></a><a href="#top"><svg><use id="wrapHtmlHash" href="#one"/></svg></a>`,
 });
 
 let sent: Msg[];
@@ -79,4 +85,44 @@ describe('content.ts: clicks on SVG <use> instances of links in an unlocked emai
     await until(() => expect(navigations(sent, mark)).toHaveLength(1));
     expect(navigations(sent, mark)[0]).toMatchObject({ type: 'openWarning', href: EVIL });
   });
+
+  it('checks a link behind a <use> that references another <use>', async () => {
+    const mark = sent.length;
+    expect(click($('useuse'))).toBe(true);
+    await until(() => expect(navigations(sent, mark)).toHaveLength(1));
+    expect(navigations(sent, mark)[0]).toMatchObject({ type: 'openWarning', href: EVIL });
+  });
+
+  it('pauses a click on a direct <use> chain longer than the guard follows', async () => {
+    clearToast();
+    const mark = sent.length;
+    expect(click($('chain6'))).toBe(true);
+    await tick();
+    expect(navigations(sent, mark)).toEqual([]);
+    expect(toast()).not.toBeNull();
+  });
+
+  // The browser activates the link the instance renders, not the <a> around the <use>.
+  it.each(['wrapNoHref', 'wrapHash', 'wrapHtmlNoHref', 'wrapHtmlHash'])(
+    'checks the link a <use> renders inside an <a> that navigates nowhere (%s)',
+    async (id) => {
+      const mark = sent.length;
+      expect(click($(id))).toBe(true);
+      await until(() => expect(navigations(sent, mark)).toHaveLength(1));
+      expect(navigations(sent, mark)[0]).toMatchObject({ type: 'openWarning', href: EVIL });
+    },
+  );
+
+  // Either the wrapper or the rendered link may navigate, depending on where the click lands: never guess.
+  it.each(['wrapSameOrigin', 'outerEvilInnerSafe'])(
+    'pauses a click on a <use> whose wrapper and rendered link go to different places (%s)',
+    async (id) => {
+      clearToast();
+      const mark = sent.length;
+      expect(click($(id))).toBe(true);
+      await tick();
+      expect(navigations(sent, mark)).toEqual([]);
+      expect(toast()).not.toBeNull();
+    },
+  );
 });

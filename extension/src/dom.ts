@@ -83,8 +83,15 @@ export function eventElement(e: Event): Element | null {
   return builtin<number>(node, 'nodeType') === 1 ? (node as Element) : parentElementOf(node);
 }
 
+/**
+ * Strip leading and trailing ASCII whitespace only, as browsers do for URL attributes (href, action, formaction).
+ * String.prototype.trim also strips U+00A0, U+2000-U+200A, U+3000, U+FEFF..., which the URL parser keeps:
+ * action="&nbsp;" is not "no action" but a relative URL (<base>/%C2%A0).
+ */
+export const trimUrlSpace = (s: string): string => s.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '');
+
 export function resolveAgainstBase(raw: string, base: string): string {
-  const trimmed = raw.trim();
+  const trimmed = trimUrlSpace(raw);
   if (!trimmed) return '';
   try {
     return new URL(trimmed, base).href;
@@ -102,7 +109,7 @@ export const queryAll = (el: Element, selector: string): Element[] => [
 function animatedHref(el: Element): string {
   if (el.namespaceURI !== SVG_NS) return '';
   const anim = (el as unknown as { href?: { animVal?: unknown } }).href?.animVal;
-  return typeof anim === 'string' ? anim.trim() : '';
+  return typeof anim === 'string' ? trimUrlSpace(anim) : '';
 }
 
 /**
@@ -110,7 +117,7 @@ function animatedHref(el: Element): string {
  * retarget `<a href="#">` anywhere), then href, then xlink:href. '' when there is none.
  */
 export function rawLinkTarget(el: Element): string {
-  return (animatedHref(el) || getAttr(el, 'href') || getAttrNS(el, XLINK_NS, 'href') || getAttr(el, 'xlink:href') || '').trim();
+  return trimUrlSpace(animatedHref(el) || getAttr(el, 'href') || getAttrNS(el, XLINK_NS, 'href') || getAttr(el, 'xlink:href') || '');
 }
 
 const MAX_USE_DEPTH = 4;
@@ -144,12 +151,17 @@ export function useLinks(use: Element): { links: Element[]; truncated: boolean }
     const isLink = tag === 'a' || tag === 'area';
     if (depth >= MAX_USE_DEPTH || seen.size >= MAX_USE_LINKS) {
       // Link-free icon sprites nest freely; only a reference that can still render a link is unknowable.
-      if (isLink || queryAll(ref, 'a, area, use').length > 0) truncated = true;
+      if (isLink || tag === 'use' || queryAll(ref, 'a, area, use').length > 0) truncated = true;
       return;
     }
     seen.add(u);
     if (isLink) {
       add(ref);
+      return;
+    }
+    // A <use> may reference another <use> directly: its instance renders what that one renders.
+    if (tag === 'use') {
+      visit(ref, depth + 1);
       return;
     }
     for (const el of queryAll(ref, 'a, area, use')) {
@@ -187,7 +199,7 @@ function sameDocumentTarget(from: Element, raw: string): Element | null {
   const doc = ownerDocOf(from);
   const hash = raw.indexOf('#');
   if (hash < 0) return null;
-  const before = raw.slice(0, hash).trim();
+  const before = trimUrlSpace(raw.slice(0, hash));
   if (before) {
     // Only same-document references can carry the email's own links.
     const resolved = resolveAgainstBase(before, doc.baseURI || 'https://invalid.local');

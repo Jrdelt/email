@@ -14,6 +14,7 @@ import {
   setAttr,
   setAttrNS,
   tagOf,
+  trimUrlSpace,
   useLinks,
 } from '../dom';
 import { hostOf } from '../domain';
@@ -94,7 +95,7 @@ function targetHostOf(el: Element): string {
     const form = closestEl(node, 'form');
     raw = form ? recordedTarget(form) : null;
   }
-  raw = (raw ?? '').trim();
+  raw = trimUrlSpace(raw ?? '');
   if (!raw) return '';
   return hostOf(resolveAgainstBase(raw, ownerDocOf(el).baseURI || 'https://invalid.local'));
 }

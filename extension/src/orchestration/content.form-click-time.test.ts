@@ -114,6 +114,7 @@ describe('content.ts: click-time checks of form submissions on an unlocked email
       registrable: 'files.example',
       level: 'danger',
       reasons: [expect.stringMatching(/risky file type \(\.exe\)/)],
+      kind: 'form',
     });
     expect(JSON.stringify(sent.slice(mark))).not.toContain('hunter2');
     expect(lookups(sent, mark)).toEqual([]); // decided locally

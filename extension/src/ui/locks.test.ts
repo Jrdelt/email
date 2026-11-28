@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
 import { inlineAttachmentsIn, linksIn } from '../adapters/extract';
-import { rawLinkTarget, useLinks } from '../dom';
+import { rawLinkTarget, resolveAgainstBase, resolveAnchorHref, useLinks } from '../dom';
 import { lockAttachments, unlockAttachments } from './attachmentLock';
 import { lockLinks, unlockLinks } from './linkLock';
 
@@ -133,6 +133,23 @@ describe('lock gaps found in review', () => {
     expect(useLinks($('u1')).links.map((e) => e.id)).toEqual(['a']);
   });
 
+  it('follows a <use> that references another <use> directly', () => {
+    document.body.innerHTML = `<svg><defs><a id="L" href="https://evil.example/f.zip"><rect/></a><use id="u2" href="#L"/>
+      <g id="G"><a id="M" href="https://evil.example/g.zip"><rect/></a></g><use id="u3" href="#G"/></defs>
+      <use id="t" href="#u2"/><use id="t2" href="#u3"/></svg>`;
+    expect(useLinks($('t'))).toEqual({ links: [$('L')], truncated: false });
+    expect(useLinks($('t2'))).toEqual({ links: [$('M')], truncated: false }); // <use> to <use> to <g>
+  });
+
+  it('reports truncation for a direct chain of more <use> than it follows, and not for a direct cycle', () => {
+    document.body.innerHTML = `<svg><defs><a id="L" href="https://evil.example/f.zip"><rect/></a>${Array.from(
+      { length: 5 },
+      (_, i) => `<use id="c${i + 1}" href="#${i ? `c${i}` : 'L'}"/>`,
+    ).join('')}<use id="x1" href="#x2"/><use id="x2" href="#x1"/></defs><use id="t" href="#c5"/><use id="cyc" href="#x1"/></svg>`;
+    expect(useLinks($('t'))).toEqual({ links: [], truncated: true });
+    expect(useLinks($('cyc'))).toEqual({ links: [], truncated: false });
+  });
+
   // The browser renders every link behind a <use>, however many or deeply nested. Past useLinks' own bounds the
   // clicked link cannot be identified, so the result says so (callers fail closed) instead of silently stopping.
   const EVIL = 'https://files.example/invoice.exe';
@@ -176,6 +193,14 @@ describe('lock gaps found in review', () => {
       (_, i) => `<g id="s${i + 1}"><use href="#s${i}"/></g>`,
     ).join('')}</defs><use id="t" href="#s4"/></svg>`;
     expect(useLinks($('t'))).toEqual({ links: [], truncated: false });
+  });
+
+  it('strips only ASCII whitespace from a link target, as the URL parser does', () => {
+    expect(resolveAgainstBase('\u00a0', 'https://evil.example/d/')).toBe('https://evil.example/d/%C2%A0');
+    expect(resolveAgainstBase(' \n https://x.example/ \t', 'https://evil.example/')).toBe('https://x.example/');
+    document.body.innerHTML = `<svg><a id="s" href="&#160;"><text>x</text></a></svg><a id="h" href="&#160;#top">t</a>`;
+    expect(resolveAnchorHref($('s'))).toMatch(/\/%C2%A0$/); // navigates (to the base), so it is checked
+    expect(rawLinkTarget($('h')).startsWith('#')).toBe(false); // a relative path, not a same-page #fragment
   });
 
   it('reads an SVG link target from its SMIL-animated value before the #fragment href', () => {

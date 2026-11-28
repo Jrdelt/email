@@ -22,6 +22,7 @@ import {
   resolveAnchorHref,
   tagOf,
   textOf,
+  trimUrlSpace,
   useLinks,
 } from '../src/dom';
 import { isLookupDomain } from '../src/domain';
@@ -305,20 +306,25 @@ function matchAttachmentInMessages(
 
 /**
  * The link a click activates: the closest <a>/<area>, or the link an SVG <use> instance renders (the click is
- * retargeted to the <use>). `at` is where the click landed, for finding its message. 'ambiguous' when a <use>
- * renders several different links and the clicked one cannot be told apart; `uncheckable` when it renders more
- * than useLinks follows, so the clicked link may not be among `ambiguous` at all.
+ * retargeted to the <use>, also inside an <a>). `at` is where the click landed, for finding its message. 'ambiguous'
+ * when a <use> renders several different links (or one besides the <a> around it) and the clicked one cannot be told
+ * apart; `uncheckable` when it renders more than useLinks follows, so the clicked link may not be among `ambiguous`.
  */
 function clickedLink(
   el: Element,
 ): { anchor: Element; at: Element } | { ambiguous: string[]; uncheckable?: boolean } | null {
   const a = closestEl(el, 'a, area');
-  if (a) return { anchor: a, at: a };
   const use = closestEl(el, 'use');
+  // A <use> inside a link: the browser activates the link the instance renders where the click lands on one (the
+  // first element with activation behaviour on the event path), and the wrapper elsewhere. Either may navigate.
+  if (a && !(use && Node.prototype.contains.call(a, use))) return { anchor: a, at: a };
   if (!use) return null;
   const { links, truncated } = useLinks(use);
   const hrefs = links.map((l) => resolveAnchorHref(l));
-  const targets = [...new Set(hrefs.filter(Boolean))];
+  if (a && !truncated && !hrefs.some(Boolean)) return { anchor: a, at: a };
+  // The wrapper's own destination counts unless it is a "#fragment" that stays on the page.
+  const outer = a && !(rawLinkTarget(a).startsWith('#') && staysOnPage(a)) ? resolveAnchorHref(a) : '';
+  const targets = [...new Set([...hrefs, outer].filter(Boolean))];
   if (truncated) return { ambiguous: targets, uncheckable: true };
   if (targets.length > 1) return { ambiguous: targets };
   // Check the link that navigates, never a target-less one rendered beside it.
@@ -348,19 +354,52 @@ function replayNavigation(anchor: Element, href: string, activeTab: boolean): vo
   else win.location.assign(href);
 }
 
+const asciiLower = (s: string): string => s.replace(/[A-Z]+/g, (c) => c.toLowerCase());
+
 /**
- * Where submitting `form` from `submitter` (a submit button, or null) navigates: the submitter's formaction, else
- * the form's action, else the page itself, resolved as the browser does. Read through the prototype-bound attribute
- * helpers: `<input name="action">` shadows `form.action`. null for method "dialog", which navigates nowhere. A GET
- * submission replaces the query with the form's fields; its site and path are those of the action.
+ * A form's method as browsers parse it: an enumerated attribute matched ASCII case-insensitively and NOT trimmed, so
+ * method=" dialog" is an invalid value, which (like a missing one) is GET.
  */
-function submissionTarget(form: Element, submitter: Element | null): string | null {
-  const attr = (own: string, formAttr: string): string =>
-    (submitter && hasAttr(submitter, own) ? getAttr(submitter, own) : getAttr(form, formAttr)) ?? '';
-  if (attr('formmethod', 'method').trim().toLowerCase() === 'dialog') return null;
+const methodKeyword = (raw: string | null): 'get' | 'post' | 'dialog' => {
+  const k = asciiLower(raw ?? '');
+  return k === 'post' || k === 'dialog' ? k : 'get';
+};
+
+/**
+ * Where submitting `form` from `submitter` (a submit button, or null) navigates, as the browser computes it:
+ * - 'dialog' for method "dialog" (the submitter's formmethod first), which navigates nowhere;
+ * - otherwise `href`: the submitter's formaction, else the form's action, else the page itself, resolved against
+ *   the base URL. Read through the prototype-bound attribute helpers: `<input name="action">` shadows `form.action`.
+ *   Only ASCII whitespace is stripped (action="&nbsp;" is a relative URL, not "no action"). A GET submission to an
+ *   http(s) URL replaces the action's query with the form's fields (`new FormData(form, submitter)`: the submitter's
+ *   own name/value and controls outside the form linked with form="id" included), so a redirect target put in a
+ *   hidden field (Bing /ck/a u=, Google /url q=) is the one checked. `shown` is the same URL without those fields
+ *   (they can hold what the user typed), the only one that may leave the page;
+ * - 'uncheckable' when the fields cannot be read (the caller fails closed).
+ */
+function submissionTarget(
+  form: Element,
+  submitter: Element | null,
+): { href: string; shown: string } | 'dialog' | 'uncheckable' {
+  const own = (name: string): boolean => Boolean(submitter && hasAttr(submitter, name));
+  const method = methodKeyword(own('formmethod') ? getAttr(submitter!, 'formmethod') : getAttr(form, 'method'));
+  if (method === 'dialog') return 'dialog';
   const doc = ownerDocOf(form);
-  const raw = attr('formaction', 'action');
-  return raw.trim() ? resolveAgainstBase(raw, doc.baseURI || doc.URL) : doc.URL;
+  const raw = (own('formaction') ? getAttr(submitter!, 'formaction') : getAttr(form, 'action')) ?? '';
+  const action = trimUrlSpace(raw) ? resolveAgainstBase(raw, doc.baseURI || doc.URL) : doc.URL;
+  if (method === 'post' || !isSafeHttpUrl(action)) return { href: action, shown: action };
+  try {
+    const params = new URLSearchParams();
+    const fields = new FormData(form as HTMLFormElement, (submitter as HTMLElement | null) ?? undefined);
+    for (const [name, value] of fields) params.append(name, typeof value === 'string' ? value : value.name);
+    const u = new URL(action);
+    u.search = '';
+    const shown = u.href;
+    u.search = params.toString();
+    return { href: u.href, shown };
+  } catch {
+    return 'uncheckable';
+  }
 }
 
 interface GuardTarget {
@@ -374,8 +413,12 @@ interface GuardTarget {
 
 /** A navigation (link click or form submission) the click guard has cancelled and decides at click time. */
 interface HeldNavigation {
-  /** Absolute http(s) destination. */
+  /** Absolute http(s) destination (for a GET form, with the form's fields as its query). */
   href: string;
+  /** What the warning page may be given: `href`, or for a GET form the same URL without its fields. */
+  shown: string;
+  /** A form submission (the warning page then speaks of a form, not a link). */
+  form?: boolean;
   /** The message it started in, as found when it was held. */
   hit: GuardTarget;
   /** Where in that message it started (looked up again to see whether the message is locked now). */
@@ -426,17 +469,22 @@ function installClickGuard(opts: {
   // The warning page gets the destination only: never a form's fields. `via` is the URL that was clicked: when it is
   // the organisation's link-protection gateway (Safe Links, ...), "Open anyway" goes through it (background.ts keeps
   // it only then), so the tenant's time-of-click check is not skipped for exactly the links this extension stopped.
-  const openWarning = (h: HeldNavigation, risk: LinkRisk, extra: { intel?: DomainIntel } = {}) =>
+  // A GET form's URL carries its fields: the page gets the action's site and path (or the destination unwrapped from
+  // them), and that URL is never sent as `via`.
+  const openWarning = (h: HeldNavigation, risk: LinkRisk, extra: { intel?: DomainIntel } = {}) => {
+    const unwrapped = risk.href !== h.href;
     void sendRuntime({
       type: 'openWarning',
-      href: risk.href,
-      ...(h.href !== risk.href ? { via: h.href } : {}),
+      href: unwrapped ? risk.href : h.shown,
+      ...(unwrapped && h.shown === h.href ? { via: h.href } : {}),
       host: risk.host,
       registrable: risk.registrable,
       level: risk.level,
       reasons: risk.reasons,
+      ...(h.form ? { kind: 'form' } : {}),
       ...extra,
     });
+  };
 
   /**
    * Decide a held navigation: wait for a pending scan, check the destination locally and then (outside Strict
@@ -512,7 +560,8 @@ function installClickGuard(opts: {
     const form = closestEl(el, 'form');
     if (!form) return;
     const submitter = (e as SubmitEvent).submitter ?? null;
-    const href = submissionTarget(form, submitter);
+    const target = submissionTarget(form, submitter);
+    const href = typeof target === 'object' ? target.href : null;
     if (href !== null && replaying.get(form) === href) return; // our own replay of a cleared submission
     // A submit button inside an email can submit a form outside it (form="id"): that is the email's submission too.
     const formHit = opts.findTarget(form);
@@ -520,10 +569,17 @@ function installClickGuard(opts: {
     const hit = formHit ?? (submitter ? opts.findTarget(submitter) : null);
     if (!at || !hit || isLocked(hit.container)) return; // a locked message's forms are the lock's job
 
+    if (target === 'uncheckable') {
+      // Where it goes cannot be worked out: never let it through unchecked.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      showPausedLinkToast(ownerDocOf(form), '', submitter instanceof HTMLElement ? submitter : null);
+      return;
+    }
     const pending = opts.isPending();
     // As for links, only http(s) destinations are checked here (inline data:/blob: downloads are the attachment
     // lock's job). Others are held only while a scan is pending, then dropped: submit again once it is checked.
-    if (href === null || !isSafeHttpUrl(href)) {
+    if (href === null || target === 'dialog' || !isSafeHttpUrl(href)) {
       if (!pending) return;
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -532,7 +588,16 @@ function installClickGuard(opts: {
     }
     const initialRisk = analyzeLinkDestination(href, hit.senderRegistrable, location.origin);
     if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
-    const held: HeldNavigation = { href, hit, at, source: at, trigger: submitter ?? form, host: initialRisk.host };
+    const held: HeldNavigation = {
+      href,
+      shown: target.shown,
+      form: true,
+      hit,
+      at,
+      source: at,
+      trigger: submitter ?? form,
+      host: initialRisk.host,
+    };
     if (!extensionAlive()) {
       // Orphaned (see the link case below): risky submissions stay paused; safe ones wait for a pending scan.
       if (initialRisk.level === 'safe' && !pending) return;
@@ -633,7 +698,7 @@ function installClickGuard(opts: {
     const activeTab = !(me.metaKey || me.ctrlKey || (e.type === 'auxclick' && me.button === 1));
     const initialRisk = analyzeLinkDestination(rawHref, hit.senderRegistrable, location.origin);
     if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
-    const held: HeldNavigation = { href: rawHref, hit, at, source: a, trigger: a, host: initialRisk.host };
+    const held: HeldNavigation = { href: rawHref, shown: rawHref, hit, at, source: a, trigger: a, host: initialRisk.host };
     if (!extensionAlive()) {
       // Orphaned by an extension update: the background can no longer check or open links for us. Risky links
       // stay paused until the tab is reloaded; safe ones still wait for a pending scan (which runs locally) and
