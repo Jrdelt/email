@@ -14,6 +14,7 @@ import {
   isUnsafeNode,
   linkFields,
   inExcludedRegion,
+  conversationPairingUncertain,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
@@ -36,14 +37,15 @@ function findBodies(doc: Document): BodyHit[] {
   return chooseBodies(pickBodies(doc, BODY_SELECTORS, isCompose), pickFrameBodies(doc, BODY_IFRAMES, isCompose));
 }
 
-/** The message card around the body (never the body or its own wrapper, which hold no header or attachments). */
-function findScope(doc: Document, hostEl: HTMLElement): HTMLElement {
+/**
+ * The message card around the body (never the body or its own wrapper, which hold no header or attachments).
+ * `perMessage` is false for the conversation-level fallback (no card matched), which may hold other messages.
+ */
+function findScope(doc: Document, hostEl: HTMLElement): { scope: HTMLElement; perMessage: boolean } {
   const start = hostEl.parentElement ?? hostEl;
-  return (
-    start.closest<HTMLElement>('[data-test-id="message-card"], [role="listitem"]') ??
-    start.closest<HTMLElement>('[data-test-id="message-group-view"], [role="main"]') ??
-    doc.body
-  );
+  const card = start.closest<HTMLElement>('[data-test-id="message-card"], [role="listitem"]');
+  if (card) return { scope: card, perMessage: true };
+  return { scope: start.closest<HTMLElement>('[data-test-id="message-group-view"], [role="main"]') ?? doc.body, perMessage: false };
 }
 
 const SUBJECT_SEL = '[data-test-id="message-group-subject-text"], [data-test-id="message-subject"], main h1, [role="main"] h1';
@@ -53,16 +55,23 @@ const ATTACHMENT_TILE_SEL =
 // Regions that never hold the sender: attachment lists/tiles (attacker-chosen file names) and the subject.
 const SENDER_EXCLUDE_SEL = `${ATTACHMENT_LIST_SEL}, ${ATTACHMENT_TILE_SEL}, [data-test-id="attachment-filename"], ${SUBJECT_SEL}`;
 
+const FROM_NODE_SEL =
+  '[data-test-id="message-from"], [data-test-id="sender-name"], [data-test-id="message-header"] [title*="@"], [data-test-id="message-header"] [aria-label*="@"]';
+const ADDRESS_ATTR_SEL = '[title*="@"], [aria-label*="@"], a[href^="mailto:"]';
+
 /**
  * The sender of the message card around `hostEl`. `uncertain` marks an address found only by the card-wide pass:
  * without the header's own sender node it may come from anywhere in the card, so it is never allowlist-trusted.
+ * A sender node found in the conversation-level fallback is uncertain too when that scope holds another body or
+ * another sender address (conversationPairingUncertain): it may belong to a different message of the thread.
  */
 function findSender(
   doc: Document,
   container: HTMLElement,
   hostEl: HTMLElement,
+  bodies: readonly BodyHit[],
 ): { senderName: string; senderAddress: string; uncertain?: true } {
-  const scope = findScope(doc, hostEl);
+  const { scope, perMessage } = findScope(doc, hostEl);
   const skip = (el: Element): boolean =>
     isUnsafeNode(el) ||
     el === container ||
@@ -70,14 +79,15 @@ function findSender(
     el.closest('[data-test-id="recipient-list"], [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i]') !== null ||
     inExcludedRegion(el, scope, hostEl, SENDER_EXCLUDE_SEL);
 
-  for (const el of scope.querySelectorAll(
-    '[data-test-id="message-from"], [data-test-id="sender-name"], [data-test-id="message-header"] [title*="@"], [data-test-id="message-header"] [aria-label*="@"]',
-  )) {
+  for (const el of scope.querySelectorAll(FROM_NODE_SEL)) {
     if (skip(el)) continue;
     const hit = extractSenderFromElement(el);
-    if (hit) return hit;
+    if (!hit) continue;
+    return perMessage || !conversationPairingUncertain(scope, hostEl, bodies, `${FROM_NODE_SEL}, ${ADDRESS_ATTR_SEL}`, skip)
+      ? hit
+      : { ...hit, uncertain: true };
   }
-  for (const el of scope.querySelectorAll('[title*="@"], [aria-label*="@"], a[href^="mailto:"]')) {
+  for (const el of scope.querySelectorAll(ADDRESS_ATTR_SEL)) {
     if (skip(el)) continue;
     const hit = extractSenderFromElement(el);
     if (hit) return { ...hit, uncertain: true };
@@ -116,7 +126,7 @@ function extractYahooAttachments(
   const attachments: AttachmentRef[] = [...inlineAttachmentsIn(container)];
   const inlineCount = attachments.length; // the chip cap below counts this adapter's own chips only
   const attachmentContainers: HTMLElement[] = [];
-  const scope = findScope(doc, hostEl);
+  const { scope } = findScope(doc, hostEl);
 
   // Native attachment lists and tiles are webmail chrome beside the body, never inside it (inline downloads in the
   // email HTML come from inlineAttachmentsIn). Node.contains is inclusive, so this also skips the body itself.
@@ -151,8 +161,9 @@ export const yahoo: WebmailAdapter = {
   name: 'yahoo',
   matches: (url) => url.hostname.toLowerCase().replace(/\.$/, '') === 'mail.yahoo.com',
   extractAll(doc): ExtractedEmail[] {
-    return findBodies(doc).map(({ container, hostEl }) => {
-      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl);
+    const bodies = findBodies(doc);
+    return bodies.map(({ container, hostEl }) => {
+      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl, bodies);
       const subject = findSubject(doc, container);
       const body = withSubject(subject, bodyText(container));
       const { attachments, attachmentContainers } = extractYahooAttachments(doc, container, hostEl);

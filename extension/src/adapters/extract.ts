@@ -65,6 +65,36 @@ export function inExcludedRegion(el: Element, scope: Element, hostEl: Element, s
   return false;
 }
 
+// Sender candidates examined per conversation-level scope; past it the pairing counts as uncertain (fail closed).
+const MAX_SENDER_CANDIDATES = 200;
+
+/**
+ * For a sender lookup that fell back to a conversation-level scope (no per-message wrapper around the body): true
+ * when that scope cannot pair a sender with `hostEl` for certain, because it also holds another message body, or
+ * its sender candidates (elements matching `candidates`, minus `skip`) show more than one distinct address (an
+ * expanded body next to another sender's collapsed header). Adapters mark such a sender pairingUncertain, so it is
+ * never allowlist-trusted; a fallback scope with one message and one sender stays certain.
+ */
+export function conversationPairingUncertain(
+  scope: Element,
+  hostEl: Element,
+  bodies: readonly BodyHit[],
+  candidates: string,
+  skip: (el: Element) => boolean,
+): boolean {
+  if (bodies.some((b) => b.hostEl !== hostEl && scope.contains(b.hostEl))) return true;
+  const seen = new Set<string>();
+  let examined = 0;
+  for (const el of scope.querySelectorAll(candidates)) {
+    if (skip(el)) continue;
+    if (++examined > MAX_SENDER_CANDIDATES) return true;
+    const hit = extractSenderFromElement(el);
+    if (hit) seen.add(hit.senderAddress.toLowerCase());
+    if (seen.size > 1) return true;
+  }
+  return false;
+}
+
 /**
  * Longest header/label text parsed for an address. Real headers are far shorter; the cap plus excluding '@'
  * from the repeated classes keeps address matching linear on attacker text (e.g. a display name of 2,000 '@').

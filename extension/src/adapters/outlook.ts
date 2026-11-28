@@ -15,6 +15,7 @@ import {
   isUnsafeNode,
   linkFields,
   inExcludedRegion,
+  conversationPairingUncertain,
 } from './extract';
 import type { AttachmentRef, WebmailAdapter } from './types';
 
@@ -41,13 +42,18 @@ function findBodies(doc: Document): BodyHit[] {
   return chooseBodies(pickBodies(doc, BODY_SELECTORS, isEditable), pickFrameBodies(doc, BODY_IFRAMES, isEditable));
 }
 
-function findMessageScope(doc: Document, hostEl: HTMLElement): HTMLElement | null {
-  return (
-    hostEl.closest<HTMLElement>('[aria-label="Email message"], [role="listitem"]') ??
-    hostEl.closest<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]') ??
-    doc.querySelector<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]') ??
-    doc.body
-  );
+// The wrapper of one message, and the conversation-level fallbacks used when none matches (a localized aria-label).
+const PER_MESSAGE_SEL = '[aria-label="Email message"], [role="listitem"]';
+const CONVERSATION_SEL = '[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]';
+
+/** The message around `hostEl`; `perMessage` is false for a conversation-level fallback, which may hold others. */
+function findMessageScope(doc: Document, hostEl: HTMLElement): { scope: HTMLElement | null; perMessage: boolean } {
+  const own = hostEl.closest<HTMLElement>(PER_MESSAGE_SEL);
+  if (own) return { scope: own, perMessage: true };
+  return {
+    scope: hostEl.closest<HTMLElement>(CONVERSATION_SEL) ?? doc.querySelector<HTMLElement>(CONVERSATION_SEL) ?? doc.body,
+    perMessage: false,
+  };
 }
 
 // Attachment wells and cards (also what extractOutlookAttachments locks): their labels and text carry attacker-chosen
@@ -75,12 +81,22 @@ const SENDER_EXCLUDE_SEL = `${ATTACHMENT_WELL_SEL}, ${ATTACHMENT_CARD_SEL}, [rol
 
 type SenderHit = { senderName: string; senderAddress: string };
 
+const FROM_NODE_SEL = '[aria-label^="From" i], [data-testid*="sender" i], [data-testid*="from" i], span.OZZZK';
+const ADDRESS_ATTR_SEL = '[title*="@"], [aria-label*="@"], a[href^="mailto:"]';
+
 /**
  * The sender of the message around `hostEl`. `uncertain` marks an address found only by the scope-wide passes (2-3):
  * without an explicit From node it may come from anywhere in the message chrome, so it is never allowlist-trusted.
+ * A From node found in a conversation-level fallback scope is uncertain too when that scope holds another body or
+ * another sender address (conversationPairingUncertain): it may belong to a different message of the thread.
  */
-function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): SenderHit & { uncertain?: true } {
-  const scope = findMessageScope(doc, hostEl);
+function findSender(
+  doc: Document,
+  container: HTMLElement,
+  hostEl: HTMLElement,
+  bodies: readonly BodyHit[],
+): SenderHit & { uncertain?: true } {
+  const { scope, perMessage } = findMessageScope(doc, hostEl);
   if (!scope) return { senderName: '', senderAddress: '' };
 
   const skip = (el: Element): boolean =>
@@ -90,21 +106,25 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
     el.closest('[role="banner"], nav, [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i], [data-testid*="recipient" i]') !== null ||
     /^(to|cc|bcc)\b/i.test(el.getAttribute('aria-label') ?? '');
   const skipLoose = (el: Element): boolean => skip(el) || inExcludedRegion(el, scope, hostEl, SENDER_EXCLUDE_SEL);
+  const fromNode = (hit: SenderHit): SenderHit & { uncertain?: true } =>
+    perMessage || !conversationPairingUncertain(scope, hostEl, bodies, `${FROM_NODE_SEL}, ${ADDRESS_ATTR_SEL}`, skipLoose)
+      ? hit
+      : { ...hit, uncertain: true };
 
   // Pass 1: explicit From / sender nodes inside scope
-  for (const el of scope.querySelectorAll('[aria-label^="From" i], [data-testid*="sender" i], [data-testid*="from" i], span.OZZZK')) {
+  for (const el of scope.querySelectorAll(FROM_NODE_SEL)) {
     if (skip(el)) continue;
     const direct = extractSenderFromElement(el);
-    if (direct) return direct;
-    for (const d of el.querySelectorAll('[title*="@"], [aria-label*="@"], a[href^="mailto:"]')) {
+    if (direct) return fromNode(direct);
+    for (const d of el.querySelectorAll(ADDRESS_ATTR_SEL)) {
       if (skip(d)) continue;
       const hit = extractSenderFromElement(d);
-      if (hit) return hit;
+      if (hit) return fromNode(hit);
     }
   }
 
   // Pass 2: header attribute nodes in DOM order inside scope
-  for (const el of scope.querySelectorAll('[title*="@"], [aria-label*="@"], a[href^="mailto:"]')) {
+  for (const el of scope.querySelectorAll(ADDRESS_ATTR_SEL)) {
     if (skipLoose(el)) continue;
     const hit = extractSenderFromElement(el);
     if (hit) return { ...hit, uncertain: true };
@@ -175,9 +195,9 @@ function extractOutlookAttachments(
   const attachmentContainers: HTMLElement[] = [];
 
   const scope =
-    hostEl.closest<HTMLElement>('[aria-label="Email message"], [role="listitem"]') ??
-    hostEl.closest<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]') ??
-    doc.querySelector<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]');
+    hostEl.closest<HTMLElement>(PER_MESSAGE_SEL) ??
+    hostEl.closest<HTMLElement>(CONVERSATION_SEL) ??
+    doc.querySelector<HTMLElement>(CONVERSATION_SEL);
   if (!scope) return { attachments, attachmentContainers };
 
   // Native wells and cards are OWA chrome beside the body, never inside it: in the email HTML, a "Download on the
@@ -228,8 +248,9 @@ export const outlook: WebmailAdapter = {
   name: 'outlook',
   matches: (url) => HOSTS.has(url.hostname.toLowerCase().replace(/\.$/, '')),
   extractAll(doc) {
-    return findBodies(doc).map(({ container, hostEl }) => {
-      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl);
+    const bodies = findBodies(doc);
+    return bodies.map(({ container, hostEl }) => {
+      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl, bodies);
       const subject = findSubject(doc, container);
       const body = withSubject(subject, bodyText(container));
       const linkInfo = linkFields(container); // unwraps Safe Links and other redirect wrappers
