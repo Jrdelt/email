@@ -61,3 +61,49 @@ describe('toast host', () => {
     expect(decoys()).toBe(1);
   });
 });
+
+describe('banner announcements', () => {
+  // Every insertion of a role=alert element is announced in full, every button label included. The content script
+  // renders a flagged email at least twice (sender lookup loading, then its result): a re-render that says the same
+  // thing must not interrupt the user with the whole banner again.
+  const roots: ShadowRoot[] = [];
+  const attach = HTMLElement.prototype.attachShadow;
+  const card = () => roots.at(-1)!.querySelector('.card')!;
+
+  function capture() {
+    roots.length = 0;
+    vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      const r = attach.call(this, init);
+      roots.push(r);
+      return r;
+    });
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it('announces the first banner, and not again when a re-render says the same thing', () => {
+    capture();
+    showBanner({ ...model(), intel: 'loading' }, actions());
+    expect(card().getAttribute('role')).toBe('alert');
+    showBanner(model(), actions());
+    expect(card().getAttribute('role')).not.toBe('alert');
+    // Still reachable as a landmark, named by its title.
+    expect(card().getAttribute('role')).toBe('region');
+    const labelId = card().getAttribute('aria-labelledby')!;
+    expect(roots.at(-1)!.getElementById(labelId)?.textContent).toBe('Check this sender.');
+  });
+
+  it('announces again when the level or title changes', () => {
+    capture();
+    showBanner(model(), actions());
+    showBanner({ ...model(), level: 'danger', title: 'Possible phishing.' }, actions());
+    expect(card().getAttribute('role')).toBe('alert');
+  });
+
+  it('announces again after the banner was removed (a new email, or a dismissed banner brought back)', () => {
+    capture();
+    showBanner(model(), actions());
+    removeBanner();
+    showBanner(model(), actions());
+    expect(card().getAttribute('role')).toBe('alert');
+  });
+});

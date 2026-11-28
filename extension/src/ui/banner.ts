@@ -184,12 +184,21 @@ const BANNER_CSS = `
 // id="ped-banner-host" and comes first in document order, so each re-render would delete one of its elements
 // instead of the previous banner, and banners would pile up.
 const hosts = new WeakMap<Document, HTMLElement>();
+// What the banner shown in each document announced (level and title). A re-render that says the same thing is not
+// announced again: every insertion of a role=alert card is read out in full, and a flagged email renders at least
+// twice (sender lookup loading, then its result). Forgotten once the banner is removed or turns into the pill.
+const announced = new WeakMap<Document, string>();
 
-export function removeBanner(doc: Document = document): void {
+function detachBanner(doc: Document): void {
   hosts.get(doc)?.remove();
   hosts.delete(doc);
   // A banner left by an earlier copy of this script (the extension was updated or reloaded).
   for (const el of topLevelById(doc, HOST_ID)) el.remove();
+}
+
+export function removeBanner(doc: Document = document): void {
+  detachBanner(doc);
+  announced.delete(doc);
 }
 
 /** Shared status derivation used by both the in-page banner and the toolbar popup. */
@@ -301,7 +310,7 @@ function truncateReason(text: string, max = 140): string {
 
 /** Renders the neo-brutalist warning card inside a closed shadow root. textContent only. */
 export function showBanner(model: BannerModel, actions: BannerActions, doc: Document = document): void {
-  removeBanner(doc);
+  detachBanner(doc);
   const host = doc.createElement('div');
   host.id = HOST_ID;
   const root = host.attachShadow({ mode: 'closed' });
@@ -313,7 +322,15 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
 
   const card = doc.createElement('div');
   card.className = `card ${model.level}`;
-  card.setAttribute('role', 'alert');
+  const announcement = `${model.level}\n${model.title}`;
+  if (announced.get(doc) === announcement) {
+    // Re-rendered with the same message: a landmark named by the title, not a new alert.
+    card.setAttribute('role', 'region');
+    card.setAttribute('aria-labelledby', 'ped-title');
+  } else {
+    card.setAttribute('role', 'alert');
+    announced.set(doc, announcement);
+  }
 
   const linksLocked = model.linksLocked;
   const attachmentsLocked = Boolean(model.attachmentsLocked);
@@ -355,6 +372,7 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   copy.className = 'copy';
 
   const title = doc.createElement('div');
+  title.id = 'ped-title';
   title.className = 'title';
   title.setAttribute('role', 'heading');
   title.setAttribute('aria-level', '2');
@@ -584,6 +602,9 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
     card.textContent = '';
     card.className = 'card trusted-pill';
     card.setAttribute('role', 'status');
+    card.removeAttribute('aria-labelledby');
+    // A warning shown after this (Undo) is announced again.
+    announced.delete(doc);
     const label = doc.createElement('span');
     label.className = 'pill-text';
     label.textContent =
