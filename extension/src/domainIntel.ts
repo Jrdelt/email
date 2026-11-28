@@ -33,6 +33,16 @@ const RDAP_FALLBACK = 'https://rdap.org/';
 const BOOTSTRAP_KEY = 'rdapBootstrap';
 const BOOTSTRAP_TTL_MS = 7 * 24 * 3600 * 1000;
 const LABEL_RE = /^[a-z0-9-]{1,63}$/;
+// The sender's own DNS decides how many MX records and how long a TXT record it returns: only a bounded part is
+// kept, so attacker-sized answers cannot fill storage.local (and stop later lookups from being cached).
+const MAX_MX = 10;
+const MAX_HOST = 253;
+const MAX_TXT = 1024;
+const MAX_REGISTRAR = 200;
+const MAX_FLAGS = 20;
+const MAX_FIELD = 64;
+const clip = (v: unknown, max: number): string | undefined =>
+  typeof v === 'string' ? (v.length > max ? v.slice(0, max) : v) : undefined;
 
 async function getJson(fetchFn: FetchFn, url: string, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
   const res = await fetchFn(url, {
@@ -140,10 +150,13 @@ export async function lookupRdap(fetchFn: FetchFn, domain: string, kv?: KV, now 
       return { status: 'notfound' };
     }
     if (!body || status < 200 || status >= 300) return { status: 'error' };
-    const ev = (a: string) => (body.events ?? []).find((e: any) => e.eventAction === a)?.eventDate as string | undefined;
+    const ev = (a: string) => clip((body.events ?? []).find((e: any) => e.eventAction === a)?.eventDate, MAX_FIELD);
     const reg = (body.entities ?? []).find((e: any) => (e.roles ?? []).includes('registrar'));
     const fn = reg?.vcardArray?.[1]?.find((v: any[]) => v[0] === 'fn')?.[3];
-    return { status: 'ok', registered: ev('registration'), expires: ev('expiration'), registrar: typeof fn === 'string' ? fn : undefined, flags: body.status };
+    const flags = Array.isArray(body.status)
+      ? body.status.filter((f: unknown): f is string => typeof f === 'string').slice(0, MAX_FLAGS).map((f: string) => clip(f, MAX_FIELD)!)
+      : undefined;
+    return { status: 'ok', registered: ev('registration'), expires: ev('expiration'), registrar: clip(fn, MAX_REGISTRAR), flags };
   } catch { return { status: 'error' }; }
 }
 
@@ -158,16 +171,18 @@ export async function lookupDns(fetchFn: FetchFn, domain: string): Promise<Domai
     if ((mx.status !== 0 && mx.status !== 3) || (root.status !== 0 && root.status !== 3)) {
       return { status: 'error', mx: [] };
     }
-    const spf = txt(root.answers).find((t) => t.toLowerCase().startsWith('v=spf1'));
-    const dm = dmarc.status === 0 ? txt(dmarc.answers).find((t) => t.toLowerCase().startsWith('v=dmarc1')) : undefined;
+    const spf = clip(txt(root.answers).find((t) => t.toLowerCase().startsWith('v=spf1')), MAX_TXT);
+    const dm = dmarc.status === 0 ? clip(txt(dmarc.answers).find((t) => t.toLowerCase().startsWith('v=dmarc1')), MAX_TXT) : undefined;
     return {
       status: 'ok',
       mx: mx.answers
         .filter((a) => a.type === 15 && typeof a.data === 'string')
-        .map((a) => a.data.split(' ').pop()!.replace(/\.$/, '')),
+        .map((a) => a.data.split(' ').pop()!.replace(/\.$/, ''))
+        .filter((h) => h.length <= MAX_HOST)
+        .slice(0, MAX_MX),
       spf,
       dmarc: dm,
-      dmarcPolicy: dm?.match(/\bp=([a-z]+)/i)?.[1]?.toLowerCase(),
+      dmarcPolicy: dm?.match(/\bp=([a-z]{1,20})\b/i)?.[1]?.toLowerCase(),
       nxdomain: mx.status === 3 && root.status === 3,
     };
   } catch { return { status: 'error', mx: [] }; }
@@ -230,7 +245,8 @@ export async function getIntel(kv: KV, domain: string, fetchFn: FetchFn, now = D
     }
   }
   const intel = await lookupDomain(domain, fetchFn, now, kv);
-  if (intel.rdap.status !== 'error' || intel.dns.status !== 'error') await writeCache(kv, now, intel);
+  // A failed cache write (e.g. storage quota) never discards a good result: the warnings still need it.
+  if (intel.rdap.status !== 'error' || intel.dns.status !== 'error') await writeCache(kv, now, intel).catch(() => {});
   return intel;
 }
 

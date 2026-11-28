@@ -195,6 +195,46 @@ describe('getIntel cache', () => {
   });
 });
 
+describe('attacker-sized lookup answers', () => {
+  // The sender's own DNS (and, in principle, an RDAP server) decides how big an answer is.
+  const hugeFetch = (async (url: string) => {
+    const u = new URL(url);
+    if (u.hostname === 'data.iana.org') return json({ services: [] });
+    if (u.hostname === 'rdap.org') {
+      return json({
+        events: [{ eventAction: 'registration', eventDate: '2010-01-01T00:00:00Z' }],
+        entities: [{ roles: ['registrar'], vcardArray: ['vcard', [['fn', {}, 'text', 'R'.repeat(5000)]]] }],
+        status: [...Array.from({ length: 500 }, (_, i) => `flag ${i} ${'f'.repeat(200)}`), { nested: 'x'.repeat(5000) }],
+      });
+    }
+    if (u.searchParams.get('type') === 'MX') {
+      return json({ Status: 0, Answer: Array.from({ length: 3000 }, (_, i) => ({ type: 15, data: `10 mx${i}.${'m'.repeat(40)}.attacker.example.` })) });
+    }
+    const big = `"${'a'.repeat(250)}"`.repeat(232);
+    const name = u.searchParams.get('name')!;
+    return json({ Status: 0, Answer: [{ type: 16, data: name.startsWith('_dmarc.') ? `"v=DMARC1; p=reject; " ${big}` : `"v=spf1 " ${big}` }] });
+  }) as FetchFn;
+
+  it('keeps only a bounded part of MX, SPF, DMARC and RDAP answers', async () => {
+    const i = await lookupDomain('attacker.example', hugeFetch, NOW);
+    expect(i.dns.status).toBe('ok');
+    expect(i.dns.mx.length).toBeLessThanOrEqual(10);
+    expect(i.dns.spf!.length).toBeLessThanOrEqual(1024);
+    expect(i.dns.dmarc!.length).toBeLessThanOrEqual(1024);
+    expect(i.dns.dmarcPolicy).toBe('reject');
+    expect(i.rdap.registrar!.length).toBeLessThanOrEqual(200);
+    expect(i.rdap.flags!.length).toBeLessThanOrEqual(20);
+    expect(i.rdap.flags!.every((f) => typeof f === 'string' && f.length <= 64)).toBe(true);
+    expect(JSON.stringify(i).length).toBeLessThan(8 * 1024);
+  });
+
+  it('a failed cache write (storage quota full) still returns the lookup result', async () => {
+    const kv = { get: async () => ({}), set: async () => { throw new Error('QUOTA_BYTES quota exceeded'); } };
+    const i = await getIntel(kv, 'example.com', fakeFetch({ registered: '2026-11-20T00:00:00Z' }), NOW);
+    expect(intelWarnings(i, NOW).join(' ')).toMatch(/brand new/);
+  });
+});
+
 describe('pruneIntelCache', () => {
   it('deletes expired and malformed entries and keeps fresh ones, without a lookup', async () => {
     const kv = memoryKV();
