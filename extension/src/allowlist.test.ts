@@ -12,7 +12,9 @@ import {
   untrustEmails,
   untrustSender,
 } from './allowlist';
+import { intelWarnings } from './domainIntel';
 import { clearReports, listReports, recordFalsePositive } from './feedback';
+import { analyzeSender } from './sender';
 import { memoryKV } from './storage';
 
 describe('normalizeSender', () => {
@@ -176,6 +178,59 @@ describe('false-positive report redaction', () => {
     for (const leak of ['Jane', 'Doe', 'MRI', 'clínica', 'pаypal']) expect(text).not.toContain(leak);
     expect(text).toContain('is an HTML/SVG web file');
     expect(text).toContain('Claims to be PayPal');
+  });
+});
+
+describe('false-positive report redaction of punycode, shortened and relay domains', () => {
+  const stored = async (reasons: string[]) => {
+    const kv = memoryKV();
+    await recordFalsePositive(kv, { score: 0.4, level: 'suspicious', reasons });
+    return (await listReports(kv))[0]!.reasons;
+  };
+  const NOW = Date.parse('2026-11-22T00:00:00Z');
+
+  it('strips domains under a punycode TLD (.xn--p1ai) from sender and lookup warnings', async () => {
+    const reasons = [
+      ...analyzeSender('Clinic', 'info@clinic.xn--p1ai', []).warnings,
+      ...analyzeSender('PayPal Support', 'help@paypal-billing.xn--p1ai', []).warnings,
+      ...intelWarnings(
+        {
+          domain: 'patient-portal.xn--80ase.xn--p1ai',
+          checkedAt: '2026-11-22T00:00:00Z',
+          rdap: { status: 'ok', registered: '2026-11-19T00:00:00Z' },
+          dns: { status: 'ok', mx: [] },
+        },
+        NOW,
+      ),
+      'A link says paypal.com but actually goes to login.xn--80ak6aa92e.xn--p1ai',
+    ];
+    expect(reasons.join('\n')).toContain('xn--p1ai'); // the warnings do name these domains
+    const text = (await stored(reasons)).join('\n');
+    for (const leak of ['clinic', 'paypal-billing', 'patient-portal', 'xn--']) expect(text).not.toContain(leak);
+    expect(text).toContain("The sender's website ([domain]) uses lookalike characters");
+    expect(text).toContain("The sender's website ([domain]) is brand new (3 days old)");
+    expect(text).toContain('Claims to be PayPal, but was sent from [domain]');
+  });
+
+  it('strips the whole of a long domain shortened with an ellipsis, not just its tail', async () => {
+    const long = `jane-doe-oncology-patient-records-${'x'.repeat(40)}.клиника-${'y'.repeat(50)}.example`;
+    const reasons = analyzeSender('Clinic', `info@${long}`, []).warnings;
+    expect(reasons.join('\n')).toContain('…');
+    const text = (await stored(reasons)).join('\n');
+    for (const leak of ['jane', 'oncology', 'xxxx', 'yyyy', '…']) expect(text).not.toContain(leak);
+    expect(text).toContain("The sender's website ([domain]) uses lookalike characters");
+  });
+
+  it('strips relay names that are not checkable domains, and long sender addresses', async () => {
+    const reasons = [
+      ...analyzeSender('Clinic', 'info@clinic.example', [], { viaDomain: 'relay.jane-doe-clinic.xn--p1ai' }).warnings,
+      ...analyzeSender('Clinic', 'info@clinic.example', [], { viaDomain: 'jane_doe.relay.example' }).warnings,
+      ...analyzeSender('jane.doe@clinic.example', `jane.doe.mrn.${'z'.repeat(120)}@other-clinic.example`, []).warnings,
+    ];
+    const text = (await stored(reasons)).join('\n');
+    for (const leak of ['jane', 'doe', 'mrn', 'zzzz', 'clinic']) expect(text).not.toContain(leak);
+    expect(text).toContain('Sent through a relay server that could not be checked ([domain])');
+    expect(text).toContain('The display name shows [address], but it was really sent from [address]');
   });
 });
 
