@@ -583,6 +583,36 @@ describe('details', () => {
     expect(report).toContain('DMARC: policy reject');
     expect(report).toContain('- sig1');
   });
+
+  // An RLO at the end of a display name reverses everything after it in the row, including the real address the
+  // extension appends: "PayPal ‮(moc.lapyap@ecivres) (security@…)" rendered as "PayPal (service@paypal.com) …".
+  const REORDER = /[‪-‮⁦-⁩]/;
+  it('neutralises bidi controls in the Sent by / From / Domain rows and the IT report', () => {
+    const s = analyzeSender('PayPal ‮(moc.lapyap@ecivres)', 'security@paypa1-alerts.com', []);
+    const sentBy = renderSimpleDetails(document, s, 'unavailable').querySelector('dd')!.textContent!;
+    expect(sentBy).not.toMatch(REORDER);
+    expect(sentBy).toContain('(security@paypa1-alerts.com)');
+    const it = renderITDetails(document, s, 'unavailable');
+    expect(it.querySelector('dd')!.textContent).not.toMatch(REORDER);
+    expect(it.textContent).not.toMatch(REORDER);
+    expect(formatITReport(s, 'unavailable')).not.toMatch(REORDER);
+    expect(formatITReport(s, 'unavailable')).toContain('<security@paypa1-alerts.com>');
+    for (const bad of [
+      analyzeSender('Bob', 'bob@‮moc.lapyap', []),
+      analyzeSender('Bob', 'bob⁧@paypal.com', []),
+    ]) {
+      expect(renderSimpleDetails(document, bad, undefined).textContent).not.toMatch(REORDER);
+      expect(renderITDetails(document, bad, undefined).textContent).not.toMatch(REORDER);
+      expect(formatITReport(bad, undefined)).not.toMatch(REORDER);
+    }
+  });
+
+  it('keeps a long display name from pushing the real address out of the Sent by row', () => {
+    const s = analyzeSender(`PayPal Security ${'x'.repeat(500)}`, 'security@paypa1-alerts.com', []);
+    const sentBy = renderSimpleDetails(document, s, 'unavailable').querySelector('dd')!.textContent!;
+    expect(sentBy.length).toBeLessThan(300);
+    expect(sentBy).toContain('(security@paypa1-alerts.com)');
+  });
 });
 
 describe('gmail adapter', () => {

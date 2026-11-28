@@ -1,6 +1,7 @@
 import { ageDays, type DomainIntel } from '../domainIntel';
 import type { Verdict } from '../features';
 import type { SenderInfo } from '../sender';
+import { ellipsizeMiddle, showable } from '../text';
 
 export type IntelState = DomainIntel | 'loading' | 'unavailable' | 'offline' | undefined;
 
@@ -19,22 +20,30 @@ export function formatAge(days?: number): string {
   return y === 1 ? '1 year old' : `${y} years old`;
 }
 
+/**
+ * Sender text inside the extension's own rows: bidi controls neutralised and shortened. An RLO at the end of a
+ * display name would otherwise reverse the real address appended after it, so "PayPal \u202e(moc.lapyap@ecivres)"
+ * showed as "PayPal (service@paypal.com)" right where the banner sends the user to check who wrote.
+ */
+const shown = (v: string, max = 120): string => showable(ellipsizeMiddle(v, max));
+
 function appendRow(doc: Document, dl: HTMLDListElement, k: string, v: string) {
   const dt = doc.createElement('dt');
   dt.textContent = k;
   const dd = doc.createElement('dd');
-  dd.textContent = v;
+  // Every row can carry text from the email or a lookup (link domains, MX hosts): never let it reorder the row.
+  dd.textContent = showable(v);
   dl.append(dt, dd);
 }
 
 /** Plain-English summary for everyday users. textContent only. */
 export function renderSimpleDetails(doc: Document, s: SenderInfo, intel: IntelState): HTMLElement {
   const dl = doc.createElement('dl');
-  appendRow(doc, dl, 'Sent by', s.name ? `${s.name} (${s.rawAddress})` : s.rawAddress || 'Unknown');
+  appendRow(doc, dl, 'Sent by', s.name ? `${shown(s.name)} (${shown(s.rawAddress)})` : shown(s.rawAddress) || 'Unknown');
 
   let website = 'Unknown';
   if (s.registrable) {
-    website = s.registrable + (s.freemail ? ' (free email account)' : '');
+    website = shown(s.registrable) + (s.freemail ? ' (free email account)' : '');
     if (intel === 'loading') website += ' — checking…';
     else if (intel === 'offline') website += ' — offline (Strict Local Mode)';
     else if (typeof intel === 'object') {
@@ -76,12 +85,12 @@ export function renderSimpleDetails(doc: Document, s: SenderInfo, intel: IntelSt
 function itRows(s: SenderInfo, intel: IntelState, verdict?: Verdict): [string, string][] {
   const rows: [string, string][] = [];
   if (verdict) rows.push(['Verdict', `${verdict.level} (score ${verdict.score.toFixed(2)})`]);
-  rows.push(['From', s.name ? `${s.name} <${s.rawAddress}>` : s.rawAddress || 'unknown']);
-  rows.push(['Address format', s.valid ? `${s.address} (valid format)` : 'invalid format']);
+  rows.push(['From', s.name ? `${shown(s.name)} <${shown(s.rawAddress)}>` : shown(s.rawAddress) || 'unknown']);
+  rows.push(['Address format', s.valid ? `${shown(s.address)} (valid format)` : 'invalid format']);
   if (s.registrable) {
-    rows.push(['Domain', `${s.registrable}${s.domain !== s.registrable ? ` (sent from ${s.domain})` : ''}${s.freemail ? ', free email provider' : ''}`]);
+    rows.push(['Domain', `${shown(s.registrable)}${s.domain !== s.registrable ? ` (sent from ${shown(s.domain)})` : ''}${s.freemail ? ', free email provider' : ''}`]);
   }
-  if (s.viaDomain) rows.push(['Relay (via)', s.viaDomain]);
+  if (s.viaDomain) rows.push(['Relay (via)', shown(s.viaDomain)]);
   if (s.unauthenticated) rows.push(['Authentication', 'unverified by webmail']);
   if (intel === 'loading') rows.push(['Domain lookup', 'checking…']);
   else if (intel === 'offline') rows.push(['Domain lookup', 'disabled (Strict Local Mode — zero network lookups)']);
@@ -135,9 +144,9 @@ function itRows(s: SenderInfo, intel: IntelState, verdict?: Verdict): [string, s
 
 /** Plain-text technical summary for copying into an IT ticket (never contains email body). */
 export function formatITReport(s: SenderInfo, intel: IntelState, verdict?: Verdict, allReasons?: string[]): string {
-  const lines = itRows(s, intel, verdict).map(([k, v]) => `${k}: ${v}`);
+  const lines = itRows(s, intel, verdict).map(([k, v]) => `${k}: ${showable(v)}`);
   if (allReasons?.length) {
-    lines.push('', 'Signals:', ...allReasons.map((r) => `- ${r}`));
+    lines.push('', 'Signals:', ...allReasons.map((r) => `- ${showable(r)}`));
   }
   return lines.join('\n');
 }
@@ -180,7 +189,7 @@ export function renderITDetailsContent(
     ul.className = 'signals';
     for (const r of allReasons) {
       const li = doc.createElement('li');
-      li.textContent = r;
+      li.textContent = showable(r);
       ul.append(li);
     }
     frag.append(ul);
