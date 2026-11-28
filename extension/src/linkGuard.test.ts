@@ -57,10 +57,10 @@ describe('analyzeLinkDestination', () => {
     expect(analyzeLinkDestination('https://xn--pple-43d.com/verify').level).toBe('danger');
     expect(analyzeLinkDestination('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl').level).toBe('danger');
     expect(analyzeLinkDestination('https://storage.googleapis.com./hmdbox/hmd_v2.html').level).toBe('danger');
-    for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso', 'docm', 'mhtml', 'jar']) {
+    for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso', 'docm', 'mhtml', 'jar', 'rdp', 'iqy', 'searchConnector-ms']) {
       const risk = analyzeLinkDestination(`https://cdn.example.com/files/doc.${ext}`);
       expect(risk.level).toBe('danger');
-      expect(risk.reasons.join(' ')).toContain(`.${ext}`);
+      expect(risk.reasons.join(' ')).toContain(`.${ext.toLowerCase()}`);
     }
     const wrapped = analyzeLinkDestination('https://www.google.com/url?q=https%3A%2F%2Fevil.example%2Fpayload.svg');
     expect(wrapped.level).toBe('danger');
@@ -77,6 +77,8 @@ describe('analyzeLinkDestination', () => {
     // Upper case and percent-encoded dots in the path still count; the query string does not.
     expect(analyzeLinkDestination('https://evil.example/files/INVOICE%2EZIP').level).toBe('warning');
     expect(analyzeLinkDestination('https://shop.example.com/search?q=a.zip').level).toBe('safe');
+    // IIS ISAPI web apps are served as /app.dll?...: a .dll path is not treated as a risky download.
+    expect(analyzeLinkDestination('https://portal.example.com/scripts/app.dll?login').level).toBe('safe');
     // A risky type inside a wrapped link still wins over the archive warning.
     expect(analyzeLinkDestination('https://cdn.example.com/files/setup.exe').level).toBe('danger');
   });

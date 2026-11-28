@@ -278,6 +278,14 @@ describe('B4 iCloud relays are stateless and trust only the browser-verified sen
     expect(relayed).not.toHaveProperty('sig');
   });
 
+  it('relays every attachment name the frame collected, so a dangerous file after 50 harmless ones is classified', async () => {
+    const { send, tabsSend } = await boot();
+    const names = [...Array.from({ length: 60 }, (_, i) => `IMG_${i}.jpg`), 'Q3.rdp'];
+    await send({ type: 'icloudBody', active: true, body: 'hi', links: [], attachmentNames: names }, sandbox(9));
+    const [, relayed] = tabsSend.mock.calls[0]! as [number, Record<string, unknown>];
+    expect(relayed.attachmentNames).toEqual(names);
+  });
+
   it('relays icloudBody and icloudPair only from iCloud message frames', async () => {
     const { send, tabsSend } = await boot();
     const nonce = '0f8fad5b-d9cb-469f-a165-70867728950e';

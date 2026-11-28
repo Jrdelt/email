@@ -1,7 +1,7 @@
 import { isLookupDomain } from '../src/domain';
 import { getIntel, type DomainIntel, type FetchFn } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
-import { MAX_ATTACHMENT_NAMES } from '../src/attachments';
+import { MAX_CLASSIFIED_ATTACHMENTS } from '../src/attachments';
 import { MAX_LINKS, capLinkText } from '../src/adapters/extract';
 import { WARN_TTL_MS, isSafeHttpUrl } from '../src/linkGuard';
 import { clearLookupCaches, getSettings } from '../src/settings';
@@ -214,7 +214,7 @@ export default defineBackground(() => {
       const attachmentNames = Array.isArray(m.attachmentNames)
         ? m.attachmentNames
             .filter((n): n is string => typeof n === 'string')
-            .slice(0, MAX_ATTACHMENT_NAMES)
+            .slice(0, MAX_CLASSIFIED_ATTACHMENTS) // the app frame classifies every name the message frame found
             .map((n) => (n.length > 1024 ? n.slice(-1024) : n)) // keep the end: the extension decides the risk
         : [];
       const links = Array.isArray(m.links)
