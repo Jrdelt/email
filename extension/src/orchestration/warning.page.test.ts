@@ -147,3 +147,23 @@ describe('warning.html: which site the link opens', () => {
     expect(text('proceed-btn')).toBe('I understand the risk — open news.example.org');
   });
 });
+
+describe('warning.html: when the destination lookups fail', () => {
+  // Offline, behind a proxy that blocks the lookups, or a provider outage: every lookup answers 'error'. The page
+  // must not say the domain was "checked" (read as a clean result) when nothing could be checked.
+  it('says the details are unavailable when every lookup failed', async () => {
+    await openPage(entry(), { answer: intel(FAILED) });
+    expect(text('dest-meta')).not.toContain('checked');
+    expect(text('dest-meta')).toBe('Domain details unavailable right now.');
+  });
+
+  it('says the same for failed lookups the click guard already made', async () => {
+    await openPage(entry({ intel: intel(FAILED) }));
+    expect(text('dest-meta')).toBe('Domain details unavailable right now.');
+  });
+
+  it('still says "checked" when a lookup succeeded but found nothing to report', async () => {
+    await openPage(entry(), { answer: intel({ ...FAILED, dns: { status: 'ok', mx: [] } }) });
+    expect(text('dest-meta')).toBe('Domain details checked.');
+  });
+});

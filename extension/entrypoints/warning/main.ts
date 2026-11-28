@@ -58,6 +58,13 @@ function renderReasons(list: string[]) {
 }
 
 function describeDestIntel(intel: DomainIntel): string {
+  // No lookup answered (offline, a network that blocks them, a provider outage): say so, never "checked".
+  const answered =
+    intel.rdap.status === 'ok' ||
+    intel.rdap.status === 'notfound' ||
+    intel.dns.status === 'ok' ||
+    intel.reputation.status === 'ok';
+  if (!answered) return 'Domain details unavailable right now.';
   const parts: string[] = [];
   if (intel.rdap.status === 'ok') {
     const age = formatAge(ageDays(intel.rdap.registered));
