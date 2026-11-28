@@ -167,3 +167,14 @@ describe('warning.html: when the destination lookups fail', () => {
     expect(text('dest-meta')).toBe('Domain details checked.');
   });
 });
+
+describe('warning.html: domain age wording', () => {
+  const day = 86_400_000;
+  it('reads "Domain created today" / "Domain 2 days old", not "Registered created today"', async () => {
+    await openPage(entry(), { answer: intel({ rdap: { status: 'ok', registered: new Date(Date.now() - 3600_000).toISOString() } }) });
+    expect(text('dest-meta')).toMatch(/^Domain created today/);
+    await openPage(entry(), { answer: intel({ rdap: { status: 'ok', registered: new Date(Date.now() - 2.5 * day).toISOString() } }) });
+    expect(text('dest-meta')).toMatch(/^Domain 2 days old/);
+    expect(text('dest-meta')).not.toContain('Registered');
+  });
+});

@@ -68,7 +68,7 @@ function describeDestIntel(intel: DomainIntel): string {
   const parts: string[] = [];
   if (intel.rdap.status === 'ok') {
     const age = formatAge(ageDays(intel.rdap.registered));
-    if (age) parts.push(`Registered ${age}`);
+    if (age) parts.push(`Domain ${age}`);
     if (intel.rdap.registrar) parts.push(`Registrar: ${showable(ellipsizeMiddle(intel.rdap.registrar, 80))}`);
   } else if (intel.dns.status === 'ok' && intel.dns.nxdomain) {
     parts.push('Domain does not exist (NXDOMAIN)');
