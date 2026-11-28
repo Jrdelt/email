@@ -495,7 +495,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   overflowCount?: number;
   trustedThisSession: Set<string>;
   dismissed: Set<string>;
-  /** The webmail's sender-verification signals are visible to the adapter (only Gmail today). */
+  /** The webmail's sender-verification signals are visible to the adapter (only English Gmail today). */
   authSignals: boolean;
   isStale: () => boolean;
   onEvaluated?: (items: { email: T; sender: ReturnType<typeof analyzeSender> }[]) => void;
@@ -838,7 +838,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
       intelPending,
       trustedThisSession,
-      authSignals: adapter?.authSignals === true,
+      authSignals: adapter?.authSignals?.(document) === true,
       dismissed,
       isStale: () => my !== token,
       onEvaluated: (items) => {

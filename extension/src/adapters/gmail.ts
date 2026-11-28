@@ -182,9 +182,15 @@ const LIST_FILE_SEL = [
 // Anything the adapter treats as an opened message (and its attachment shelf) is handled by the normal locks.
 const OPENED_EMAIL_SEL = 'div.adn, div.a3s, [role="listitem"], div.hq, div.aQH, [role="dialog"]';
 
+// UI languages whose verification labels the adapter reads (isUnauthenticated, VIA_LABEL_RE are English). In any
+// other language Gmail's localized "couldn't verify" badge is invisible to it, so a forged copy of a trusted address
+// would look verified: report no auth signals there (fail closed). Gmail sets <html lang> to its UI language; a
+// missing lang counts as unreadable.
+const READABLE_LANG_RE = /^en(?:-|$)/i;
+
 export const gmail: WebmailAdapter = {
   name: 'gmail',
-  authSignals: true,
+  authSignals: (doc) => READABLE_LANG_RE.test((doc.documentElement?.getAttribute('lang') ?? '').trim()),
   listAttachmentAt(el: Element): HTMLElement | null {
     const chip = closestEl(el, LIST_FILE_SEL);
     if (!chip || !closestEl(chip, LIST_ROW_SEL) || closestEl(chip, OPENED_EMAIL_SEL)) return null;

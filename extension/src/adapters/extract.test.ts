@@ -135,6 +135,24 @@ describe('gmail via relay', () => {
       </span></h3><div class="a3s">Please wire the payment today.</div></div>`;
     expect(gmail.extract(document)!.viaDomain).toBe('12.relay.evil.example');
   });
+
+  it('reports sender-verification signals only for a Gmail UI language whose labels it reads', async () => {
+    const { gmail } = await import('./gmail');
+    const html = document.documentElement;
+    const prev = html.getAttribute('lang');
+    const signals = (lang: string | null) => {
+      if (lang === null) html.removeAttribute('lang');
+      else html.setAttribute('lang', lang);
+      return gmail.authSignals!(document);
+    };
+    try {
+      expect([signals('en'), signals('en-GB'), signals('EN-us')]).toEqual([true, true, true]);
+      expect([signals('de'), signals('fr-CA'), signals('eng'), signals(''), signals(null)]).toEqual([false, false, false, false, false]);
+    } finally {
+      if (prev === null) html.removeAttribute('lang');
+      else html.setAttribute('lang', prev);
+    }
+  });
 });
 
 describe('padding cannot push the real message out of scanning range', () => {

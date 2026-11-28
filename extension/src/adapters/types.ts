@@ -35,11 +35,12 @@ export interface WebmailAdapter {
    */
   frameDocs?(doc: Document): Document[];
   /**
-   * True when the adapter reads the webmail's own sender-verification signals (unauthenticated badge, 'via'
-   * relay). Without them a forged copy of an allowlisted address cannot be told apart, so "Always trust sender"
-   * keeps such emails' attachments locked (see evaluateAndRender in content.ts).
+   * True when the adapter can read the webmail's own sender-verification signals (unauthenticated badge, 'via'
+   * relay) on this page, e.g. only in UI languages whose labels it knows. Without them a forged copy of an
+   * allowlisted address cannot be told apart, so "Always trust sender" keeps such emails' attachments locked
+   * (see evaluateAndRender in content.ts). Absent means false.
    */
-  authSignals?: boolean;
+  authSignals?(doc: Document): boolean;
   /**
    * The attachment button `el` belongs to when it sits in the inbox/list view, outside any opened email (Gmail shows
    * file buttons on list rows). Such a file opens without the email ever being scanned, so the click is refused.

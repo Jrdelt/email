@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"url":"https://mail.google.com/mail/u/0/#inbox"}
-// C13 counterpart: the same kind of trusted sender on Gmail, whose adapter reads Gmail's sender verification
+// C13 counterpart: the same kind of trusted sender on Gmail in English, whose adapter reads Gmail's sender verification
 // (authSignals: no "couldn't verify" badge, no unexpected "via" relay here). Sender trust then covers the whole email,
 // so its inline download is NOT attachment-locked, unlike on Outlook (content.trusted-outlook-attachment.test.ts).
 import { beforeAll, describe, expect, it } from 'vitest';
