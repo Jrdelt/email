@@ -108,3 +108,23 @@ describe('brand claims as the reader sees them', () => {
     expect(analyzeSender('Service', 'alerts@paypal.xyz', []).warnings.join(' ')).toMatch(/looks like a copy of paypal\.com/);
   });
 });
+
+describe('a relay that cannot be checked', () => {
+  // Gmail's "via" text under an IDN TLD (or any non-hostname text) used to be dropped as if there were no relay,
+  // so a spoofed copy of a trusted address was auto-trusted. It now fails closed.
+  it.each(['mailer.relay-hub.xn--p1ai', 'mailer.relay-hub.рф', 'relay_hub.example', 'mailer.relay-hub.xn--80asehdb.'])(
+    'refuses auto-trust for via %s',
+    (via) => {
+      const s = analyzeSender('Alex Kim', 'alex@corp.example', [], { viaDomain: via });
+      expect(s.authIssue).toBe(true);
+      expect(canTrustByAllowlist(s)).toBe(false);
+      expect(s.warnings.join(' | ')).toMatch(/relay server that could not be checked/);
+    },
+  );
+
+  it('still trusts a sender with no relay or a known email service relay', () => {
+    expect(canTrustByAllowlist(analyzeSender('Alex Kim', 'alex@corp.example', [], { viaDomain: '' }))).toBe(true);
+    expect(canTrustByAllowlist(analyzeSender('Alex Kim', 'alex@corp.example', [], { viaDomain: '  ' }))).toBe(true);
+    expect(canTrustByAllowlist(analyzeSender('Alex Kim', 'alex@corp.example', [], { viaDomain: 'em1.sendgrid.net' }))).toBe(true);
+  });
+});

@@ -19,19 +19,35 @@ import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 const extractEmailText = (raw: string): string => capText(raw, MAX_HEADER_CHARS).match(ADDRESS_TOKEN_RE)?.[0]?.trim() ?? '';
 
 const cleanHost = (raw: string): string =>
-  raw.trim().replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, '').toLowerCase();
+  raw.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase();
+
+// Anything Gmail shows that looks like a host name, including ones isValidDomain rejects (an IDN TLD such as .рф or
+// .xn--p1ai, an underscore): those are kept, so src/sender.ts can refuse auto-trust instead of seeing no relay.
+const HOST_LIKE_RE = /^[\p{L}\p{N}][\p{L}\p{N}_-]*(?:\.[\p{L}\p{N}_-]+)+$/u;
+
+/** Gmail's relay text as an ASCII host (Unicode labels become punycode), or '' when it does not look like a host. */
+function relayHost(raw: string): string {
+  const c = cleanHost(raw);
+  if (!c || c.length > 253 || !HOST_LIKE_RE.test(c)) return '';
+  if (isValidDomain(c) || !/[^\x00-\x7f]/.test(c)) return c;
+  try {
+    return new URL(`http://${c}/`).hostname || c;
+  } catch {
+    return c;
+  }
+}
 
 const DISPLAY_NAME_SEL = 'span.gD:not(.go), [name]';
-const VIA_LABEL_RE = /^via\s+([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)/i;
+const VIA_LABEL_RE = /^via\s+([^\s,;()<>]+)/iu;
 
 function extractViaDomain(scope: Document | HTMLElement, container: HTMLElement): string | undefined {
   for (const anchor of scope.querySelectorAll<HTMLElement>('a.acP, a[href*="support.google.com/mail/answer/1311182"]')) {
     if (container.contains(anchor)) continue;
-    const sib = cleanHost(anchor.parentElement?.nextElementSibling?.textContent ?? '');
-    if (sib && isValidDomain(sib)) return sib;
-    const afterVia = (anchor.parentElement?.textContent ?? '').match(/\bvia\s+([^\s,;()]+)/i)?.[1] ?? '';
-    const candidate = cleanHost(afterVia);
-    if (candidate && isValidDomain(candidate)) return candidate;
+    const sib = relayHost(anchor.parentElement?.nextElementSibling?.textContent ?? '');
+    if (sib) return sib;
+    const afterVia = (anchor.parentElement?.textContent ?? '').match(/\bvia\s+([^\s,;()<>]+)/iu)?.[1] ?? '';
+    const candidate = relayHost(afterVia);
+    if (candidate) return candidate;
   }
   // Only Gmail's own "via <relay>" label counts: never h3.iw as a whole or the display-name chip, whose text
   // the sender controls ("Boss via sendgrid.net" must not hide the real relay).
@@ -39,10 +55,11 @@ function extractViaDomain(scope: Document | HTMLElement, container: HTMLElement)
   for (const el of scope.querySelectorAll<HTMLElement>('span.go')) {
     if (container.contains(el) || el.closest(DISPLAY_NAME_SEL) || el.querySelector(DISPLAY_NAME_SEL)) continue;
     const m = (el.textContent ?? '').trim().match(VIA_LABEL_RE);
-    const candidate = cleanHost(m?.[1] ?? '');
-    if (candidate && isValidDomain(candidate) && !candidates.includes(candidate)) candidates.push(candidate);
+    const candidate = relayHost(m?.[1] ?? '');
+    if (candidate && !candidates.includes(candidate)) candidates.push(candidate);
   }
-  // More than one relay label means one is spoofed: fail closed by reporting a non-ESP relay if there is one.
+  // More than one relay label means one is spoofed: fail closed by reporting a non-ESP relay if there is one (an
+  // unparseable one counts as non-ESP).
   return candidates.find((c) => !KNOWN_ESP_DOMAINS.has(registrableDomain(c))) ?? candidates[0];
 }
 

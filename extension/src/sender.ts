@@ -74,6 +74,13 @@ export function analyzeSender(
     warnings.push('Webmail could not verify that this sender is genuine');
   }
 
+  // Webmail showed a relay that is not a checkable hostname (an IDN TLD such as .xn--p1ai or .рф, an underscore...).
+  // Treating it as "no relay" would let a spoofed copy of a trusted address through: fail closed instead.
+  if (via && !validVia) {
+    info.authIssue = true;
+    warnings.push(`Sent through a relay server that could not be checked (${showable(ellipsizeMiddle(via, 120))})`);
+  }
+
   // A relay only counts as the sender's own organisation when the registrable domains match and are not a bare
   // public suffix (two unrelated domains under com.pl must not look like the same organisation).
   const sameOrgVia = viaReg === registrable && !isMultiPartSuffix(registrable);

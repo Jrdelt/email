@@ -137,6 +137,29 @@ describe('gmail via relay', () => {
     expect(gmail.extract(document)!.viaDomain).toBe('12.relay.evil.example');
   });
 
+  it('keeps a relay under an IDN TLD or with non-hostname characters, so the sender check can fail closed', async () => {
+    const { gmail } = await import('./gmail');
+    const via = (header: string) => {
+      document.body.innerHTML = `<div class="adn"><span class="gD" email="alex@corp.example" name="Alex Kim">Alex Kim</span>
+        ${header}<div class="a3s">Report attached.</div></div>`;
+      return gmail.extract(document)!.viaDomain;
+    };
+    expect(via('<span class="go">via mailer.relay-hub.рф</span>')).toBe('mailer.relay-hub.xn--p1ai');
+    expect(via('<span class="go">via mailer.relay-hub.xn--p1ai</span>')).toBe('mailer.relay-hub.xn--p1ai');
+    expect(via('<span class="go">via relay_hub.example</span>')).toBe('relay_hub.example');
+    expect(via('<span class="go">via em1.sendgrid.net</span><span class="go">via mailer.relay-hub.рф</span>')).toBe(
+      'mailer.relay-hub.xn--p1ai',
+    );
+    expect(
+      via(`<span><a class="acP" href="https://support.google.com/mail/answer/1311182">via</a></span>
+        <span>mailer.relay-hub.xn--p1ai</span>`),
+    ).toBe('mailer.relay-hub.xn--p1ai');
+    expect(via('<span><a class="acP" href="#">via</a> mailer.relay-hub.рф</span>')).toBe('mailer.relay-hub.xn--p1ai');
+    // Not a host at all: still no relay.
+    expect(via('<span class="go">via Google Groups</span>')).toBeUndefined();
+    expect(via('<span class="go">via sendgrid.net</span>')).toBe('sendgrid.net');
+  });
+
   it('reports sender-verification signals only for a Gmail UI language whose labels it reads', async () => {
     const { gmail } = await import('./gmail');
     const html = document.documentElement;
