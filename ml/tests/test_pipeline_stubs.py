@@ -15,12 +15,15 @@ import pytest
 
 from phishml.features import FEATURE_NAMES
 
-pending = pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="pending roadmap task; remove when implemented")
-
-
-@pytest.mark.parametrize(
-    "module", ["phishml", "phishml.features", "phishml.data", "phishml.evaluate", "phishml.train", "phishml.export_model"]
+pending = pytest.mark.xfail(
+    raises=NotImplementedError, strict=True, reason="pending roadmap task; remove the marker when implemented"
 )
+
+
+MODULES = ["phishml", "phishml.features", "phishml.data", "phishml.evaluate", "phishml.train", "phishml.export_model"]
+
+
+@pytest.mark.parametrize("module", MODULES)
 def test_pipeline_modules_import(module):
     importlib.import_module(module)
 
@@ -30,6 +33,7 @@ def _frame(dates, labels, bodies=None):
     return pd.DataFrame(
         {
             "sender": [f"s{i}@example.com" for i in range(n)],
+            "subject": [""] * n,
             "body": bodies if bodies is not None else [f"message {i}" for i in range(n)],
             "links": [[] for _ in range(n)],
             "label": labels,

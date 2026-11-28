@@ -1,0 +1,181 @@
+[
+  {
+    "name": "urgent_subject_and_duplicate_safelinks",
+    "sender": "alerts@bank.example.com",
+    "subject": "Action required: confirm your password expires within 24 hours",
+    "body": "Your statements are ready. Sign in at www.bank.example.com to view them.",
+    "links": [
+      {
+        "text": "www.bank.example.com",
+        "href": "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.bank.example.com%2Fstatements&data=05%7C02&reserved=0"
+      },
+      {
+        "text": "www.bank.example.com",
+        "href": "https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.bank.example.com%2Fstatements&data=05%7C02&reserved=0"
+      }
+    ],
+    "expected_input": {
+      "body": "Action required: confirm your password expires within 24 hours\nYour statements are ready. Sign in at www.bank.example.com to view them.",
+      "links": [
+        {
+          "text": "www.bank.example.com",
+          "href": "https://www.bank.example.com/statements"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 5,
+      "body_len": 135
+    }
+  },
+  {
+    "name": "google_redirect_uses_last_q",
+    "sender": "news@shop.example",
+    "subject": "",
+    "body": "See the offer.",
+    "links": [
+      {
+        "text": "https://shop.example/offer",
+        "href": "https://www.google.com/url?q=https://shop.example/offer&q=https://evil.example/login"
+      }
+    ],
+    "expected_input": {
+      "body": "See the offer.",
+      "links": [
+        {
+          "text": "https://shop.example/offer",
+          "href": "https://evil.example/login"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 14
+    }
+  },
+  {
+    "name": "proofpoint_v2_wrapped_brand_link",
+    "sender": "it@corp.example",
+    "subject": "Mailbox notice",
+    "body": "Review the notice.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://urldefense.proofpoint.com/v2/url?u=https-3A__www.paypal.com_signin&d=DwMF&c=x"
+      }
+    ],
+    "expected_input": {
+      "body": "Mailbox notice\nReview the notice.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/signin"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 33
+    }
+  },
+  {
+    "name": "long_subject_and_invisible_filler",
+    "sender": "billing@vendor.example",
+    "subject": "Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue ",
+    "body": "Hello\u200b\u200b   there,\n\n\tplease\u00a0\u00a0pay\u2060 today.\u00ad   Thanks  ",
+    "links": [],
+    "expected_input": {
+      "body": "Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice overdue Invoice over\nHello there, please pay today. Thanks ",
+      "links": []
+    },
+    "expected_features": {
+      "n_links": 0,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 339
+    }
+  },
+  {
+    "name": "duplicate_href_text_collapsed_and_lookalike_wrapper_host",
+    "sender": "team@files.example",
+    "subject": "Shared file",
+    "body": "Open the shared file.",
+    "links": [
+      {
+        "text": "Click here",
+        "href": "https://files.example/doc"
+      },
+      {
+        "text": "  Click \n  here ",
+        "href": "https://files.example/doc"
+      },
+      {
+        "text": "Download",
+        "href": "https://files.example/doc"
+      },
+      {
+        "text": "View",
+        "href": "https://safelinks.protection.outlook.com.evil.example/?url=https%3A%2F%2Ffiles.example%2F"
+      }
+    ],
+    "expected_input": {
+      "body": "Shared file\nOpen the shared file.",
+      "links": [
+        {
+          "text": "Click here",
+          "href": "https://files.example/doc"
+        },
+        {
+          "text": "Download",
+          "href": "https://files.example/doc"
+        },
+        {
+          "text": "View",
+          "href": "https://safelinks.protection.outlook.com.evil.example/?url=https%3A%2F%2Ffiles.example%2F"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 3,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 33
+    }
+  }
+]
