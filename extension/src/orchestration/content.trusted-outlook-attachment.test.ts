@@ -47,6 +47,10 @@ describe('content.ts: trusted sender on Outlook, attachment card', () => {
       attachments: { count: 1, level: 'locked', names: ['minutes.pdf'] },
       trusted: false,
     });
+    // The note says why the trusted sender's attachment is locked, instead of "untrusted emails ... trust this sender".
+    expect((lastVerdict(sent)!.attachments as unknown as { reasons: string[] }).reasons).toEqual([
+      "You trust this sender, but this webmail can't show the extension that the email really came from them, so attachments stay blocked until you choose \u201cI trust this email\u201d.",
+    ]);
   });
 
   it('does not pause the links', () => {

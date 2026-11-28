@@ -41,7 +41,7 @@ import {
   setAttachmentBlockedHandler,
   unlockAttachments,
 } from '../src/ui/attachmentLock';
-import { decideBanner, removeBanner, showBanner } from '../src/ui/banner';
+import { decideBanner, detachBanner, removeBanner, showBanner } from '../src/ui/banner';
 import type { IntelState } from '../src/ui/details';
 import { isLocked, lockLinks, setLinkBlockedHandler, unlockLinks } from '../src/ui/linkLock';
 import { showListAttachmentToast, showPausedAttachmentToast, showPausedLinkToast } from '../src/ui/linkToast';
@@ -135,7 +135,8 @@ interface ScannableMsg {
 }
 
 const SAFE_VERDICT: Verdict = { score: 0, level: 'safe', reasons: [] };
-const TRUSTED_SENDER_NOTE = "You trust this sender, but this webmail can't show the extension that the email really came from them.";
+const TRUSTED_SENDER_NOTE =
+  "You trust this sender, but this webmail can't show the extension that the email really came from them, so attachments stay blocked until you choose \u201cI trust this email\u201d.";
 
 /**
  * Verdict for open messages beyond MAX_THREAD_MESSAGES. They are not scored, so fail closed:
@@ -769,6 +770,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   dismissed: Set<string>;
   /** The webmail's sender-verification signals are visible to the adapter (only English Gmail today). */
   authSignals: boolean;
+  /** Why they are not, for a trusted sender's locked attachments (the adapter's note; default TRUSTED_SENDER_NOTE). */
+  authSignalsNote?: string;
   isStale: () => boolean;
   onEvaluated?: (items: { email: T; sender: ReturnType<typeof analyzeSender> }[]) => void;
   /** Per message: lock its links (`linksLocked`), and its attachments when untrusted and it has any. */
@@ -808,9 +811,14 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       trusted || base.skipped || attachmentsOnly ? SAFE_VERDICT : untrustedVerdict(base.overflow, base.rawSender, base.email);
     const sender: SenderInfo = attachmentsOnly ? { ...base.rawSender, warnings: [], allowlisted: true } : base.rawSender;
     const analysis = trusted ? undefined : analyzeAttachments(base.attNames, base.attCount);
-    // Appended, so a real attachment finding (a disguised or risky file) stays the first reason shown.
+    // The note replaces the generic "untrusted emails ... trust this email or sender" line (the sender is trusted, and
+    // that line was the only one the card showed); after a real attachment finding (a disguised or risky file) it is
+    // appended, so that finding stays the first reason shown.
+    const note = opts.authSignalsNote ?? TRUSTED_SENDER_NOTE;
     const attAnalysis: AttachmentAnalysis | undefined =
-      analysis && attachmentsOnly ? { ...analysis, reasons: [...analysis.reasons, TRUSTED_SENDER_NOTE] } : analysis;
+      analysis && attachmentsOnly
+        ? { ...analysis, reasons: analysis.level === 'locked' ? [note] : [...analysis.reasons, note] }
+        : analysis;
     return { attachmentsOnly, trusted, verdict, sender, attAnalysis };
   };
 
@@ -966,6 +974,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
         ...primaryBanner,
         linksLocked: anyLinksLocked,
         ...(anyAttachmentsLocked ? { attachmentsLocked: true } : {}),
+        announceKey: threadHashKey,
       },
       {
         onUnlock: async () => {
@@ -1129,7 +1138,8 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     activeAttachmentEls = nextAttachmentEls;
     lastKey = threadKey;
     const my = ++token;
-    removeBanner();
+    // Detach only: a rescan of the same email must not announce its warning again (announceKey tells emails apart).
+    detachBanner(document);
 
     await evaluateAndRender({
       kv,
@@ -1139,6 +1149,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       trustedThisSession,
       ownWrites,
       authSignals: adapter?.authSignals?.(document) === true,
+      authSignalsNote: adapter?.authSignalsNote?.(document),
       dismissed,
       isStale: () => my !== token,
       onEvaluated: (items) => {
@@ -1595,7 +1606,8 @@ function runICloudApp(kv: typeof browser.storage.local) {
     activeAttachmentEls = nextAttEls;
     lastKey = fullKey;
     const my = ++token;
-    removeBanner();
+    // Detach only: a rescan of the same email must not announce its warning again (announceKey tells emails apart).
+    detachBanner(document);
 
     await evaluateAndRender({
       kv,

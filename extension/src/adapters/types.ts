@@ -47,6 +47,12 @@ export interface WebmailAdapter {
    */
   authSignals?(doc: Document): boolean;
   /**
+   * Why `authSignals` is false on this page when the webmail does show sender verification but the adapter cannot
+   * read it (Gmail in a UI language other than English), as the note on a trusted sender's locked attachments.
+   * Absent or undefined: the generic note (this webmail does not show it).
+   */
+  authSignalsNote?(doc: Document): string | undefined;
+  /**
    * The attachment button `el` belongs to when it sits in the inbox/list view, outside any opened email (Gmail shows
    * file buttons on list rows). Such a file opens without the email ever being scanned, so the click is refused.
    */

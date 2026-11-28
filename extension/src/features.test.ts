@@ -275,6 +275,24 @@ describe("the sender's own domain shown on an email-service click-tracking link"
       'https://click.pstmrk.it/3s/www.acme.com%2F/abc/def',
       'https://mandrillapp.com/track/click/30001234/www.acme.com?p=e',
       'https://r20.rs6.net/tn.jsp?f=001abc&c=xyz',
+      // Campaign Monitor, Mailjet, SFMC, ActiveCampaign, Kit, Klaviyo, MailerLite, Brevo.
+      'https://acme.createsend1.com/t/r-l-abc-def/',
+      'https://acme.cmail19.com/t/r-l-abc-def/',
+      'https://acme.cmail20.com/t/r-l-abc-def/',
+      'https://x1a2b.mjt.lu/lnk/AVQAAA/abc',
+      'https://click.exct.net/?qs=abc123',
+      'https://acme.acemlna.com/lt.php?x=abc',
+      'https://acme.acemlnb.com/lt.php?x=abc',
+      'https://acme.acemlnc.com/lt.php?x=abc',
+      'https://acme.acemlnd.com/lt.php?x=abc',
+      'https://click.convertkit-mail.com/abc/def',
+      'https://click.convertkit-mail2.com/abc/def',
+      'https://trk.klclick1.com/ls/click?upn=abc',
+      'https://trk.klclick2.com/ls/click?upn=abc',
+      'https://trk.klclick3.com/ls/click?upn=abc',
+      'https://click.mlsend.com/link/c/abc',
+      'https://acme.r.sendibt2.com/tr/cl/abc',
+      'https://acme.r.sendibt3.com/tr/cl/abc',
     ]) {
       expect(scoreEmail('news@acme.com', 'Our news', [{ text: 'www.acme.com', href }]).reasons, href).toEqual([]);
     }

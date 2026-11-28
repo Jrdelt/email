@@ -40,9 +40,11 @@ describe('content.ts: trusted sender on a non-English Gmail', () => {
       attachments: { count: 1, level: 'locked', names: ['Rechnung_0412.pdf'] },
       trusted: false,
     });
-    expect((v.attachments as unknown as { reasons: string[] }).reasons.at(-1)).toMatch(
-      /can't show the extension that the email really came from them/,
-    );
+    // One reason, which says why (not the generic "untrusted emails ... trust this email or sender": the sender is
+    // trusted, and "Always trust sender" is greyed out) and what helps.
+    expect((v.attachments as unknown as { reasons: string[] }).reasons).toEqual([
+      "You trust this sender, but Gmail's sender check can only be read when Gmail's display language is English, so attachments stay blocked until you choose \u201cI trust this email\u201d (or switch Gmail to English).",
+    ]);
   });
 
   it('keeps the inline download locked: href stashed, click and Enter cancelled', () => {

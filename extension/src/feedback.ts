@@ -35,6 +35,11 @@ const TEMPLATES: [RegExp, string][] = [
   [/^(Sent through a (?:relay server that could not be checked|suspicious relay server) )\(.*\)$/s, '$1([domain])'],
   [/^(Claims to be .*?, but was sent from ).*$/s, '$1[domain]'],
   [/^(The display name shows ).*(, but it was really sent from ).*$/s, '$1[address]$2[address]'],
+  // Link reasons (src/features.ts, src/linkGuard.ts) name a URL host, which may hold '_', '~', '!' or a label longer
+  // than any domain pattern: replace the whole value. A host has no space, so the greedy '.*' stops at the wording.
+  [/^(A link says ).*( but actually goes to ).*$/s, '$1[domain]$2[domain]'],
+  [/^(A link uses a URL shortener |This link uses a URL shortener )\(.*\)(?= that hides )/s, '$1([domain])'],
+  [/^((?:A|This) link uses a tracking\/IP-logger service )\(.*\)(?= that (?:hides|captures) )/s, '$1([domain])'],
 ];
 
 /**

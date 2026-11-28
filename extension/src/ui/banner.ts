@@ -18,6 +18,8 @@ export interface BannerModel {
   verdict?: Verdict;
   sender?: SenderInfo;
   intel?: IntelState;
+  /** Which email(s) the banner is for: a re-render for the same key, level and title is not announced again. */
+  announceKey?: string;
 }
 
 export interface BannerActions {
@@ -188,12 +190,13 @@ const BANNER_CSS = `
 // id="ped-banner-host" and comes first in document order, so each re-render would delete one of its elements
 // instead of the previous banner, and banners would pile up.
 const hosts = new WeakMap<Document, HTMLElement>();
-// What the banner shown in each document announced (level and title). A re-render that says the same thing is not
-// announced again: every insertion of a role=alert card is read out in full, and a flagged email renders at least
+// What the banner shown in each document announced (email, level and title). A re-render that says the same thing
+// is not announced again: every insertion of a role=alert card is read out in full, and a flagged email renders at least
 // twice (sender lookup loading, then its result). Forgotten once the banner is removed or turns into the pill.
 const announced = new WeakMap<Document, string>();
 
-function detachBanner(doc: Document): void {
+/** Remove the banner but remember what it announced (a rescan that shows the same email's warning again). */
+export function detachBanner(doc: Document): void {
   hosts.get(doc)?.remove();
   hosts.delete(doc);
   // A banner left by an earlier copy of this script (the extension was updated or reloaded).
@@ -330,7 +333,7 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
 
   const card = doc.createElement('div');
   card.className = `card ${model.level}`;
-  const announcement = `${model.level}\n${model.title}`;
+  const announcement = `${model.announceKey ?? ''}\n${model.level}\n${model.title}`;
   if (announced.get(doc) === announcement) {
     // Re-rendered with the same message: a landmark named by the title, not a new alert.
     card.setAttribute('role', 'region');

@@ -21,7 +21,7 @@ export const BRANDS: Brand[] = [
   b('Amazon', [
     'amazon.com', 'amazon.co.uk', 'amazon.ca', 'amazon.de', 'amazon.com.au', 'amazon.fr', 'amazon.it', 'amazon.es',
     'amazon.nl', 'amazon.se', 'amazon.pl', 'amazon.com.be', 'amazon.co.jp', 'amazon.in', 'amazon.com.mx',
-    'amazon.com.br', 'amazon.com.tr', 'amazon.sa', 'amazon.ae', 'amazon.eg', 'amazon.sg', 'amazon.cn',
+    'amazon.com.br', 'amazon.com.tr', 'amazon.sa', 'amazon.ae', 'amazon.eg', 'amazon.sg', 'amazon.cn', 'primevideo.com',
   ]),
   b('Netflix', ['netflix.com']),
   b('Chase', ['chase.com', 'jpmorgan.com']),
@@ -96,16 +96,32 @@ export const GENERIC_BRAND_LABELS: ReadonlySet<string> = new Set(['me', 'live', 
 /**
  * Words that, right after a brand, name the brand's own organisation or product rather than a person's surname:
  * "Amazon.com", "PayPal Inc.", "Apple ID", "DHL Express", "Microsoft 365" (but not "Chase Smith"). Only matched
- * directly after the brand, so "Chase Smith (Acme Inc)" stays a person.
+ * directly after the brand, so "Chase Smith (Acme Inc)" stays a person. Legal and domain suffixes count for every
+ * brand; product words only for the brand that has them, since many brands are ordinary words and other real
+ * organisations share them ("Apple Bank" at applebank.com, "Chase Pro Tools", "Norton Pro").
  */
-const ORG_WORD_LIST = [
-  'com', 'net', 'org', 'gov', 'inc', 'llc', 'ltd', 'corp', 'id', 'express', 'bank', 'online', 'prime', 'pro', 'pay',
-  '365', 'workspace', 'outlook', 'office', 'teams', 'onedrive', 'icloud', 'gmail', 'wallet',
-];
-const ORG_SUFFIX = `\\s+(?:${ORG_WORD_LIST.join('|')})\\b`;
+const ORG_WORD_LIST = ['com', 'net', 'org', 'gov', 'inc', 'llc', 'ltd', 'corp'];
+const BRAND_PRODUCT_WORDS: Readonly<Record<string, readonly string[]>> = {
+  Apple: ['id', 'pay', 'wallet', 'icloud'],
+  Microsoft: ['365', 'outlook', 'office', 'teams', 'onedrive', 'online'],
+  Outlook: ['online'],
+  Google: ['workspace', 'pay', 'gmail', 'wallet'],
+  Amazon: ['prime', 'pay'],
+  Chase: ['bank', 'online'],
+  'Bank of America': ['online'],
+  'Wells Fargo': ['bank', 'online'],
+  DHL: ['express'],
+  FedEx: ['express'],
+  Facebook: ['pay'],
+  Coinbase: ['wallet', 'pro'],
+  Zelle: ['pay'],
+  Adobe: ['express', 'id'],
+};
 
-/** Per brand (same order as BRANDS): the brand followed by an organisation word. */
-export const BRAND_ORG_PATTERNS: readonly RegExp[] = BRANDS.map((br) => new RegExp(br.pattern.source + ORG_SUFFIX, 'i'));
+/** Per brand (same order as BRANDS): the brand followed by an organisation word or one of its own product words. */
+export const BRAND_ORG_PATTERNS: readonly RegExp[] = BRANDS.map(
+  (br) => new RegExp(`${br.pattern.source}\\s+(?:${[...ORG_WORD_LIST, ...(BRAND_PRODUCT_WORDS[br.name] ?? [])].join('|')})\\b`, 'i'),
+);
 
 export const FREEMAIL = new Set([
   'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'aol.com',

@@ -137,6 +137,7 @@ describe("brand claims in the brands' own sender names", () => {
     ['PayPal Inc.', 'PayPal'], ['paypal.com', 'PayPal'], ['www.paypal.com', 'PayPal'], ['IRS.gov', 'IRS'],
     ['Amazon Prime', 'Amazon'], ['Microsoft 365', 'Microsoft'], ['Chase Bank', 'Chase'], ['Google Workspace', 'Google'],
     ['amazon.co.uk', 'Amazon'], ['bankofamerica.com', 'Bank of America'], ['Apple Pay', 'Apple'],
+    ['Wells Fargo Bank', 'Wells Fargo'], ['FedEx Express', 'FedEx'], ['Adobe Express', 'Adobe'], ['Coinbase Wallet', 'Coinbase'],
   ])('%s from a stranger claims %s', (name, brand) => {
     expect(claims(name)).toContain(`Claims to be ${brand}, but was sent from mailer-evil.xyz`);
   });
@@ -146,6 +147,11 @@ describe("brand claims in the brands' own sender names", () => {
     ['Chase Smith', 'chase.smith@gmail.com'], ['Chase Norton', 'chase.norton@gmail.com'], ['chasesmith', 'c@gmail.com'],
     ['Chase Smith (Acme Inc)', 'chase@acme.com'], ['Adobe Smith', 'a@x.com'], ['Olga Express Logistics', 'olga@logistics.example'],
     ['acme.com', 'news@acme.com'], ['www.example.org', 'hi@example.org'],
+    // Real organisations whose names start with a word brand: product words count for that brand only.
+    ['Apple Bank', 'alerts@applebank.com'], ['Apple Bank', 'statements@mailer-evil.xyz'], ['Chase Pro Tools', 'a@chaseprotools.example'],
+    ['Apple Pro Training', 'hi@training.example'], ['Amazon Pro Sellers', 'x@sellers.example'], ['Norton Pro', 'n@norton-pro.example'],
+    ['Outlook Bank', 'x@outlookbank.example'], ['Apple Express', 'x@appleexpress.example'],
+    ['Amazon Prime Video', 'no-reply@primevideo.com'],
   ])('%s <%s> is not a claim', (name, addr) => {
     expect(claims(name, addr)).not.toMatch(/Claims to be/);
   });

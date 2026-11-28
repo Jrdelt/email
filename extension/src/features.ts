@@ -39,9 +39,19 @@ export const SHORTENER_HOSTS = new Set([
 // Email services' click-tracking domains (registrable): with link tracking on, every link in a newsletter or
 // verification email points here, whatever its text shows. scoreEmail only (not a feature, so no parity entry).
 // Never generic redirectors or shorteners.
+// Dedicated tracking registrables only: an ESP's company domain (iterable.com, exacttarget.com) also hosts landing
+// pages anyone with an account can publish, so it is never listed.
 const ESP_CLICK_TRACKERS = new Set([
   'sendgrid.net', 'list-manage.com', 'mailgun.org', 'mandrillapp.com', 'hubspotlinks.com', 'hubspotemail.net',
   'mcsv.net', 'sparkpostmail.com', 'customeriomail.com', 'klclick.com', 'awstrack.me', 'pstmrk.it', 'rs6.net',
+  'createsend1.com', 'cmail19.com', 'cmail20.com', // Campaign Monitor
+  'mjt.lu', // Mailjet
+  'exct.net', // Salesforce Marketing Cloud
+  'acemlna.com', 'acemlnb.com', 'acemlnc.com', 'acemlnd.com', // ActiveCampaign
+  'convertkit-mail.com', 'convertkit-mail2.com', // Kit (ConvertKit)
+  'klclick1.com', 'klclick2.com', 'klclick3.com', // Klaviyo
+  'mlsend.com', // MailerLite
+  'sendibt2.com', 'sendibt3.com', // Brevo
 ]);
 
 const CLOUD_STORAGE_HOSTS = new Set([

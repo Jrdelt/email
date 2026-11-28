@@ -13,6 +13,7 @@ import {
   untrustSender,
 } from './allowlist';
 import { intelWarnings } from './domainIntel';
+import { scoreEmail } from './features';
 import { clearReports, listReports, recordFalsePositive } from './feedback';
 import { analyzeSender } from './sender';
 import { memoryKV } from './storage';
@@ -219,6 +220,22 @@ describe('false-positive report redaction of punycode, shortened and relay domai
     const text = (await stored(reasons)).join('\n');
     for (const leak of ['jane', 'oncology', 'xxxx', 'yyyy', '…']) expect(text).not.toContain(leak);
     expect(text).toContain("The sender's website ([domain]) uses lookalike characters");
+  });
+
+  it('strips the whole host from link reasons, with underscores, punctuation or labels longer than a domain', async () => {
+    const long = `jane-doe-dob-1980-04-12-mrn-55512-oncology-results-${'x'.repeat(100)}`;
+    const reasons = [
+      ...scoreEmail('news@shop.example', 'Hello', [{ text: 'Track it', href: 'https://patient_jane_doe.bit.ly/abc' }]).reasons,
+      ...scoreEmail('news@shop.example', 'Hello', [{ text: 'Track it', href: 'https://jane~doe!mrn.bit.ly/' }]).reasons,
+      ...scoreEmail('news@shop.example', 'Hello', [{ text: 'www.paypal.com', href: `https://${long}.evil.example/` }]).reasons,
+      ...scoreEmail('news@shop.example', 'Hello', [{ text: 'Your photo', href: 'https://acct_1_jane.grabify.link/x' }]).reasons,
+    ];
+    expect(reasons.join('\n')).toContain('jane'); // the reasons do name these hosts
+    const text = (await stored(reasons)).join('\n');
+    for (const leak of ['jane', 'doe', 'mrn', 'xxxx', 'oncology']) expect(text).not.toContain(leak);
+    expect(text).toContain('A link uses a URL shortener ([domain]) that hides its real destination');
+    expect(text).toContain('A link says [domain] but actually goes to [domain]');
+    expect(text).toContain('A link uses a tracking/IP-logger service ([domain]) that hides where it goes');
   });
 
   it('strips relay names that are not checkable domains, and long sender addresses', async () => {

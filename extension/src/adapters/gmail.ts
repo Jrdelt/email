@@ -218,6 +218,10 @@ const READABLE_LANG_RE = /^en(?:-|$)/i;
 export const gmail: WebmailAdapter = {
   name: 'gmail',
   authSignals: (doc) => READABLE_LANG_RE.test((doc.documentElement?.getAttribute('lang') ?? '').trim()),
+  authSignalsNote: (doc) =>
+    gmail.authSignals!(doc)
+      ? undefined
+      : "You trust this sender, but Gmail's sender check can only be read when Gmail's display language is English, so attachments stay blocked until you choose \u201cI trust this email\u201d (or switch Gmail to English).",
   listAttachmentAt(el: Element): HTMLElement | null {
     const chip = closestEl(el, LIST_FILE_SEL);
     if (!chip || !closestEl(chip, LIST_ROW_SEL) || closestEl(chip, OPENED_EMAIL_SEL)) return null;
