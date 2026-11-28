@@ -420,7 +420,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
       // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
       if (href) out.push({ text: capLinkText(textOf(node)), href: unwrapCached(href) });
     } else if (tag === 'form') {
-      const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? '';
+      const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? getAttr(node, 'data-ped-att-action') ?? '';
       const href = resolveAgainstBase(raw, base);
       if (href) out.push({ text: '', href });
     } else if (hasAttr(node, 'formaction') || hasAttr(node, 'data-ped-formaction') || hasAttr(node, 'data-ped-att-formaction')) {
@@ -503,9 +503,16 @@ function mayBeDownloadScheme(el: Element): boolean {
   return false;
 }
 
+// Form submissions: a <form>'s action, or a submit control's formaction, live or stashed by a lock.
+const FORM_TARGET_SEL =
+  'form, [formaction], [data-ped-action], [data-ped-att-action], [data-ped-formaction], [data-ped-att-formaction]';
+const FORM_TARGET_ATTRS = ['action', 'data-ped-action', 'data-ped-att-action'] as const;
+const CONTROL_TARGET_ATTRS = ['formaction', 'data-ped-formaction', 'data-ped-att-formaction'] as const;
+
 /**
  * Extract inline download/data:/blob: links inside an email body container: `<a>` and `<area>`, SVG `<a>`
- * with `xlink:href`, and stashed (locked) attributes. The scheme is read from the parsed URL, so case,
+ * with `xlink:href`, forms and submit controls that submit to such a URL (a data: response the browser cannot
+ * render is saved as a file), and stashed (locked) attributes. The scheme is read from the parsed URL, so case,
  * leading spaces and embedded tabs/newlines (` data:`, `da&#10;ta:`) are normalised the way the browser does.
  * If there are more than MAX_ATTACHMENTS, the container itself is returned as the last entry so the whole
  * body is attachment-locked rather than leaving the extra downloads live.
@@ -541,6 +548,19 @@ export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
         textOf(el) ||
         '',
     );
+    if (!add(el, name)) return out;
+  }
+  // A form (its action) or a submit control (its formaction) aimed at a data:/blob: URL downloads on submit, with
+  // any method. Any live or stashed value counts (over-matching only locks more). The name comes from labels only:
+  // the browser picks the saved file's name, and the control's text is not one.
+  for (const el of container.querySelectorAll<HTMLElement>(FORM_TARGET_SEL)) {
+    const attrs = tagOf(el) === 'form' ? FORM_TARGET_ATTRS : CONTROL_TARGET_ATTRS;
+    const isDownload = attrs.some((attr) => {
+      const v = getAttr(el, attr);
+      return v !== null && DOWNLOAD_SCHEME_RE.test(v) && isDownloadUrl(resolveAgainstBase(v, base));
+    });
+    if (!isDownload) continue;
+    const name = cleanAttachmentName(getAttr(el, 'aria-label') || getAttr(el, 'title') || '');
     if (!add(el, name)) return out;
   }
   // SVG SMIL can point a link at a data:/blob: download with no such href in the markup (and keeps doing so after

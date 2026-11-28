@@ -50,6 +50,31 @@ describe('inlineAttachmentsIn', () => {
 });
 
 
+describe('form submissions to data:/blob: URLs are inline downloads', () => {
+  const html = `<form id="f" action="data:application/zip;base64,TVqQ" method="post"><button id="fb">Get</button></form>
+    <form id="g"><button id="b" formaction=" BLOB:https://x.example/1">Get</button><input type="image" id="i" formaction="da&#10;ta:x"></form>
+    <form id="ok" action="https://x.example/data:y"><button formaction="/blob:z">Search</button></form>`;
+
+  it('finds the form for a data: action and the control for a data:/blob: formaction, not ordinary forms', () => {
+    expect(inlineAttachmentsIn(body(html)).map((a) => a.element.id)).toEqual(['f', 'b', 'i']);
+  });
+
+  it('keeps finding them, and scores the same links, once the attachment lock has stashed the targets', async () => {
+    const { lockAttachments, unlockAttachments } = await import('../ui/attachmentLock');
+    const m = body(html);
+    const before = scanLinks(m).links;
+    const found = inlineAttachmentsIn(m).map((a) => a.element);
+    lockAttachments(found);
+    expect(document.getElementById('f')!.hasAttribute('action')).toBe(false);
+    expect(document.getElementById('b')!.hasAttribute('formaction')).toBe(false);
+    expect(inlineAttachmentsIn(m).map((a) => a.element)).toEqual(found);
+    expect(scanLinks(m).links).toEqual(before);
+    unlockAttachments(found);
+    expect(document.getElementById('f')!.getAttribute('action')).toBe('data:application/zip;base64,TVqQ');
+    expect(document.getElementById('b')!.getAttribute('formaction')).toBe(' BLOB:https://x.example/1');
+  });
+});
+
 describe('decoy body markers inside the email cannot replace the real body', () => {
   const PHISH = '<a id="evil" href="http://192.168.4.20/login">https://www.paypal.com/signin</a>';
   const cases = [
