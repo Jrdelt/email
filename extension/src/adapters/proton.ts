@@ -105,7 +105,11 @@ function findSender(
     perMessage || !conversationPairingUncertain(scope, hostEl, bodies, ADDRESS_SEL, skip) ? hit : { ...hit, uncertain: true as const };
 
   if (fromBlock) {
-    const direct = extractSenderFromElement(fromBlock, fallbackName);
+    // The From block's own text is the sender's. A whole header's text also holds the recipients, and its last
+    // address (which parseSenderHeader takes) is a recipient's: read only that header's attributes here and let the
+    // loop below, which skips the recipients, find the address.
+    const isFromNode = fromBlock.matches(FROM_BLOCK_SELECTORS[0]!);
+    const direct = extractSenderFromElement(fromBlock, fallbackName, isFromNode ? {} : { text: false });
     if (direct) return fromBlockHit(direct);
   }
 
