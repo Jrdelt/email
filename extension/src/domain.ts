@@ -39,9 +39,10 @@ export const isValidDomain = (d: string): boolean => d.length <= 253 && DOMAIN_R
 
 // Private-use and special-use TLDs never resolve publicly, so looking them up can only leak intranet names
 // (e.g. an EHR host on hospital.lan) to DNS/RDAP providers. RFC 2606 documentation names (.example, .test) are
-// harmless and stay checkable.
+// harmless and stay checkable. .mail, .corp and .home are permanently undelegated by ICANN (name-collision risk)
+// and are common internal namespaces (on-prem Exchange: ehr.hospital.mail).
 const PRIVATE_TLDS = new Set([
-  'local', 'localhost', 'localdomain', 'lan', 'home', 'corp', 'internal', 'intranet', 'private', 'arpa',
+  'local', 'localhost', 'localdomain', 'lan', 'home', 'corp', 'mail', 'internal', 'intranet', 'private', 'arpa',
   'onion', 'alt', 'invalid',
 ]);
 

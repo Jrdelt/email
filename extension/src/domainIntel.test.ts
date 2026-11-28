@@ -153,6 +153,16 @@ describe('lookupDomain', () => {
   });
 });
 
+describe('getIntel private names', () => {
+  it('never sends an intranet name on an undelegated TLD (.mail, .corp, .home) to any lookup service', async () => {
+    const f = fakeFetch();
+    for (const d of ['hospital.mail', 'ehr.corp', 'nas.home']) {
+      await expect(getIntel(memoryKV(), d, f, NOW)).rejects.toThrow();
+    }
+    expect((f as any).mock.calls).toEqual([]);
+  });
+});
+
 describe('getIntel cache', () => {
   it('caches for 24h', async () => {
     const kv = memoryKV();

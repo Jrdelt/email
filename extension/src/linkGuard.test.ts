@@ -156,7 +156,8 @@ describe('mergeLinkIntel & destinationIntelWarnings', () => {
 describe('private-use domains are never looked up online', () => {
   it('does not request a domain check for intranet TLDs but still does for public ones', async () => {
     const { isLookupDomain } = await import('./domain');
-    for (const d of ['hospital.lan', 'ehr.corp', 'printer.local', 'svc.internal', 'x.onion']) {
+    // .mail is permanently undelegated by ICANN with .corp and .home (name collision): on-prem Exchange uses it.
+    for (const d of ['hospital.lan', 'ehr.corp', 'printer.local', 'svc.internal', 'x.onion', 'hospital.mail', 'ehr.hospital.mail']) {
       expect(isLookupDomain(d)).toBe(false);
       expect(analyzeLinkDestination(`https://${d}/patient/123`).needsDomainCheck).toBe(false);
     }
