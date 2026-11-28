@@ -241,6 +241,17 @@ function extractAll(adapter: WebmailAdapter | undefined, doc: Document): Extract
 const attachmentNamesOf = (e: ScannableMsg): string[] =>
   e.attachmentNames ?? e.attachments?.map((a) => a.name) ?? [];
 
+/**
+ * How many attachments a message has, for its locks, notice and fingerprint: its attachment items, or, when the
+ * adapter recognised only attachment controls with no item in them (a lone "Download all" after a markup change),
+ * one nameless attachment per control. The adapter reports those so that they are locked: an untrusted email's
+ * attachments always are (AGENTS.md), however they were found.
+ */
+function attachmentCountOf(e: ScannableMsg, names: readonly string[]): number {
+  const count = Math.max(names.length, e.attachments?.length ?? 0);
+  return count > 0 ? count : (e.attachmentContainers?.length ?? 0);
+}
+
 function attachmentElementsOf(e: ScannableMsg): HTMLElement[] {
   return [...new Set([...(e.attachmentContainers ?? []), ...(e.attachments?.map((a) => a.element) ?? [])])];
 }
@@ -722,7 +733,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     Promise.all(
       messages.map(async (email) => {
         const attNames = attachmentNamesOf(email);
-        const attCount = Math.max(attNames.length, email.attachments?.length ?? 0);
+        const attCount = attachmentCountOf(email, attNames);
         const hash = await hashEmail(email.senderAddress, email.body, email.links, attNames, {
           unauthenticated: email.unauthenticated,
           viaDomain: email.viaDomain,
