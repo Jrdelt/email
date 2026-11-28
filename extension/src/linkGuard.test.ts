@@ -267,6 +267,32 @@ describe('redirectors that carry their target in the URL', () => {
   });
 });
 
+describe('sites on free hosting services', () => {
+  // The registrable domain of <anything>.pages.dev is pages.dev: its years-old, clean record used to vouch for every
+  // site anyone publishes there, so the click opened silently.
+  it.each([
+    ['https://account-verify-demo.pages.dev/login', 'pages.dev'],
+    ['https://m365-login-demo.web.app/', 'web.app'],
+    ['https://demo-portal.firebaseapp.com/__/auth', 'firebaseapp.com'],
+    ['https://docs-share-demo.netlify.app/a', 'netlify.app'],
+    ['https://invoice-demo.vercel.app/', 'vercel.app'],
+    ['https://someone.github.io/page', 'github.io'],
+    ['https://w.someone.workers.dev/', 'workers.dev'],
+    ['https://abc123.lambda-url.us-east-1.on.aws/', 'on.aws'],
+    ['https://site-demo.blogspot.com/', 'blogspot.com'],
+  ])('%s warns and does not look up the platform domain', (href, suffix) => {
+    const r = analyzeLinkDestination(href, 'shop.example');
+    expect(r.level).toBe('warning');
+    expect(r.needsDomainCheck).toBe(false);
+    expect(r.reasons.join(' ')).toContain(`free hosting service (${suffix})`);
+  });
+  it('leaves the platform itself and look-alike names alone', () => {
+    for (const href of ['https://pages.dev/', 'https://evilpages.dev/x', 'https://pages.dev.shop-files.example/', 'https://github.com/a/b']) {
+      expect(analyzeLinkDestination(href, 'shop.example').reasons.join(' '), href).not.toContain('free hosting');
+    }
+  });
+});
+
 describe('click-time risky download list', () => {
   it('covers the attachment danger types but not ordinary web pages', () => {
     for (const p of ['setup.exe', 'macro.dotm', 'reg.reg', 'x.cpl', 'note.one', 'disk.vhd', 'image.svg', 'a.ps1']) {

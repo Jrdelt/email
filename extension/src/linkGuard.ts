@@ -20,6 +20,19 @@ export const WARN_TTL_MS = 3600_000;
 
 const PATH_EXT_RE = /\.([a-z0-9-]{1,20})$/i;
 
+// Free hosting services where anyone can publish a site under a subdomain in seconds. The registrable domain of
+// <site>.pages.dev is pages.dev, whose years-old, clean record says nothing about who runs the site, so a click is
+// never cleared by that lookup: it goes to the warning page (with a way to continue), like a URL shortener.
+const FREE_SITE_SUFFIXES = [
+  'pages.dev', 'workers.dev', 'web.app', 'firebaseapp.com', 'netlify.app', 'vercel.app', 'github.io', 'gitlab.io',
+  'glitch.me', 'onrender.com', 'herokuapp.com', 'azurewebsites.net', 'azurestaticapps.net', 'blogspot.com',
+  'weebly.com', 'wixsite.com', 'webflow.io', 'framer.app', 'surge.sh', 'replit.app', 'trycloudflare.com',
+  'ngrok-free.app', 'ngrok.io', '000webhostapp.com', 'on.aws',
+];
+
+/** The free hosting service a host is a site on (never the service's own apex), or ''. */
+const freeSiteSuffix = (host: string): string => FREE_SITE_SUFFIXES.find((s) => host.endsWith(`.${s}`)) ?? '';
+
 /** Returns true strictly for valid http(s) URLs. */
 export function isSafeHttpUrl(raw: string): boolean {
   try {
@@ -266,6 +279,13 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
   } else if (SHORTENER_HOSTS.has(host) || SHORTENER_HOSTS.has(registrable)) {
     hasWarning = true;
     reasons.push(`This link uses a URL shortener (${host}) that hides where it really goes`);
+  }
+  const freeSite = freeSiteSuffix(host);
+  if (freeSite) {
+    hasWarning = true;
+    reasons.push(
+      `This link goes to a site on a free hosting service (${freeSite}): anyone can publish there, so who runs it can't be checked`,
+    );
   }
   if (u.protocol === 'http:') {
     hasWarning = true;
