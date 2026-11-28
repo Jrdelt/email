@@ -33,7 +33,7 @@ const isCompose = (el: HTMLElement): boolean =>
   el.closest('[contenteditable="true"], [data-test-id="compose-editor"], [data-test-id="rte"]') !== null;
 
 function findBodies(doc: Document): BodyHit[] {
-  // The first source with content wins, keeping its empty bodies (attachment-only messages in a conversation).
+  // Direct and iframe bodies merged; empty ones kept (attachment-only messages in a conversation).
   return chooseBodies(pickBodies(doc, BODY_SELECTORS, isCompose), pickFrameBodies(doc, BODY_IFRAMES, isCompose));
 }
 

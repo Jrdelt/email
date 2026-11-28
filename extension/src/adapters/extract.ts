@@ -121,28 +121,22 @@ export type BodyHit = { container: HTMLElement; hostEl: HTMLElement };
 export type BodyPick = { bodies: BodyHit[]; hasContent: boolean };
 
 /**
- * Message bodies for adapters: the first selector (in priority order) whose visible, non-excluded, outermost matches
- * include one with content, returning ALL of that selector's matches, empty ones too: in a conversation, a message
- * whose body is empty but which carries an attachment must still be scanned and attachment-locked. When no match
- * has content, the first selector with any match is used (`hasContent` false).
+ * Message bodies for adapters: every visible, non-excluded, outermost match of any of `selectors`, in document order,
+ * empty ones too: in a conversation, a message whose body is empty but which carries an attachment must still be
+ * scanned and attachment-locked, and a message rendered with other markup (a lower-priority selector) must not be
+ * dropped. `isNestedIn` keeps body markers inside the email HTML from counting. `hasContent` is set when any has
+ * content.
  */
 export function pickBodies(doc: Document, selectors: readonly string[], excluded: (el: HTMLElement) => boolean): BodyPick {
-  let fallback: BodyHit[] = [];
-  for (const sel of selectors) {
-    const valid: HTMLElement[] = [];
-    let hasContent = false;
-    for (const el of doc.querySelectorAll<HTMLElement>(sel)) {
-      if (excluded(el) || isHidden(el)) continue;
-      if (isNestedIn(el, selectors)) continue;
-      if (valid.some((prev) => prev.contains(el))) continue;
-      valid.push(el);
-      hasContent ||= hasMessageContent(el);
-    }
-    const bodies = valid.map((el) => ({ container: el, hostEl: el }));
-    if (hasContent) return { bodies, hasContent };
-    if (fallback.length === 0) fallback = bodies;
+  const bodies: BodyHit[] = [];
+  let hasContent = false;
+  for (const el of doc.querySelectorAll<HTMLElement>(selectors.join(', '))) {
+    if (excluded(el) || isHidden(el)) continue;
+    if (isNestedIn(el, selectors)) continue; // a body marker inside the email HTML never counts
+    bodies.push({ container: el, hostEl: el });
+    hasContent ||= hasMessageContent(el);
   }
-  return { bodies: fallback, hasContent: false };
+  return { bodies, hasContent };
 }
 
 /** Bodies of same-origin message iframes (cross-origin ones are skipped), empty ones included. */
@@ -165,11 +159,18 @@ export function pickFrameBodies(doc: Document, selector: string, excluded: (el: 
 }
 
 /**
- * Choose between an adapter's direct and iframe bodies: the first source with content wins (with its empty
- * siblings); otherwise the first source with any body, so attachment-only emails are still found.
+ * Merge an adapter's direct and iframe bodies, in document order: every source with content contributes all its
+ * bodies (its empty ones too), so a thread with one message inline and another in a same-origin iframe keeps both.
+ * A source without content (an empty wrapper around the body frame, an empty helper frame) adds nothing then; when
+ * no source has content, the first source with any body is used, so attachment-only emails are still found.
  */
 export function chooseBodies(...picks: BodyPick[]): BodyHit[] {
-  return (picks.find((p) => p.hasContent) ?? picks.find((p) => p.bodies.length > 0))?.bodies ?? [];
+  const withContent = picks.filter((p) => p.hasContent);
+  const used = withContent.length > 0 ? withContent : picks.filter((p) => p.bodies.length > 0).slice(0, 1);
+  const out: BodyHit[] = [];
+  for (const p of used) for (const b of p.bodies) if (!out.some((o) => o.hostEl === b.hostEl)) out.push(b);
+  // Thread order, so extract() (the last message) and positional pairing stay right. 4 = DOCUMENT_POSITION_FOLLOWING.
+  return used.length > 1 ? out.sort((a, b) => (a.hostEl.compareDocumentPosition(b.hostEl) & 4 ? -1 : 1)) : out;
 }
 
 /** Same-origin documents of the iframes matching `selector` (cross-origin ones are skipped). */

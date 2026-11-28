@@ -38,7 +38,7 @@ const isCompose = (el: HTMLElement): boolean =>
 function findBodies(doc: Document): BodyHit[] {
   // A direct body that merely wraps the content iframe is not itself the message.
   const excludedDirect = (el: HTMLElement) => isCompose(el) || el.querySelector('iframe[data-testid="content-iframe"]') !== null;
-  // The first source with content wins, keeping its empty bodies (attachment-only messages in a conversation).
+  // Direct and iframe bodies merged; empty ones kept (attachment-only messages in a conversation).
   return chooseBodies(
     pickFrameBodies(doc, CONTENT_IFRAMES, isCompose),
     pickBodies(doc, DIRECT_BODY_SELECTORS, excludedDirect),
