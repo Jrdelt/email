@@ -30,10 +30,26 @@ def scoring_input(sender: str, subject: str, body: str, links: list[Link]) -> tu
     - withSubject (src/adapters/extract.ts): the first 300 UTF-16 code units of the subject, "\\n", then the body.
     - bodyText: characters that render as nothing (INVISIBLE_RE) dropped, whitespace runs collapsed to one space,
       and past MAX_BODY_CHARS (20,000) only the first and last halves.
-    - scanLinks: each href unwrapped through redirect and link-protection wrappers as unwrapRedirectUrl does
-      (src/linkGuard.ts: Safe Links, google.com/url with the LAST duplicate parameter, Proofpoint v2/v3, Barracuda,
-      Cisco, Facebook, YouTube; up to 4 hops), link text bounded as capLinkText does, duplicate (href,
-      whitespace-collapsed text) pairs dropped, and past MAX_LINKS (1000) the risk-first sample.
-    Any change to those steps in the extension updates the fixture, this function and its test together.
+    - scanLinks: each href unwrapped through redirect and link-protection wrappers as unwrapRedirect does
+      (src/linkGuard.ts unwrapOnce, up to 4 hops, every hop's target an http(s) URL as isSafeHttpUrl accepts):
+      - Defender Safe Links (*.safelinks.protection.outlook.com) url=; Facebook l.php / lm.facebook.com u=;
+        YouTube /redirect q=; Barracuda linkprotect.cudasvc.com/url a=; Proofpoint v2 u= (-XX and _ decoding) and
+        v3 (/v3/__<url>__;<token>, '*' and '**X' runs filled from the base64url token); Cisco Secure Email (the
+        percent-decoded last path segment).
+      - Google /url on the explicit GOOGLE_SUFFIXES list of Google's own country domains (www.google.co.uk, ...;
+        never a google.<any TLD> pattern, so google.zz or google.evil.example stay wrapped): the names q then url,
+        skipping empty values and values that are not http(s) URLs, the LAST usable value of the first name that
+        has one. Only the last 16 values of a name are examined (a target before them is not unwrapped).
+      - Google AMP: /amp/s/<host>/<path> becomes https://<host>/<path>, /amp/<host>/<path> http://..., the query
+        string kept.
+      - Bing /ck/a on www.bing.com, bing.com and cn.bing.com: u=a1<base64url UTF-8 target>; a value that cannot be
+        decoded is not unwrapped.
+      Link text is bounded as capLinkText does; text inside U+202E ... U+202C (or to the end) is reversed and that
+      reading scored when it shows another host than the destination (linkTextReader/scoredText; CSS-hidden link
+      text is a rendering concern of load_dataset, not of this function). Duplicate (href, whitespace-collapsed
+      text) pairs are dropped, and past MAX_LINKS (1000) the risk-first sample is kept.
+    The authoritative spec is unwrapRedirect plus the fixture: every rule above has a case there, so a mirror that
+    misses one fails test_scoring_input_matches_the_extension. Any change to those steps in the extension updates
+    the fixture, this function and its test together.
     """
     raise NotImplementedError

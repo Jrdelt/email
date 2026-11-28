@@ -76,11 +76,17 @@ export function isSafeHttpUrl(raw: string): boolean {
   }
 }
 
+// Duplicate values of one redirect parameter examined (from the end, which is the one followed). `isTarget` parses
+// each as a URL, so an href repeating q= thousands of times must not cost a parse per value on every rescan.
+const MAX_PARAM_VALUES = 16;
+
 /**
  * The value a redirector actually follows: Google /url and Facebook l.php use the LAST duplicate parameter, so a
  * benign first value must not be what gets inspected. Names are tried in order, skipping one whose values are all
  * empty or rejected by `isTarget` (Google search results carry "q=&url=<target>", or the search words in q=).
- * Several distinct usable values, under one name or several, mark the link as ambiguous.
+ * Several distinct usable values, under one name or several, mark the link as ambiguous. Only the last
+ * MAX_PARAM_VALUES values of a name are examined; a name repeated more often also marks the link as ambiguous (fail
+ * closed: an unexamined value may be the one followed), while `value` is still the last usable one examined.
  */
 function redirectParam(
   u: URL,
@@ -88,14 +94,20 @@ function redirectParam(
   isTarget: (v: string) => boolean = () => true,
 ): { value: string | null; ambiguous: boolean } {
   let value: string | null = null;
+  let capped = false;
   const seen = new Set<string>();
   for (const name of names) {
-    const all = u.searchParams.getAll(name).map((v) => v.trim()).filter((v) => v !== '' && isTarget(v));
+    let values = u.searchParams.getAll(name);
+    if (values.length > MAX_PARAM_VALUES) {
+      capped = true;
+      values = values.slice(-MAX_PARAM_VALUES);
+    }
+    const all = values.map((v) => v.trim()).filter((v) => v !== '' && isTarget(v));
     if (!all.length) continue;
     value ??= all[all.length - 1]!;
     for (const v of all) seen.add(v);
   }
-  return { value, ambiguous: seen.size > 1 };
+  return { value, ambiguous: capped || seen.size > 1 };
 }
 
 // Google's own search domains (www.google.com/supported_domains). An explicit list, never a pattern: once a link is

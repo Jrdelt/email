@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DomainIntel } from './domainIntel';
 import {
   analyzeLinkDestination,
@@ -242,6 +242,35 @@ describe('Google /url with an empty or non-URL q=', () => {
     // Same target in both: not ambiguous.
     const same = analyzeLinkDestination('https://www.google.com/url?q=https://shop.example/a&url=https://shop.example/a', 'shop.example');
     expect(same).toMatchObject({ host: 'shop.example', level: 'safe' });
+  });
+});
+
+describe('Google /url with very many duplicate parameters', () => {
+  // Every q=/url= value is parsed as a URL to find a usable target; only the last 16 values of a name are examined, so
+  // a padded href costs a bounded amount of work on every rescan. Past that the link is ambiguous (fail closed), and
+  // the last usable value examined is still the destination scored.
+  const padded = (n: number, last: string) => `https://www.google.com/url?${'q=x&'.repeat(n)}q=${encodeURIComponent(last)}`;
+
+  it('examines only the last values of a padded parameter, and marks the link ambiguous', () => {
+    const r = analyzeLinkDestination(padded(25_000, 'https://shop.example/'), 'shop.example');
+    expect(r).toMatchObject({ href: 'https://shop.example/', host: 'shop.example', level: 'warning' });
+    expect(r.reasons.join(' ')).toMatch(/more than one destination/);
+    expect(unwrapRedirectUrl(padded(25_000, 'https://shop.example/'))).toBe('https://shop.example/');
+  });
+
+  it('parses at most 16 values per name, however many the href repeats', () => {
+    const spy = vi.spyOn(globalThis, 'URL');
+    try {
+      unwrapRedirectUrl(padded(5_000, 'https://shop.example/'));
+      expect(spy.mock.calls.length).toBeLessThan(40);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('leaves a link with a few duplicates as before (the last usable value, unambiguous when they agree)', () => {
+    const r = analyzeLinkDestination(padded(15, 'https://shop.example/'), 'shop.example');
+    expect(r).toMatchObject({ href: 'https://shop.example/', level: 'safe' });
   });
 });
 

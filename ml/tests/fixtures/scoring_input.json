@@ -177,5 +177,325 @@
       "urgency_hits": 0,
       "body_len": 33
     }
+  },
+  {
+    "name": "google_country_domain_url",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.google.co.uk/url?q=https://www.paypal.com/signin"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/signin"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
+  },
+  {
+    "name": "google_url_empty_q_falls_through_to_url",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.google.com/url?sa=t&q=&url=https%3A%2F%2Fwww.paypal.com%2Fsignin&usg=x"
+      },
+      {
+        "text": "PayPal help",
+        "href": "https://www.google.com/url?q=paypal+help&url=https%3A%2F%2Fwww.paypal.com%2Fhelp"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/signin"
+        },
+        {
+          "text": "PayPal help",
+          "href": "https://www.paypal.com/help"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 2,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
+  },
+  {
+    "name": "google_amp_and_bing_click_tracker",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.google.com/amp/s/www.paypal.com/help?x=1"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly93d3cucGF5cGFsLmNvbS9zaWduaW4&ntb=1"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/help?x=1"
+        },
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/signin"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 2,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
+  },
+  {
+    "name": "lookalike_google_hosts_stay_wrapped",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://google.zz/url?q=https://www.paypal.com/signin"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.google.evil.example/url?q=https://www.paypal.com/signin"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://google.zz/url?q=https://www.paypal.com/signin"
+        },
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.google.evil.example/url?q=https://www.paypal.com/signin"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 2,
+      "n_text_href_mismatch": 2,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 2,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
+  },
+  {
+    "name": "google_url_padded_past_the_value_cap",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.google.com/url?q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=https://www.paypal.com/signin"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/signin"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
+  },
+  {
+    "name": "google_url_target_before_the_value_cap",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.google.com/url?q=https://www.paypal.com/signin&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.google.com/url?q=https://www.paypal.com/signin&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x&q=x"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
+  },
+  {
+    "name": "rlo_reversed_link_text",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "\u202emoc.lapyap.www\u202c",
+        "href": "https://evil.example/login"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://evil.example/login"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 1,
+      "n_text_href_mismatch": 1,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
+  },
+  {
+    "name": "other_link_wrappers",
+    "sender": "service@paypal.com",
+    "subject": "Your account",
+    "body": "Review your account activity.",
+    "links": [
+      {
+        "text": "www.paypal.com",
+        "href": "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.paypal.com%2Fa&h=x"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "https://www.youtube.com/redirect?q=https%3A%2F%2Fwww.paypal.com%2Fb&event=x"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "https://linkprotect.cudasvc.com/url?a=https%3A%2F%2Fwww.paypal.com%2Fc&c=E,1"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "https://secure-web.cisco.com/1abcDEF/https%3A%2F%2Fwww.paypal.com%2Fd"
+      },
+      {
+        "text": "www.paypal.com",
+        "href": "https://urldefense.com/v3/__https://www.paypal.com/e__;!!abc$"
+      }
+    ],
+    "expected_input": {
+      "body": "Your account\nReview your account activity.",
+      "links": [
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/a"
+        },
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/b"
+        },
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/c"
+        },
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/d"
+        },
+        {
+          "text": "www.paypal.com",
+          "href": "https://www.paypal.com/e"
+        }
+      ]
+    },
+    "expected_features": {
+      "n_links": 5,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 42
+    }
   }
 ]
