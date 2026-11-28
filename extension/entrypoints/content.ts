@@ -44,8 +44,9 @@ import { ellipsizeMiddle, showable } from '../src/text';
 const MAX_THREAD_MESSAGES = 20; // newest messages that get full scoring and domain lookups
 const MAX_SESSION_SET = 200;
 const CLICK_INTEL_TIMEOUT_MS = 700;
-// While the sender's own domain lookup is still running, a click on a same-domain link waits a little longer
-// for it: a brand-new or non-existent sender domain is the classic phishing shape.
+// While the sender's own domain lookup is still running, a held click waits a little longer, for the sender's
+// verdict as well as its destination's: a brand-new or non-existent sender domain is the classic phishing shape, and
+// the warning it brings locks every link of the email.
 const SENDER_INTEL_WAIT_MS = 2500;
 // Longest a click in an iCloud message frame waits for the app frame's lock decision before going through.
 const ICLOUD_VERDICT_WAIT_MS = 2500;
@@ -308,7 +309,14 @@ function replayNavigation(anchor: Element, href: string, activeTab: boolean): vo
 function installClickGuard(opts: {
   findTarget: (
     el: Element,
-  ) => { container: HTMLElement; senderAddress: string; senderRegistrable: string; senderIntelPending?: boolean } | null;
+  ) => {
+    container: HTMLElement;
+    senderAddress: string;
+    senderRegistrable: string;
+    senderIntelPending?: boolean;
+    /** Settles once the pending sender lookup's verdict (and any lock it brings) has been rendered. */
+    senderSettled?: Promise<unknown>;
+  } | null;
   findAttachment?: (el: Element) => { element: HTMLElement; name: string } | null;
   isPending: () => boolean;
   flushScan: () => Promise<void>;
@@ -394,12 +402,29 @@ function installClickGuard(opts: {
     const activeTab = !(me.metaKey || me.ctrlKey || (e.type === 'auxclick' && me.button === 1));
     const initialRisk = analyzeLinkDestination(rawHref, hit.senderRegistrable, location.origin);
     if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
-    // Clicks held for a scan that then locks the message get the same notice as a click on a locked link.
-    const lockedAfterScan = () => {
+    const lockedNow = () => {
+      if (isLocked(hit.container)) return true;
       const refreshed = opts.findTarget(at);
-      if (!isLocked(hit.container) && !(refreshed && isLocked(refreshed.container))) return false;
+      return Boolean(refreshed && isLocked(refreshed.container));
+    };
+    // Clicks held for a scan or lookup that then locks the message get the same notice as a click on a locked link.
+    // Checked after every wait of a held click and right before it navigates.
+    const lockedAfterScan = () => {
+      if (!lockedNow()) return false;
       showPausedLinkToast(ownerDocOf(a), initialRisk.host, a instanceof HTMLElement ? a : null);
       return true;
+    };
+    // Settles once the sender's pending lookup has been rendered or the message is locked. A rescan of the thread
+    // replaces the pending lookup (the stale scan renders nothing), so follow it to the one that renders.
+    const senderVerdict = async (first: Promise<unknown> | undefined): Promise<void> => {
+      for (let settled = first; settled; ) {
+        await settled.catch(() => undefined);
+        if (lockedNow()) return;
+        if (opts.isPending()) await opts.flushScan();
+        const now = opts.findTarget(a);
+        const next = now?.senderIntelPending ? now.senderSettled : undefined;
+        settled = next === settled ? undefined : next;
+      }
     };
     if (!extensionAlive()) {
       // Orphaned by an extension update: the background can no longer check or open links for us. Risky links
@@ -444,15 +469,30 @@ function installClickGuard(opts: {
 
       if (risk.needsDomainCheck) {
         const settings = await getSettings(browser.storage.local, managedStorage());
+        if (lockedAfterScan()) return;
         if (!settings.strictLocalMode) {
           let timerId: ReturnType<typeof setTimeout> | undefined;
           const waitMs = latest.senderIntelPending ? SENDER_INTEL_WAIT_MS : CLICK_INTEL_TIMEOUT_MS;
-          const intel = await Promise.race([
-            sendRuntime<DomainIntel>({ type: 'domainIntel', domain: risk.registrable }),
-            new Promise<undefined>((resolve) => {
-              timerId = setTimeout(() => resolve(undefined), waitMs);
-            }),
-          ]).finally(() => clearTimeout(timerId));
+          let intel: DomainIntel | undefined;
+          const destination = sendRuntime<DomainIntel>({ type: 'domainIntel', domain: risk.registrable }).then((r) => {
+            intel = r;
+          });
+          // While the sender's own lookup runs, wait (within the same bound) for its verdict too: a domain warning
+          // it brings locks the email, which pauses this link as well. Stop waiting as soon as such a lock lands.
+          const sender = latest.senderIntelPending ? senderVerdict(latest.senderSettled) : undefined;
+          const timeout = new Promise<void>((resolve) => {
+            timerId = setTimeout(resolve, waitMs);
+          });
+          await Promise.race(
+            sender
+              ? [
+                  Promise.all([destination, sender]),
+                  sender.then(() => (lockedNow() ? undefined : new Promise<never>(() => {}))),
+                  timeout,
+                ]
+              : [destination, timeout],
+          ).finally(() => clearTimeout(timerId));
+          if (lockedAfterScan()) return;
           const finalRisk = mergeLinkIntel(risk, intel);
           if (finalRisk.level !== 'safe') {
             void sendRuntime({
@@ -469,6 +509,7 @@ function installClickGuard(opts: {
         }
       }
 
+      if (lockedAfterScan()) return;
       let sameOrigin = false;
       try {
         sameOrigin = new URL(rawHref).origin === location.origin;
@@ -498,8 +539,11 @@ function installClickGuard(opts: {
 async function evaluateAndRender<T extends ScannableMsg>(opts: {
   kv: typeof browser.storage.local;
   messages: T[];
-  /** Sender domains whose online lookup is still running (shared with the click guard). */
-  intelPending?: Set<string>;
+  /**
+   * Sender domains whose online lookup is still running (shared with the click guard), each with a promise that
+   * settles once the verdict including its result has been rendered.
+   */
+  intelPending?: Map<string, Promise<void>>;
   /** Leading messages (oldest) that exceed MAX_THREAD_MESSAGES: locked unless trusted, never scored or looked up. */
   overflowCount?: number;
   trustedThisSession: Set<string>;
@@ -767,16 +811,23 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   render();
 
   if (!settings.strictLocalMode && intelByDomain.size > 0) {
-    void Promise.all(
-      [...intelByDomain.keys()].map(async (domain) => {
-        opts.intelPending?.add(domain);
+    const domains = [...intelByDomain.keys()];
+    const pending = opts.intelPending;
+    // A sender stays pending until the render with its result is done (the render waits for every sender of the
+    // thread), so the click guard never treats a sender as checked before its warning, if any, has locked links.
+    const rendered: Promise<void> = Promise.all(
+      domains.map(async (domain) => {
         const res = await sendRuntime<DomainIntel | null>({ type: 'domainIntel', domain });
-        opts.intelPending?.delete(domain);
         intelByDomain.set(domain, res === null ? 'offline' : (res ?? 'unavailable'));
       }),
-    ).then(() => {
-      if (!isStale()) render();
-    });
+    )
+      .then(() => {
+        if (!isStale()) render();
+      })
+      .finally(() => {
+        for (const domain of domains) if (pending?.get(domain) === rendered) pending.delete(domain);
+      });
+    for (const domain of domains) pending?.set(domain, rendered);
   }
 }
 
@@ -784,7 +835,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
   const trustedThisSession = new Set<string>();
   const dismissed = new Set<string>();
   const containerSender = new WeakMap<HTMLElement, { address: string; registrable: string }>();
-  const intelPending = new Set<string>();
+  const intelPending = new Map<string, Promise<void>>();
   let lastKey = '';
   let activeContainers: HTMLElement[] = [];
   let activeMessages: ExtractedEmail[] = [];
@@ -935,6 +986,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
             senderAddress: meta?.address ?? '',
             senderRegistrable: senderIntelPending ? '' : registrable,
             senderIntelPending,
+            senderSettled: intelPending.get(registrable),
           };
         }
       }
