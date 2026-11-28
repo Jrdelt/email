@@ -402,3 +402,59 @@ describe('Gmail inbox-list file buttons', () => {
     expect(at('shelf')).toBeNull();
   });
 });
+
+describe('link text is read once per element, within a work budget', () => {
+  const timed = <T>(f: () => T): [T, number] => {
+    const t = performance.now();
+    const v = f();
+    return [v, performance.now() - t];
+  };
+  const filler = (n: number) => 'lorem ipsum '.repeat(Math.ceil(n / 12)).slice(0, n);
+
+  it('thousands of SMIL <set> in one <a> do not re-read its large text', () => {
+    const sets = Array.from({ length: 1000 }, (_, i) => `<set attributeName="href" to="#n${i}"/>`).join('');
+    const m = body(`<svg><a href="#top"><text>${filler(50_000)}</text>${sets}</a></svg>`);
+    const [r, ms] = timed(() => scanLinks(m));
+    expect(ms).toBeLessThan(150);
+    expect(r.links.some((l) => l.href.endsWith('#n999'))).toBe(true);
+  });
+
+  it('link elements nested hundreds deep around one large text fail closed instead of re-reading it', () => {
+    let html = `<span>${filler(100_000)}</span>`;
+    for (let i = 0; i < 400; i++) html = `<div data-ped-formaction="#n${i}">${html}</div>`;
+    const m = body(html);
+    const [r, ms] = timed(() => scanLinks(m));
+    expect(ms).toBeLessThan(150);
+    expect(r.truncated).toBe(true);
+    expect(r.links.length).toBeGreaterThan(0);
+  });
+
+  it('nested SVG data: downloads around one large text are named from both ends of it', () => {
+    // Built through the DOM: browsers nest SVG <a> from markup too (foreign content), happy-dom's parser does not.
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const m = body('<svg></svg>');
+    let parent: Element = m.firstElementChild!;
+    for (let i = 0; i < 300; i++) {
+      const a = document.createElementNS(svgNS, 'a');
+      a.setAttribute('href', 'data:application/octet-stream;base64,AA==');
+      parent = parent.appendChild(a);
+    }
+    parent.appendChild(document.createElementNS(svgNS, 'text')).textContent = `Statement ${filler(100_000)} invoice.html`;
+    const [atts, ms] = timed(() => inlineAttachmentsIn(m));
+    expect(ms).toBeLessThan(150);
+    expect(atts).toHaveLength(300);
+    for (const a of [atts[0], atts[299]]) {
+      expect(a.name.startsWith('Statement lorem')).toBe(true);
+      expect(a.name.endsWith('invoice.html')).toBe(true);
+      expect(a.name.length).toBeLessThanOrEqual(1024);
+    }
+  });
+
+  it('keeps the full text of ordinary links', () => {
+    const m = body(`<a href="https://a.example/1"><b>Sign</b> in to <i>https://www.paypal.com</i></a>
+      <a href="https://a.example/2">${'x'.repeat(MAX_LINK_TEXT_CHARS - 1)}</a>`);
+    const r = scanLinks(m);
+    expect(r.truncated).toBe(false);
+    expect(r.links.map((l) => l.text)).toEqual(['Sign in to https://www.paypal.com', 'x'.repeat(MAX_LINK_TEXT_CHARS - 1)]);
+  });
+});

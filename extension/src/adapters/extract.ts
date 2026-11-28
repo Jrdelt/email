@@ -190,6 +190,98 @@ export function capLinkText(text: string): string {
   return `${visible.slice(0, head)} ${visible.slice(at, at + (max - head - 1))}`;
 }
 
+const SHOW_ALL = 0xffffffff;
+const isTextNode = (n: Node): boolean => n.nodeType === 3 /* TEXT */ || n.nodeType === 4 /* CDATA_SECTION */;
+
+/**
+ * At most `max` characters of `el`'s text: the first half from its start and the rest from its end (joined by a
+ * space when they do not meet), visiting at most `steps` nodes in each direction. Bounded however large or deeply
+ * nested the subtree is; equals textContent when that is short and shallow.
+ */
+function textEnds(el: Element, max: number, steps: number): string {
+  const doc = ownerDocOf(el);
+  const headMax = Math.ceil(max / 2);
+  const fw = doc.createTreeWalker(el, SHOW_ALL);
+  let head = '';
+  let last: Node | null = null; // last text node read forwards, and how many of its characters were taken
+  let used = 0;
+  let n = fw.nextNode();
+  for (let i = 0; n && i < steps && head.length < headMax; n = fw.nextNode(), i++) {
+    if (!isTextNode(n)) continue;
+    const t = n.nodeValue ?? '';
+    const take = t.slice(0, headMax - head.length);
+    head += take;
+    last = n;
+    used = take.length;
+  }
+  if (!n && (!last || used === (last.nodeValue ?? '').length)) return head;
+  // Backwards from the deepest last node until the tail is full or the head is reached.
+  const tailMax = max - head.length - 1;
+  const bw = doc.createTreeWalker(el, SHOW_ALL);
+  let i = 0;
+  while (i < steps && bw.lastChild()) i++;
+  const tail: string[] = [];
+  let tailLen = 0;
+  let met = false;
+  for (let m: Node | null = bw.currentNode; m && m !== el && i < steps && tailLen < tailMax; m = bw.previousNode(), i++) {
+    if (!isTextNode(m)) continue;
+    const t = m.nodeValue ?? '';
+    const from = m === last ? used : 0;
+    const start = Math.max(from, t.length - (tailMax - tailLen));
+    tail.push(t.slice(start));
+    tailLen += t.length - start;
+    if (m === last) {
+      met = start === from;
+      break;
+    }
+  }
+  const end = tail.reverse().join('');
+  return met || !head || !end ? head + end : `${head} ${end}`;
+}
+
+// Work bound on link text per scan, in raw characters plus nodes visited (~10 ms). Real emails stay far below it.
+// Past it, every further link's text is sampled from both ends only and the scan reports truncation (fail closed),
+// so link elements sharing one large subtree (SVG <a> or formaction elements nested hundreds deep, thousands of
+// SMIL <set> in one <a>) cannot multiply the work.
+const LINK_TEXT_BUDGET = 25 * MAX_BODY_CHARS;
+const LINK_TEXT_STEPS = 256; // nodes visited per direction for a sampled link text
+
+/** Per-scan link text reader: each element's text is read once, in full while the budget lasts. */
+function linkTextReader(): { read(el: Element): string; exceeded(): boolean } {
+  const memo = new Map<Element, string>();
+  let left = LINK_TEXT_BUDGET;
+  let over = false;
+  const full = (el: Element): string | null => {
+    const w = ownerDocOf(el).createTreeWalker(el, SHOW_ALL);
+    const parts: string[] = [];
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      left -= 1;
+      if (isTextNode(n)) {
+        const t = n.nodeValue ?? '';
+        parts.push(t);
+        left -= t.length;
+      }
+      if (left < 0) return null;
+    }
+    return parts.join('');
+  };
+  return {
+    read(el) {
+      let v = memo.get(el);
+      if (v !== undefined) return v;
+      let raw = left >= 0 ? full(el) : null;
+      if (raw === null) {
+        over = true;
+        raw = textEnds(el, MAX_LINK_TEXT_CHARS, LINK_TEXT_STEPS);
+      }
+      v = capLinkText(raw);
+      memo.set(el, v);
+      return v;
+    },
+    exceeded: () => over,
+  };
+}
+
 /** Prepend the subject (bounded) without cutting the end of the already-sampled body. */
 export const withSubject = (subject: string, body: string): string =>
   subject ? (body ? `${subject.slice(0, 300)}\n${body}` : subject.slice(0, 300)) : body;
@@ -405,6 +497,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
   };
   const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
   const nodes = [...el.querySelectorAll(sel)];
+  const linkText = linkTextReader();
   // Past the examination bound, look at the first and last nodes and report truncation (fail closed): thousands
   // of identical filler links must not keep the real one from being examined.
   let truncated = nodes.length > MAX_LINK_SCAN;
@@ -420,7 +513,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
       // The animated link: the element the animation aims at with its own href, or the <a> around it.
       const { target } = animationTarget(node);
       const anchor = target ? closestEl(target, 'a') : null;
-      const text = anchor ? capLinkText(textOf(anchor)) : '';
+      const text = anchor ? linkText.read(anchor) : '';
       for (const raw of animValues(node)) {
         const href = resolveAgainstBase(raw, base);
         if (!href) continue;
@@ -433,7 +526,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
       // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
-      if (href) out.push({ text: capLinkText(textOf(node)), href: unwrapCached(href) });
+      if (href) out.push({ text: linkText.read(node), href: unwrapCached(href) });
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? getAttr(node, 'data-ped-att-action') ?? '';
       const href = resolveAgainstBase(raw, base);
@@ -445,7 +538,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
         getAttr(node, 'data-ped-att-formaction') ??
         '';
       const href = resolveAgainstBase(raw, base);
-      const text = capLinkText(textOf(node) || getAttr(node, 'value') || '').trim();
+      const text = (linkText.read(node) || capLinkText(getAttr(node, 'value') || '')).trim();
       if (href) out.push({ text, href });
     }
   }
@@ -457,7 +550,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     seen.add(key);
     return true;
   });
-  return { links: sampleLinks(unique), truncated: truncated || unique.length > MAX_LINKS };
+  return { links: sampleLinks(unique), truncated: truncated || linkText.exceeded() || unique.length > MAX_LINKS };
 }
 
 // Cheap string checks (no URL parsing) for links that could carry a finding: shown text with a host or URL in it
@@ -524,6 +617,10 @@ const FORM_TARGET_SEL =
 const FORM_TARGET_ATTRS = ['action', 'data-ped-action', 'data-ped-att-action'] as const;
 const CONTROL_TARGET_ATTRS = ['formaction', 'data-ped-formaction', 'data-ped-att-formaction'] as const;
 
+// Characters (and nodes) read from each end of an inline download's text for its name: nested SVG <a> downloads
+// around one large text must not each read all of it. The end is kept, so the extension the danger check reads survives.
+const ATTACHMENT_NAME_TEXT = 512;
+
 /**
  * Extract inline download/data:/blob: links inside an email body container: `<a>` and `<area>`, SVG `<a>`
  * with `xlink:href`, forms and submit controls that submit to such a URL (a data: response the browser cannot
@@ -560,7 +657,7 @@ export function inlineAttachmentsIn(container: HTMLElement): AttachmentRef[] {
         filenameFromHref(href, base) ||
         getAttr(el, 'aria-label') ||
         getAttr(el, 'title') ||
-        textOf(el) ||
+        textEnds(el, 2 * ATTACHMENT_NAME_TEXT, ATTACHMENT_NAME_TEXT) ||
         '',
     );
     if (!add(el, name)) return out;
