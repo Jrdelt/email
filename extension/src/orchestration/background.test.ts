@@ -303,6 +303,15 @@ describe('B4 iCloud relays are stateless and trust only the browser-verified sen
       [4, { type: 'icloudLock', locked: true, attachmentsLocked: false, sig: 'abc123' }, { frameId: 12 }],
     ]);
   });
+
+  it('relays the full 128-bit body signature both ways, and nothing longer', async () => {
+    const { send, tabsSend } = await boot();
+    const sig = '0123456789abcdef0123456789abcdef';
+    await send({ type: 'icloudBody', active: true, body: 'hi', links: [], attachmentNames: [], sig }, sandbox(9));
+    await send({ type: 'icloudLock', locked: false, attachmentsLocked: false, frameIds: [9], sig }, app());
+    await send({ type: 'icloudLock', locked: false, attachmentsLocked: false, frameIds: [9], sig: `${sig}0` }, app());
+    expect(tabsSend.mock.calls.map(([, msg]) => (msg as { sig?: unknown }).sig)).toEqual([sig, sig, undefined]);
+  });
 });
 
 describe('B5 warn:* entries (the full clicked URL for warning.html) expire', () => {

@@ -8,7 +8,7 @@ import { clearLookupCaches, getSettings } from '../src/settings';
 
 const MAX_BODY_CHARS = 21_000; // sandbox body (head + tail sample, see adapters/extract.ts bodyText) plus slack
 const MAX_RELAY_FRAMES = 200; // every open message frame of a long thread must still receive its lock decision
-const SIG_RE = /^[0-9a-f]{1,8}$/; // FNV-1a body signature from the iCloud sandbox
+const SIG_RE = /^[0-9a-f]{1,32}$/; // body signature from the iCloud sandbox (128 bits of SHA-256)
 const PAIR_NONCE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/; // iCloud card/frame pairing token
 
 function frameRoleOf(url?: string) {

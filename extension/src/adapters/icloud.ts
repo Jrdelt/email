@@ -35,7 +35,7 @@ export interface ICloudSandboxPayload {
   links: Link[];
   linksTruncated?: boolean;
   attachmentNames?: string[];
-  /** Short hash of the sandbox's body signature: lock decisions echo it so stale ones can be ignored. */
+  /** The sandbox's body signature (128 bits of SHA-256): lock decisions echo it so stale ones can be ignored. */
   sig?: string;
 }
 

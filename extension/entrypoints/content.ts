@@ -62,14 +62,18 @@ function extensionAlive(): boolean {
   }
 }
 
-/** Short, stable hash (FNV-1a) used to tie iCloud lock decisions to the body they were made for. */
-function shortHash(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
+/**
+ * Signature that ties iCloud lock decisions to the body they were made for: the first 128 bits of SHA-256 (32 hex
+ * characters). It must resist collisions: email content could be padded to give a phishing body the signature of an
+ * earlier benign one (trivial with a 32-bit FNV-1a), whose unlock would then apply to it. undefined if unavailable.
+ */
+async function bodySignature(s: string): Promise<string | undefined> {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+    return [...new Uint8Array(digest, 0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return undefined;
   }
-  return (h >>> 0).toString(16);
 }
 
 const PAIR_NONCE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -1159,6 +1163,9 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
 
 function runICloudSandbox() {
   let lastSig = '';
+  // Signature of the reported body: '' before any body, SIG_PENDING while it is being computed (or if it cannot be).
+  // Decisions carrying a signature apply only when it equals this one.
+  const SIG_PENDING = 'pending';
   let lastSigHash = '';
   let desiredLocked = false;
   let desiredAttachmentsLocked = false;
@@ -1232,18 +1239,29 @@ function runICloudSandbox() {
     const attachmentNames = attachments.map((a) => a.name);
     const sig = JSON.stringify({ active, body, links, linksTruncated, attachmentNames });
     if (force || sig !== lastSig) {
-      if (sig !== lastSig) awaitingVerdict = true;
+      if (sig !== lastSig) {
+        awaitingVerdict = true;
+        lastSigHash = SIG_PENDING; // no decision applies to this body before its signature is known
+      }
       lastSig = sig;
-      lastSigHash = shortHash(sig);
-      void sendRuntime({
-        type: 'icloudBody',
-        active: true,
-        body,
-        links,
-        linksTruncated,
-        attachmentNames,
-        sig: lastSigHash,
-      });
+      const send = (hash: string | undefined) =>
+        void sendRuntime({
+          type: 'icloudBody',
+          active: true,
+          body,
+          links,
+          linksTruncated,
+          attachmentNames,
+          ...(hash ? { sig: hash } : {}),
+        });
+      if (lastSigHash !== SIG_PENDING) send(lastSigHash);
+      else {
+        void bodySignature(sig).then((hash) => {
+          if (lastSig !== sig) return; // a newer body was reported meanwhile
+          if (hash) lastSigHash = hash;
+          send(hash); // without a signature the app frame's decisions for this body can only lock it
+        });
+      }
     }
     if (desiredLocked) lockLinks(container);
     syncInlineAttachmentLocks(attachments, desiredAttachmentsLocked);
@@ -1511,7 +1529,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
         links: Array.isArray(m.links) ? (m.links as Link[]) : [],
         ...(m.linksTruncated === true ? { linksTruncated: true } : {}),
         ...(attachmentNames.length ? { attachmentNames } : {}),
-        ...(typeof m.sig === 'string' ? { sig: m.sig.slice(0, 16) } : {}),
+        ...(typeof m.sig === 'string' ? { sig: m.sig.slice(0, 32) } : {}),
       };
       sandboxBodies.set(m.frameId, payload);
       const last = frameLocks.get(m.frameId);
