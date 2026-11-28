@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { MAX_LINK_TEXT_CHARS, MAX_LINKS } from './adapters/extract';
 import { extractFeatures, FEATURE_NAMES, isCloudHtmlLink, type Link, scoreEmail, shownHost } from './features';
 
 interface ParityCase {
@@ -135,6 +136,52 @@ describe('scoreEmail', () => {
       { text: 'Read notes', href: 'https://bit.ly/3xyz' },
     ]);
     expect(marketingShortLink.level).toBe('safe');
+  });
+});
+
+describe('scoring an email at the MAX_LINKS cap stays within the 10 ms budget', () => {
+  // Link text as the adapters cap it (MAX_LINK_TEXT_CHARS), full of characters NFKC has to decompose.
+  const filler = ('ｗｗｗ．ｐａｙｐａｌ．ｃｏｍ／' + 'ａ'.repeat(120)).repeat(12).slice(0, MAX_LINK_TEXT_CHARS - 8);
+  const accented = 'àéîõüçñ'.repeat(300).slice(0, MAX_LINK_TEXT_CHARS - 40);
+  const medianMs = (fn: () => unknown): number => {
+    for (let i = 0; i < 3; i++) fn();
+    const times: number[] = [];
+    for (let i = 0; i < 9; i++) {
+      const t = performance.now();
+      fn();
+      times.push(performance.now() - t);
+    }
+    return times.sort((a, b) => a - b)[4]!;
+  };
+
+  it.each([
+    ['full-width look-alike text', (i: number) => ({ text: `${filler}${i}`, href: `https://e${i}.example/` })],
+    ['accented prose with an IDN URL', (i: number) => ({ text: `${accented} https://www.pаypal.com/${i}`, href: `https://xn--80ak6aa92e.com/p/${i}` })],
+    // U+FDFA expands 18-fold under NFKC: the budget counts normalised text, not raw text.
+    ['ligatures NFKC expands 18 times', (i: number) => ({ text: `${'\ufdfa'.repeat(MAX_LINK_TEXT_CHARS - 8)}${i}`, href: `https://e${i}.example/` })],
+  ])('%s', (_, mk) => {
+    const links = Array.from({ length: MAX_LINKS }, (_, i) => mk(i));
+    expect(medianMs(() => scoreEmail('alerts@shop.example', 'Please verify your password', links))).toBeLessThan(10);
+  });
+
+  it('fails closed, keeping the findings it made, when the link text is too long to read in full', () => {
+    const padding = Array.from({ length: MAX_LINKS - 1 }, (_, i) => ({ text: `${accented}${i}`, href: `https://shop.example/${i}` }));
+    const unchecked = scoreEmail('news@shop.example', 'Hello', padding);
+    expect(unchecked).toMatchObject({ level: 'suspicious', unchecked: true });
+    expect(unchecked.reasons.join(' ')).toMatch(/too much link text/);
+
+    const finding = scoreEmail('news@shop.example', 'Hello', [{ text: 'www.paypal.com', href: 'https://evil.example/login' }, ...padding]);
+    expect(finding.level).toBe('suspicious');
+    expect(finding.unchecked).toBeUndefined();
+    expect(finding.reasons.join(' ')).toContain('A link says www.paypal.com but actually goes to evil.example');
+    expect(finding.reasons.join(' ')).toMatch(/too much link text/);
+  });
+
+  it('reads repeated link text once and still scores every link', () => {
+    const links = Array.from({ length: MAX_LINKS }, (_, i) => ({ text: filler, href: `https://shop.example/${i}` }));
+    const v = scoreEmail('news@shop.example', 'Hello', links);
+    expect(v.unchecked).toBeUndefined();
+    expect(v.reasons).toEqual(['A link says www.paypal.com but actually goes to shop.example']);
   });
 });
 

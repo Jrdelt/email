@@ -444,6 +444,16 @@ describe('link text is read once per element, within a work budget', () => {
     expect(r.links.some((l) => l.href.endsWith('#n999'))).toBe(true);
   });
 
+  it('an animated link whose rendered text NFKC expands 18-fold is not re-normalised for every <set> target', () => {
+    const sets = Array.from({ length: 1900 }, (_, i) => `<set attributeName="href" to="https://n${i}.example/"/>`).join('');
+    const m = body(
+      `<svg><a href="https://top.example/"><text><tspan style="display:none">x</tspan>${'\ufdfa'.repeat(2000)}</text>${sets}</a></svg>`,
+    );
+    const [r, ms] = timed(() => scanLinks(m));
+    expect(ms).toBeLessThan(150);
+    expect(r.links.some((l) => l.href === 'https://n1899.example/')).toBe(true);
+  });
+
   it('link elements nested hundreds deep around one large text fail closed instead of re-reading it', () => {
     let html = `<span>${filler(100_000)}</span>`;
     for (let i = 0; i < 400; i++) html = `<div data-ped-formaction="#n${i}">${html}</div>`;

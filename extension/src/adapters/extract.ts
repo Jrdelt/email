@@ -15,7 +15,7 @@ import {
   textOf,
 } from '../dom';
 import { hostOf, registrableDomain } from '../domain';
-import { EXPLICIT_URL, INVISIBLE_RE, safePercentDecode, shownHost, type Link } from '../features';
+import { EXPLICIT_URL, INVISIBLE_RE, safePercentDecode, shownHostReader, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
@@ -444,20 +444,23 @@ function linkTextReader(root: Element): { read(el: Element): LinkText; exceeded(
   };
 }
 
+type ShownHostReader = ReturnType<typeof shownHostReader>;
+
 /** True when `text` shows a host whose registrable domain is not the destination's (scoreEmail's mismatch rule). */
-function showsOtherHost(text: string, href: string): boolean {
-  const shown = shownHost(text);
+function showsOtherHost(shown: ShownHostReader, text: string, href: string): boolean {
+  const host = shown.read(text);
   const h = hostOf(href);
-  return Boolean(shown && h && registrableDomain(shown) !== registrableDomain(h));
+  return Boolean(host && h && registrableDomain(host) !== registrableDomain(h));
 }
 
 /**
  * The text scored for a link to `href`: the rendered text when it shows another host than the destination, else the
  * DOM text. Either reading counts (fail closed), so hiding a URL in the markup cannot clear a mismatch the reader
- * sees, and a misjudged style cannot clear one the DOM text shows.
+ * sees, and a misjudged style cannot clear one the DOM text shows. Shown hosts are read once per text, within the
+ * scan's budget (past it the scan reports truncation).
  */
-const scoredText = (t: LinkText, href: string): string =>
-  t.rendered !== undefined && showsOtherHost(t.rendered, href) ? t.rendered : t.text;
+const scoredText = (shown: ShownHostReader, t: LinkText, href: string): string =>
+  t.rendered !== undefined && showsOtherHost(shown, t.rendered, href) ? t.rendered : t.text;
 
 /** Prepend the subject (bounded) without cutting the end of the already-sampled body. */
 export const withSubject = (subject: string, body: string): string =>
@@ -817,6 +820,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
   const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
   const nodes = [...el.querySelectorAll(sel)];
   const linkText = linkTextReader(el);
+  const shown = shownHostReader();
   // Past the examination bound, look at the first and last nodes and report truncation (fail closed): thousands
   // of identical filler links must not keep the real one from being examined.
   let truncated = nodes.length > MAX_LINK_SCAN;
@@ -840,14 +844,14 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
           truncated = true;
           break;
         }
-        out.push({ text: scoredText(text, href), href });
+        out.push({ text: scoredText(shown, text, href), href });
       }
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
       // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
       if (href) {
         const dest = unwrapCached(href);
-        out.push({ text: scoredText(linkText.read(node), dest), href: dest });
+        out.push({ text: scoredText(shown, linkText.read(node), dest), href: dest });
       }
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? getAttr(node, 'data-ped-att-action') ?? '';
@@ -861,7 +865,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
         '';
       const href = resolveAgainstBase(raw, base);
       if (href) {
-        const text = (scoredText(linkText.read(node), href) || capLinkText(getAttr(node, 'value') || '')).trim();
+        const text = (scoredText(shown, linkText.read(node), href) || capLinkText(getAttr(node, 'value') || '')).trim();
         out.push({ text, href });
       }
     }
@@ -874,7 +878,10 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     seen.add(key);
     return true;
   });
-  return { links: sampleLinks(unique), truncated: truncated || linkText.exceeded() || unique.length > MAX_LINKS };
+  return {
+    links: sampleLinks(unique),
+    truncated: truncated || linkText.exceeded() || shown.exceeded() || unique.length > MAX_LINKS,
+  };
 }
 
 // Cheap string checks (no URL parsing) for links that could carry a finding: shown text with a host or URL in it

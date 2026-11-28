@@ -112,18 +112,29 @@ function isCloudStorageHost(host: string): boolean {
   );
 }
 
-/** True when a link points to an HTML page hosted directly on raw cloud object storage. */
-export function isCloudHtmlLink(href: string): boolean {
+/** An http(s) URL parsed once, or null (scoreEmail reads host, path and query from the same parse). */
+function parseHttpUrl(href: string): URL | null {
   try {
     const u = new URL(href);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-    if (!isCloudStorageHost(host)) return false;
-    const path = safePercentDecode(u.pathname);
-    return !path.endsWith('\n') && /\.(?:html?|shtml|xhtml|xht)$/i.test(path);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Lowercase hostname without IPv6 brackets or a trailing dot (same as domain.ts hostOf). */
+const hostOfUrl = (u: URL): string => u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+
+function isCloudHtmlUrl(u: URL): boolean {
+  if (!isCloudStorageHost(hostOfUrl(u))) return false;
+  const path = safePercentDecode(u.pathname);
+  return !path.endsWith('\n') && /\.(?:html?|shtml|xhtml|xht)$/i.test(path);
+}
+
+/** True when a link points to an HTML page hosted directly on raw cloud object storage. */
+export function isCloudHtmlLink(href: string): boolean {
+  const u = parseHttpUrl(href);
+  return u !== null && isCloudHtmlUrl(u);
 }
 
 /** Drop trailing . , ; : ! ? in linear time (an anchored regex retries at every position of a long run). */
@@ -219,12 +230,26 @@ function asciiHost(host: string): string {
 const PUNY_TLD_HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?$/;
 const isPunyTldHost = (h: string): boolean => h.length <= 253 && PUNY_TLD_HOST_RE.test(h);
 
+const HOST_CHAR_RE = /[.:]|[^\x00-\x7f]/;
+
 /**
  * Extract a hostname only when the link text looks like an explicit URL or bare domain/IP,
  * so prose like "please reset your password immediately." or filenames like "report.pdf" return ''.
  */
 export function shownHost(text: string): string {
-  const t = normalizeShownText(text).trim();
+  return readShownHost(text).host;
+}
+
+/** shownHost plus the work it took: the length of the normalised text (NFKC can expand text up to 18 times). */
+function readShownHost(text: string): { host: string; cost: number } {
+  // ASCII text without a dot or a colon cannot show a URL, domain or IP (NFKC and the folds leave ASCII alone).
+  if (!HOST_CHAR_RE.test(text)) return { host: '', cost: 0 };
+  const normalized = normalizeShownText(text);
+  return { host: shownHostOf(normalized.trim()), cost: Math.max(text.length, normalized.length) };
+}
+
+/** shownHost of already normalised, trimmed link text. */
+function shownHostOf(t: string): string {
   if (!t) return '';
   const m = t.match(EXPLICIT_URL);
   if (m) {
@@ -256,16 +281,42 @@ function senderDomainOf(sender: string): string {
   return cleaned.slice(cleaned.lastIndexOf('@') + 1).toLowerCase().replace(/\.$/, '');
 }
 
-function isOpaqueShortTokenLink(link: Link): boolean {
-  try {
-    const u = new URL(link.href);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    if (u.search || u.hash) return false;
-    if (!SHORT_TOKEN_PATH_RE.test(u.pathname) || !/\d/.test(u.pathname)) return false;
-    return SHORT_CTA_TEXT_RE.test(link.text);
-  } catch {
-    return false;
-  }
+function isOpaqueShortTokenUrl(u: URL, text: string): boolean {
+  if (u.search || u.hash) return false;
+  if (!SHORT_TOKEN_PATH_RE.test(u.pathname) || !/\d/.test(u.pathname)) return false;
+  return SHORT_CTA_TEXT_RE.test(text);
+}
+
+/**
+ * Normalised link text read per email (NFKC is the cost; ~3 ms at worst), far above real mail: a large newsletter
+ * has some 20k characters of link text, and the adapters already fail closed past 500k raw characters
+ * (LINK_TEXT_BUDGET in adapters/extract.ts). Past it, shown hosts are not read and the caller fails closed.
+ */
+const SHOWN_TEXT_BUDGET = 250_000;
+
+/**
+ * shownHost for the links of one email: each distinct text is read once (newsletters and SVG animations repeat
+ * theirs), within SHOWN_TEXT_BUDGET of normalised text. Past the budget `read` returns '' and `exceeded` is true.
+ */
+export function shownHostReader(): { read(text: string): string; exceeded(): boolean } {
+  const memo = new Map<string, string>();
+  let left = SHOWN_TEXT_BUDGET;
+  let over = false;
+  return {
+    read(text) {
+      const hit = memo.get(text);
+      if (hit !== undefined) return hit;
+      if (left <= 0) {
+        over = true;
+        return '';
+      }
+      const { host, cost } = readShownHost(text);
+      left -= cost;
+      memo.set(text, host);
+      return host;
+    },
+    exceeded: () => over,
+  };
 }
 
 /** Extract numerical feature vector matching ml/src/phishml/features.py extract_features(). */
@@ -315,8 +366,11 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
   let hasExternalOrUnknownLink = false;
   let hasOpaqueUrgentShortToken = false;
 
+  const shownText = shownHostReader();
+
   for (const l of links) {
-    const h = hostOf(l.href);
+    const u = parseHttpUrl(l.href); // parsed once for host, cloud page and short-token checks
+    const h = u ? hostOfUrl(u) : '';
     const reg = registrableDomain(h);
     const isExternal = Boolean(reg) && (!senderReg || reg !== senderReg);
     if (isExternal) hasExternalOrUnknownLink = true;
@@ -328,7 +382,7 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
       score += 0.3;
       reasons.push('A link uses lookalike characters in its web address');
     }
-    if (isCloudHtmlLink(l.href)) {
+    if (u && isCloudHtmlUrl(u)) {
       score += 0.4;
       reasons.push('A link points to a web page hosted on raw cloud storage');
     }
@@ -338,10 +392,10 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
     } else if ((SHORTENER_HOSTS.has(h) || SHORTENER_HOSTS.has(reg)) && isExternal) {
       score += 0.25;
       reasons.push(`A link uses a URL shortener (${h}) that hides its real destination`);
-    } else if (isExternal && hits >= 2 && isOpaqueShortTokenLink(l)) {
+    } else if (u && isExternal && hits >= 2 && isOpaqueShortTokenUrl(u, l.text)) {
       hasOpaqueUrgentShortToken = true;
     }
-    const shown = shownHost(l.text);
+    const shown = shownText.read(l.text);
     const shownReg = shown ? registrableDomain(shown) : '';
     // The sender's own domain shown on its email service's click tracker is how tracked mail looks, not a disguise:
     // the sender could link anywhere with any other text just as well. Anyone else's domain still counts.
@@ -365,5 +419,10 @@ export function scoreEmail(sender: string, body: string, links: Link[]): Verdict
   }
   score = Math.min(1, score);
   const level = score >= 0.6 ? 'likely-phishing' : score >= 0.3 ? 'suspicious' : 'safe';
-  return { score, level, reasons: [...new Set(reasons)] };
+  const verdict: Verdict = { score, level, reasons: [...new Set(reasons)] };
+  if (!shownText.exceeded()) return verdict;
+  // Past the link text budget, not every link's text was read: keep a real finding as is; otherwise never let the
+  // email score safe.
+  verdict.reasons.push('This email has too much link text to check it all, so its links are paused');
+  return level === 'safe' ? { ...verdict, score: 0.3, level: 'suspicious', unchecked: true } : verdict;
 }
