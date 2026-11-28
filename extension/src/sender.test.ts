@@ -30,7 +30,7 @@ describe('analyzeSender', () => {
     expect(w('chasesmith', 'chase.smith@gmail.com')).toEqual([]);
   });
   it('display name containing a different address', () => expect(w('service@paypal.com', 'x@evil.example')[0]).toMatch(/really sent from x@evil\.example/));
-  it.each([['security@paypa1.com', 'paypal.com'], ['a@rnicrosoft.com', 'microsoft.com'], ['a@paypal-secure.com', null], ['a@paypal.co', 'paypal.com']])(
+  it.each([['security@paypa1.com', 'paypal.com'], ['a@rnicrosoft.com', 'microsoft.com'], ['a@paypal-secure.com', 'paypal.com'], ['a@paypal.co', 'paypal.com']])(
     'lookalike %s', (addr, like) => {
       const ws = w('Someone', addr).join(' ');
       if (like) expect(ws).toContain(`looks like a copy of ${like}`); else expect(ws).not.toContain('looks like a copy of');
@@ -175,5 +175,63 @@ describe('display names written with look-alike letters', () => {
     expect(analyzeSender('Ορέστης Παπαδόπουλος', 'orestis@example.gr', []).warnings).toEqual([]);
     expect(analyzeSender('аlex@corp.example', 'alex@corp.example', []).warnings).toEqual([]);
     expect(analyzeSender('PаyPal', 'service@paypal.com', []).warnings).toEqual([]);
+  });
+});
+
+describe('combosquatted, subdomain-squatted and transposed sender domains', () => {
+  const copy = (addr: string) => w('Customer Notice', addr).join(' | ');
+  it.each([
+    ['a@paypal-secure.com', 'paypal.com'],
+    ['a@secure-paypal.com', 'paypal.com'],
+    ['a@paypal-account-verify.net', 'paypal.com'],
+    ['a@paypalsupport.com', 'paypal.com'],
+    ['a@securepaypal.com', 'paypal.com'],
+    ['a@paypa1-secure.com', 'paypal.com'],
+    ['a@appleid-verify.com', 'apple.com'],
+    ['a@apple-support.co.uk', 'apple.com'],
+    ['a@amazon-billing.com', 'amazon.com'],
+    ['a@amazonbilling.com', 'amazon.com'],
+    ['a@microsoft-teams-alert.info', 'microsoft.com'],
+    ['a@netflix-payments.com', 'netflix.com'],
+    ['a@dhl-delivery.com', 'dhl.com'],
+    ['a@mircosoft.com', 'microsoft.com'],
+    ['a@netfilx.com', 'netflix.com'],
+    ['a@mircosoft-support.com', 'microsoft.com'],
+  ])('%s looks like a copy of %s', (addr, like) => {
+    expect(copy(addr)).toContain(`looks like a copy of ${like}`);
+  });
+
+  it.each([
+    ['a@paypal.com.evil.xyz', 'paypal.com', 'evil.xyz'],
+    ['a@secure.paypal.co.uk.login-check.example', 'paypal.co.uk', 'login-check.example'],
+    ['a@appleid.apple.com-verify.info', 'apple.com', 'com-verify.info'],
+  ])('%s pretends to be %s but belongs to %s', (addr, brand, real) => {
+    expect(copy(addr)).toContain(`pretends to be ${brand} but belongs to ${real}`);
+  });
+
+  it.each([
+    'a@purchase.com', // ends with "chase"
+    'a@groups.io',
+    'a@upside.com', // "ups" + "ide", not "ups" + "id"
+    'a@pickups.com',
+    'a@apple-orchard.com', // a dictionary-word brand needs a service word next to it
+    'a@amazon-tours.com',
+    'a@chase-smith-law.com',
+    'a@chasecenter.com',
+    'a@outlook-consulting.com',
+    'a@stripe-design.com',
+    'a@live-support.com', // generic labels of secondary brand domains (live.com, office.com, cash.app, block.xyz, me.com)
+    'a@office-supplies.com',
+    'a@cash-converters.com',
+    'a@block-help.com',
+    'a@home-mail.com',
+    'a@meta-analysis.org',
+    'a@metadata.io',
+    'friend@googlemail.com', // Google's own legacy Gmail domain
+    'a@googlegroups.com',
+    'a@mail.paypal.com',
+    'a@email.apple.com',
+  ])('%s is not a look-alike', (addr) => {
+    expect(copy(addr)).not.toMatch(/looks like a copy of|pretends to be/);
   });
 });
