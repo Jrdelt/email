@@ -11,6 +11,9 @@ __pycache__/
 coverage/
 store-upload/
 
-data/raw/
+# Downloaded corpora and anything derived from them stay local (AGENTS.md "Data"); only the provenance file is tracked.
+/data/raw/
+/ml/data/*
+!/ml/data/SOURCES.md
 .DS_Store
 .env
