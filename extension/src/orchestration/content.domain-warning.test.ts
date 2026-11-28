@@ -13,7 +13,6 @@ const intelFor = (domain: string, over: { rdap?: object; dns?: object }) => ({
   checkedAt: new Date().toISOString(),
   rdap: { status: 'ok', registered: new Date(Date.now() - 900 * DAY).toISOString() },
   dns: { status: 'ok', mx: ['mx.example.net'], nxdomain: false },
-  reputation: { status: 'ok', source: 'URIBL', listed: [] },
   ...over,
 });
 const NXDOMAIN = intelFor('northwind.example', {

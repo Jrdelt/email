@@ -451,7 +451,6 @@ describe('decideBanner', () => {
     domain: 'mongodb.com', checkedAt: '2026-11-22T00:00:00Z',
     rdap: { status: 'ok' as const, registered: '2008-07-08T00:00:00Z' },
     dns: { status: 'ok' as const, mx: ['aspmx.l.google.com'] },
-    reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: [] },
   };
 
   it('returns null for safe email with urgency wording and clean sender/intel', () => {
@@ -474,19 +473,18 @@ describe('decideBanner', () => {
     expect(unlocked.linksLocked).toBe(false);
   });
 
-  it('shows warning banner and locks links on async spam-listed domain intel', () => {
+  it('shows warning banner and locks links on async domain intel (domain does not exist)', () => {
     const sender = analyzeSender('Someone', 'a@evil.example', []);
-    const spamIntel = {
+    const missingIntel = {
       domain: 'evil.example', checkedAt: '2026-11-22T00:00:00Z',
-      rdap: { status: 'ok' as const, registered: '2015-01-01T00:00:00Z' },
-      dns: { status: 'ok' as const, mx: ['mx.evil.example'] },
-      reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: ['black'] },
+      rdap: { status: 'notfound' as const },
+      dns: { status: 'ok' as const, mx: [], nxdomain: true },
     };
-    const banner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, spamIntel, false)!;
+    const banner = decideBanner({ score: 0, level: 'safe', reasons: [] }, sender, missingIntel, false)!;
     expect(banner.level).toBe('warning');
     expect(banner.tag).toBe('DOMAIN WARNING');
     expect(banner.linksLocked).toBe(true);
-    expect(banner.reasons[0]).toMatch(/reported for spam online/);
+    expect(banner.reasons[0]).toMatch(/does not exist/);
   });
 
   it('shows danger banner and unlocks only when unlockedThisSession is true', () => {
@@ -541,7 +539,6 @@ describe('details', () => {
     domain: 'bank.com', checkedAt: new Date().toISOString(),
     rdap: { status: 'ok' as const, registered: '2001-01-01T00:00:00Z', registrar: 'Example Registrar', expires: '2030-01-01T00:00:00Z' },
     dns: { status: 'ok' as const, mx: ['mx.bank.com'], spf: 'v=spf1 -all', dmarcPolicy: 'reject' },
-    reputation: { status: 'ok' as const, source: 'URIBL' as const, listed: [] },
   };
 
   it('renderSimpleDetails shows plain-English rows without technical jargon and escapes HTML', () => {
@@ -552,8 +549,7 @@ describe('details', () => {
     expect(text).toContain('Bank <script> (alerts@mail.bank.com)');
     expect(text).toContain('Website');
     expect(text).toContain('bank.com — ');
-    expect(text).toContain('Spam check');
-    expect(text).toContain('No spam reports found');
+    expect(text).not.toContain('Spam');
     expect(text).toContain('Links go to');
     expect(text).not.toMatch(/\b(MX|SPF|DMARC|URIBL|Registrar)\b/);
     expect(dl.querySelector('script')).toBeNull();
@@ -570,7 +566,7 @@ describe('details', () => {
     expect(text).toContain('Example Registrar');
     expect(text).toContain('mx.bank.com');
     expect(text).toContain('policy reject');
-    expect(text).toContain('not listed');
+    expect(text).not.toContain('URIBL');
     expect(details.querySelector('button.copy-it')?.textContent).toBe('Copy details for IT');
   });
 

@@ -50,22 +50,6 @@ export function renderSimpleDetails(doc: Document, s: SenderInfo, intel: IntelSt
   }
   appendRow(doc, dl, 'Website', website);
 
-  const spamText =
-    intel === 'loading'
-      ? 'Checking…'
-      : intel === 'offline'
-        ? 'Skipped (Strict Local Mode — 0 network lookups)'
-        : !intel && s.allowlisted
-          ? 'Not checked (trusted sender)'
-          : intel === 'unavailable' || !intel
-            ? 'Not available right now'
-          : intel.reputation.status === 'ok'
-            ? intel.reputation.listed.length
-              ? 'Reported for spam online'
-              : 'No spam reports found'
-            : 'Could not check right now';
-  appendRow(doc, dl, 'Spam check', spamText);
-
   const linksText = s.linkDomains.length
     ? `Other websites: ${s.linkDomains.slice(0, 3).join(', ')}${s.linkDomains.length > 3 ? ` (+${s.linkDomains.length - 3} more)` : ''}`
     : 'Same website as sender (or no links)';
@@ -114,17 +98,6 @@ function itRows(s: SenderInfo, intel: IntelState, verdict?: Verdict): [string, s
     } else {
       rows.push(['DNS', 'lookup failed']);
     }
-    const rep = intel.reputation;
-    rows.push([
-      'Spam list (URIBL)',
-      rep.status === 'ok'
-        ? rep.listed.length
-          ? `listed: ${rep.listed.join(', ')}`
-          : 'not listed'
-        : rep.status === 'refused'
-          ? 'lookup refused'
-          : 'lookup failed',
-    ]);
   }
   rows.push([
     'External link domains',

@@ -65,9 +65,6 @@ function describeDestIntel(intel: DomainIntel): string {
   } else if (intel.rdap.status === 'notfound') {
     parts.push('Domain not registered');
   }
-  if (intel.reputation.status === 'ok') {
-    parts.push(intel.reputation.listed.length ? 'Reported for spam/phishing online' : 'Not listed on URIBL');
-  }
   return parts.join(' • ');
 }
 

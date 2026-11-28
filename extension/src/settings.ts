@@ -26,7 +26,7 @@ export interface RemovableKV extends KV {
 /**
  * Load effective privacy settings, honoring browser.storage.managed enterprise policy overrides first.
  * In HIPAA-regulated or enterprise environments, IT admins can lock strictLocalMode=true so zero
- * off-device RDAP/DNS/URIBL requests ever leave the browser.
+ * off-device RDAP/DNS requests ever leave the browser.
  */
 export async function getSettings(localKV: ReadableKV, managedKV?: ReadableKV): Promise<PrivacySettings> {
   let managedStrict: boolean | undefined;

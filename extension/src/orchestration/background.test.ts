@@ -18,7 +18,7 @@ const ICLOUD_APP_URL = 'https://www.icloud.com/applications/mail2/current/en-us/
 const ICLOUD_SANDBOX_URL = 'https://p55-mail.icloud-sandbox.com/applications/mail2-message/current/en-us/index.html';
 // The only hosts docs/privacy.md allows the background to contact (registry RDAP servers come from the IANA
 // bootstrap file, which these tests never serve).
-const ALLOWED_LOOKUP_HOSTS = new Set(['data.iana.org', 'rdap.org', 'cloudflare-dns.com', 'dns.google']);
+const ALLOWED_LOOKUP_HOSTS = new Set(['data.iana.org', 'rdap.org', 'cloudflare-dns.com']);
 
 const gmailTop = (tabId = 7): Sender => ({ id: EXT_ID, tab: { id: tabId }, frameId: 0, url: GMAIL_URL });
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0)); // fake storage settles in microtasks

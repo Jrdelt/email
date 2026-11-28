@@ -131,11 +131,10 @@ describe('mergeLinkIntel & destinationIntelWarnings', () => {
     checkedAt: '2026-11-22T00:00:00Z',
     rdap: { status: 'ok', registered: '2010-01-01T00:00:00Z' },
     dns: { status: 'ok', mx: ['mx.dest.example'] },
-    reputation: { status: 'ok', source: 'URIBL', listed: [] },
     ...overrides,
   });
 
-  it('upgrades to danger on brand-new (<30d), NXDOMAIN, notfound, or URIBL black/red destinations', () => {
+  it('upgrades to danger on brand-new (<30d), NXDOMAIN or notfound destinations', () => {
     const base = analyzeLinkDestination('https://dest.example/login', 'sender.com');
 
     const brandNew = mergeLinkIntel(
@@ -153,10 +152,6 @@ describe('mergeLinkIntel & destinationIntelWarnings', () => {
     const notFound = mergeLinkIntel(base, baseIntel({ rdap: { status: 'notfound' }, dns: { status: 'ok', mx: [] } }), NOW);
     expect(notFound.level).toBe('danger');
     expect(notFound.reasons[0]).toMatch(/not registered/);
-
-    const spam = mergeLinkIntel(base, baseIntel({ reputation: { status: 'ok', source: 'URIBL', listed: ['black'] } }), NOW);
-    expect(spam.level).toBe('danger');
-    expect(spam.reasons[0]).toMatch(/reported for spam or phishing/);
   });
 
   it('does not false-positive on web-only domains without MX records or unsupported RDAP TLDs', () => {

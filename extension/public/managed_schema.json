@@ -4,7 +4,7 @@
     "strictLocalMode": {
       "type": "boolean",
       "title": "Enforce Strict Local Mode (Zero Network Lookups)",
-      "description": "When true, disables all off-device RDAP, DNS, and URIBL domain lookups so zero network requests leave the browser (recommended for HIPAA-regulated environments)."
+      "description": "When true, disables all off-device RDAP and DNS domain lookups so zero network requests leave the browser (recommended for HIPAA-regulated environments)."
     },
     "disableLocalReports": {
       "type": "boolean",

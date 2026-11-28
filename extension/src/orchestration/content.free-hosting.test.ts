@@ -12,7 +12,6 @@ const AGED_PLATFORM = {
   checkedAt: new Date().toISOString(),
   rdap: { status: 'ok', registered: '2019-02-05T00:00:00Z' },
   dns: { status: 'ok', mx: ['mx.example'], nxdomain: false },
-  reputation: { status: 'ok', source: 'URIBL', listed: [] },
 };
 
 const PAGE = gmailMessage({
