@@ -4,8 +4,9 @@
 // each re-render deleted a decoy from the email instead of the previous banner, and banners piled up (X removed an
 // older, hidden one). Only the extension's own hosts may be removed.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { analyzeAttachments } from '../attachments';
 import { analyzeSender } from '../sender';
-import { removeBanner, showBanner } from './banner';
+import { decideBanner, removeBanner, showBanner } from './banner';
 import { removePausedLinkToast, showPausedLinkToast } from './linkToast';
 
 const actions = () => ({
@@ -105,5 +106,60 @@ describe('banner announcements', () => {
     removeBanner();
     showBanner(model(), actions());
     expect(card().getAttribute('role')).toBe('alert');
+  });
+});
+
+describe('banner wording follows what was found', () => {
+  // A colleague's otherwise normal email with invoice.html attached: no link was flagged, but the banner said the
+  // email's links "look dangerous" under a PHISHING ALERT sticker. A check-limit notice said SENDER CHECK although
+  // the sender was not the issue.
+  const roots: ShadowRoot[] = [];
+  const attach = HTMLElement.prototype.attachShadow;
+  afterEach(() => vi.restoreAllMocks());
+  function render(m: Parameters<typeof showBanner>[0]) {
+    vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      const r = attach.call(this, init);
+      roots.push(r);
+      return r;
+    });
+    showBanner(m, actions());
+    const root = roots.at(-1)!;
+    return {
+      sticker: root.querySelector('.sticker-top')!.textContent,
+      confirm: root.querySelector('#ped-confirm .confirm-msg')?.textContent ?? '',
+    };
+  }
+  const colleague = analyzeSender('Jordan Lee', 'jordan@northwind.example', []);
+  const SAFE = { score: 0, level: 'safe' as const, reasons: [] };
+
+  it('an attachment-only danger banner says so, not that links look dangerous', () => {
+    const m = decideBanner(SAFE, colleague, undefined, false, analyzeAttachments(['invoice.html']))!;
+    expect(m).toMatchObject({ level: 'danger', tag: 'ATTACHMENT WARNING', linksLocked: true, attachmentsLocked: true });
+    const shown = render(m);
+    expect(shown.sticker).toBe('ATTACHMENT ALERT');
+    expect(shown.confirm).not.toMatch(/links .*look dangerous/i);
+    expect(shown.confirm).toBe(
+      'An attachment in this email uses a high-risk file type, so its links are paused too. Only unlock if you verified the sender.',
+    );
+  });
+
+  it('a phishing banner keeps its wording', () => {
+    const v = { score: 0.9, level: 'likely-phishing' as const, reasons: ['Asks you to verify your account'] };
+    const shown = render(decideBanner(v, colleague, undefined, false)!);
+    expect(shown.sticker).toBe('PHISHING ALERT');
+    expect(shown.confirm).toBe('Links in this email look dangerous. Only unlock if you verified the sender.');
+  });
+
+  it('a check-limit notice is not labelled a sender check', () => {
+    const v = { score: 0.3, level: 'suspicious' as const, unchecked: true, reasons: ['too many links to check'] };
+    expect(render(decideBanner(v, colleague, undefined, false)!).sticker).toBe('CHECK LIMIT');
+  });
+
+  it('a sender warning is still a sender check, and an attachment notice an attachment check', () => {
+    const lookalike = analyzeSender('PayPal Support', 'help@gmail.com', []);
+    expect(render(decideBanner(SAFE, lookalike, undefined, false)!).sticker).toBe('SENDER CHECK');
+    expect(render(decideBanner(SAFE, colleague, undefined, false, analyzeAttachments(['minutes.pdf']))!).sticker).toBe(
+      'ATTACHMENT CHECK',
+    );
   });
 });

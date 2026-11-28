@@ -347,8 +347,19 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   const topSticker = doc.createElement('div');
   topSticker.className = 'sticker-top';
   topSticker.setAttribute('aria-hidden', 'true');
+  // Named after what was found (the tag): a risky attachment in an otherwise clean email is not a phishing alert, and
+  // a check limit is not a sender problem.
+  const attachmentFinding = model.tag === 'ATTACHMENT WARNING';
   topSticker.textContent =
-    model.level === 'danger' ? 'PHISHING ALERT' : attachmentsLocked && !linksLocked ? 'ATTACHMENT CHECK' : 'SENDER CHECK';
+    model.level === 'danger'
+      ? attachmentFinding
+        ? 'ATTACHMENT ALERT'
+        : 'PHISHING ALERT'
+      : model.tag === 'CHECK LIMIT'
+        ? 'CHECK LIMIT'
+        : attachmentFinding || (attachmentsLocked && !linksLocked)
+          ? 'ATTACHMENT CHECK'
+          : 'SENDER CHECK';
 
   const close = doc.createElement('button');
   close.type = 'button';
@@ -658,11 +669,13 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
       const triggerBtn = button('I trust this email', () => {});
       emailConfirm = confirmStep(
         'ped-confirm',
-        linksLocked && attachmentsLocked
-          ? 'Links and attachments in this email look dangerous. Only unlock if you verified the sender.'
-          : attachmentsLocked
-            ? 'An attachment in this email uses a high-risk file type. Only unlock if you verified the sender.'
-            : 'Links in this email look dangerous. Only unlock if you verified the sender.',
+        attachmentFinding && linksLocked
+          ? 'An attachment in this email uses a high-risk file type, so its links are paused too. Only unlock if you verified the sender.'
+          : linksLocked && attachmentsLocked
+            ? 'Links and attachments in this email look dangerous. Only unlock if you verified the sender.'
+            : attachmentsLocked
+              ? 'An attachment in this email uses a high-risk file type. Only unlock if you verified the sender.'
+              : 'Links in this email look dangerous. Only unlock if you verified the sender.',
         attachmentsLocked && !linksLocked
           ? 'Yes, unlock attachments anyway'
           : linksLocked && attachmentsLocked
