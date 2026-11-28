@@ -1,5 +1,5 @@
 import { isLookupDomain } from '../src/domain';
-import { getIntel, type DomainIntel, type FetchFn } from '../src/domainIntel';
+import { getIntel, pruneIntelCache, type DomainIntel, type FetchFn } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { MAX_CLASSIFIED_ATTACHMENTS } from '../src/attachments';
 import { MAX_LINKS, capLinkText } from '../src/adapters/extract';
@@ -77,7 +77,27 @@ export default defineBackground(() => {
     strictNow = strictLocalMode;
     return strictNow;
   };
-  void refreshStrict();
+  // Lookup-cache access for work started in generation `gen`: writes are dropped once Strict Local Mode is on or
+  // the cache was purged since, so they can never bring purged results back.
+  const cacheKV = (gen: number) => {
+    const allowed = () => !strictNow && gen === generation;
+    return {
+      allowed,
+      kv: {
+        get: (k: string) => browser.storage.local.get(k),
+        set: async (items: Record<string, unknown>) => {
+          if (allowed()) await browser.storage.local.set(items);
+        },
+      },
+    };
+  };
+  // Expired data is deleted when the background starts, not only at the next lookup or link warning: cached
+  // sender/clicked-link domains (24 h, 15 min for partial results) and warn:* entries holding a full URL (1 h).
+  const startGen = generation;
+  void refreshStrict()
+    .then((strict) => (strict ? undefined : pruneIntelCache(cacheKV(startGen).kv)))
+    .catch(() => {});
+  void pruneOldWarnings(Date.now());
   browser.storage?.onChanged?.addListener((changes: Record<string, { newValue?: unknown }>, area: string) => {
     if (area === 'managed' || (area === 'local' && 'privacySettings' in changes)) void refreshStrict();
     // Cleared from elsewhere (popup "Clear all local data"): results of lookups already running are discarded.
@@ -147,15 +167,8 @@ export default defineBackground(() => {
         if (await refreshStrict()) return null;
         let p = inflight.get(domain);
         if (!p) {
-          const gen = generation;
-          const allowed = () => !strictNow && gen === generation;
+          const { allowed, kv } = cacheKV(generation);
           const guardedFetch: FetchFn = (u, i) => (allowed() ? fetch(u, i) : Promise.reject(new Error('lookups stopped')));
-          const kv = {
-            get: (k: string) => browser.storage.local.get(k),
-            set: async (items: Record<string, unknown>) => {
-              if (allowed()) await browser.storage.local.set(items);
-            },
-          };
           p = getIntel(kv, domain, guardedFetch).finally(() => inflight.delete(domain));
           inflight.set(domain, p);
         }

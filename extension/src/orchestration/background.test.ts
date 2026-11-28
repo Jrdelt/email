@@ -25,9 +25,10 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0)); // fake st
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-async function boot(opts: { fetch?: Fetch } = {}) {
+async function boot(opts: { fetch?: Fetch; seed?: () => Promise<void> } = {}) {
   vi.resetModules();
   fakeBrowser.reset();
+  await opts.seed?.(); // storage as the browser holds it when the service worker starts
   vi.stubGlobal('browser', fakeBrowser);
   vi.stubGlobal('defineBackground', (main: () => void) => main);
   const fetchSpy = vi.fn<Fetch>(opts.fetch ?? (async () => new Response('{}', { status: 404 })));
@@ -347,5 +348,47 @@ describe('B5 warn:* entries (the full clicked URL for warning.html) expire', () 
     });
     await (fakeBrowser.tabs.onRemoved as unknown as { trigger: (...a: unknown[]) => Promise<unknown> }).trigger(41, {});
     await until(async () => expect(await keys(), 'warn:* entries after tab 41 closed').toEqual(['warn:open']));
+  });
+});
+
+describe('B6 expired data is deleted when the background starts, not only at the next lookup or warning', () => {
+  const HOUR = 3_600_000;
+  const intel = (domain: string, ageMs: number) => ({
+    domain,
+    checkedAt: new Date(Date.now() - ageMs).toISOString(),
+    rdap: { status: 'ok' },
+    dns: { status: 'ok', mx: [] },
+  });
+
+  it('drops expired lookup-cache entries (sender and clicked-link domains) and expired warn:* entries', async () => {
+    await boot({
+      seed: async () => {
+        await fakeBrowser.storage.local.set({
+          domainIntelCache: { 'old.example': intel('old.example', 25 * HOUR), 'fresh.example': intel('fresh.example', HOUR) },
+        });
+        await fakeBrowser.storage.session.set({
+          'warn:stale': { href: 'https://old.example/login', createdAt: Date.now() - WARN_TTL_MS - 60_000 },
+          'warn:fresh': { href: 'https://recent.example/login', createdAt: Date.now() - 60_000 },
+        });
+      },
+    });
+    await until(async () => {
+      expect(Object.keys((await local('domainIntelCache')) as object)).toEqual(['fresh.example']);
+      expect((await warnEntries()).map(([k]) => k)).toEqual(['warn:fresh']);
+    });
+  });
+
+  it('in Strict Local Mode deletes the whole cache instead (and never writes it back)', async () => {
+    await boot({
+      seed: async () => {
+        await fakeBrowser.storage.local.set({
+          privacySettings: { strictLocalMode: true },
+          domainIntelCache: { 'fresh.example': intel('fresh.example', HOUR) },
+        });
+      },
+    });
+    await until(async () => expect(await local('domainIntelCache')).toBeUndefined());
+    await flush();
+    expect(await local('domainIntelCache')).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getIntel, intelWarnings, lookupDomain, resetRdapBootstrap, type FetchFn } from './domainIntel';
+import { getIntel, intelWarnings, lookupDomain, pruneIntelCache, resetRdapBootstrap, type FetchFn } from './domainIntel';
 
 beforeEach(() => resetRdapBootstrap());
 import { memoryKV } from './storage';
@@ -183,5 +183,34 @@ describe('getIntel cache', () => {
     await Promise.all([getIntel(kv, 'alpha.com', f, NOW), getIntel(kv, 'beta.com', f, NOW)]);
     const cached = (await kv.get('domainIntelCache')).domainIntelCache as Record<string, unknown>;
     expect(Object.keys(cached).sort()).toEqual(['alpha.com', 'beta.com']);
+  });
+  it('deletes expired entries on a cache hit too, not only when a new domain is looked up', async () => {
+    const kv = memoryKV();
+    const f = fakeFetch();
+    await getIntel(kv, 'old.com', f, NOW);
+    await getIntel(kv, 'recent.com', f, NOW + 23 * 3600_000);
+    await getIntel(kv, 'recent.com', f, NOW + 25 * 3600_000); // a hit: old.com expired an hour ago
+    const cached = (await kv.get('domainIntelCache')).domainIntelCache as Record<string, unknown>;
+    expect(Object.keys(cached)).toEqual(['recent.com']);
+  });
+});
+
+describe('pruneIntelCache', () => {
+  it('deletes expired and malformed entries and keeps fresh ones, without a lookup', async () => {
+    const kv = memoryKV();
+    const at = (ms: number) => new Date(ms).toISOString();
+    const ok = { rdap: { status: 'ok' }, dns: { status: 'ok', mx: [] } };
+    await kv.set({
+      domainIntelCache: {
+        'old.com': { domain: 'old.com', checkedAt: at(NOW - 25 * 3600_000), ...ok },
+        'partial.com': { domain: 'partial.com', checkedAt: at(NOW - 20 * 60_000), rdap: { status: 'error' }, dns: { status: 'ok', mx: [] } },
+        'fresh.com': { domain: 'fresh.com', checkedAt: at(NOW - 3600_000), ...ok },
+        'junk.com': { domain: 'junk.com' },
+      },
+    });
+    const f = fakeFetch();
+    await pruneIntelCache(kv, NOW);
+    expect(Object.keys((await kv.get('domainIntelCache')).domainIntelCache as object)).toEqual(['fresh.com']);
+    expect((f as any).mock.calls).toEqual([]);
   });
 });

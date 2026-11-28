@@ -179,34 +179,58 @@ export async function lookupDomain(domain: string, fetchFn: FetchFn, now = Date.
   return { domain, checkedAt: new Date(now).toISOString(), rdap, dns };
 }
 
+const isFresh = (k: string, v: unknown, now: number): v is DomainIntel =>
+  isValidDomain(k) &&
+  Boolean(v) &&
+  typeof (v as DomainIntel).checkedAt === 'string' &&
+  now - Date.parse((v as DomainIntel).checkedAt) < ttlOf(v as DomainIntel);
+
+/**
+ * Rewrite the cache without its expired entries (adding `add`, keeping the newest 200). Writes are serialized, and
+ * nothing is written when there is nothing to add or delete.
+ */
+function writeCache(kv: KV, now: number, add?: DomainIntel): Promise<void> {
+  const op = cacheWriteChain.then(async () => {
+    const latestRaw = (await kv.get(CACHE_KEY))[CACHE_KEY];
+    const merged = Object.create(null) as Record<string, DomainIntel>;
+    let dropped = false;
+    if (latestRaw && typeof latestRaw === 'object') {
+      for (const [k, v] of Object.entries(latestRaw as Record<string, unknown>)) {
+        if (isFresh(k, v, now)) merged[k] = v;
+        else dropped = true;
+      }
+    }
+    if (add) merged[add.domain] = add;
+    else if (!dropped) return;
+    const entries = Object.entries(merged)
+      .sort((a, b) => b[1].checkedAt.localeCompare(a[1].checkedAt))
+      .slice(0, MAX_CACHE);
+    await kv.set({ [CACHE_KEY]: Object.fromEntries(entries) });
+  });
+  cacheWriteChain = op.catch(() => {});
+  return op;
+}
+
+/**
+ * Delete expired lookups (sender and clicked-link domains) from the cache. The background runs this when it
+ * starts, so a cached domain is not kept past its 24 h (15 min) lifetime just because no new lookup happens.
+ */
+export const pruneIntelCache = (kv: KV, now = Date.now()): Promise<void> => writeCache(kv, now);
+
 /** Cached lookup (24 h, newest 200 domains). Concurrent writes are serialized and expired entries pruned. */
 export async function getIntel(kv: KV, domain: string, fetchFn: FetchFn, now = Date.now()): Promise<DomainIntel> {
   if (!isLookupDomain(domain)) throw new Error('invalid or private domain');
   const rawCache = (await kv.get(CACHE_KEY))[CACHE_KEY];
   if (rawCache && typeof rawCache === 'object' && Object.hasOwn(rawCache, domain)) {
-    const hit = (rawCache as Record<string, DomainIntel>)[domain];
-    if (hit && typeof hit.checkedAt === 'string' && now - Date.parse(hit.checkedAt) < ttlOf(hit)) return hit;
+    const hit = (rawCache as Record<string, unknown>)[domain];
+    if (isFresh(domain, hit, now)) {
+      const all = Object.entries(rawCache as Record<string, unknown>);
+      if (all.some(([k, v]) => !isFresh(k, v, now))) await writeCache(kv, now).catch(() => {});
+      return hit;
+    }
   }
   const intel = await lookupDomain(domain, fetchFn, now, kv);
-  if (intel.rdap.status !== 'error' || intel.dns.status !== 'error') {
-    const writeOp = cacheWriteChain.then(async () => {
-      const latestRaw = (await kv.get(CACHE_KEY))[CACHE_KEY];
-      const merged = Object.create(null) as Record<string, DomainIntel>;
-      if (latestRaw && typeof latestRaw === 'object') {
-        for (const [k, v] of Object.entries(latestRaw as Record<string, DomainIntel>)) {
-          if (!isValidDomain(k) || !v || typeof v.checkedAt !== 'string') continue;
-          if (now - Date.parse(v.checkedAt) < ttlOf(v)) merged[k] = v;
-        }
-      }
-      merged[domain] = intel;
-      const entries = Object.entries(merged)
-        .sort((a, b) => b[1].checkedAt.localeCompare(a[1].checkedAt))
-        .slice(0, MAX_CACHE);
-      await kv.set({ [CACHE_KEY]: Object.fromEntries(entries) });
-    });
-    cacheWriteChain = writeOp.catch(() => {});
-    await writeOp;
-  }
+  if (intel.rdap.status !== 'error' || intel.dns.status !== 'error') await writeCache(kv, now, intel);
   return intel;
 }
 
