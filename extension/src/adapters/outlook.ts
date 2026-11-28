@@ -14,6 +14,7 @@ import {
   sameOriginFrameDocs,
   isUnsafeNode,
   linkFields,
+  inExcludedRegion,
 } from './extract';
 import type { AttachmentRef, WebmailAdapter } from './types';
 
@@ -49,7 +50,36 @@ function findMessageScope(doc: Document, hostEl: HTMLElement): HTMLElement | nul
   );
 }
 
-function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
+// Attachment wells and cards (also what extractOutlookAttachments locks): their labels and text carry attacker-chosen
+// file names ("Boss <boss@corp.example>.pdf"), never the sender.
+const ATTACHMENT_WELL_SEL = [
+  '[role="region"][aria-label*="attachment" i]',
+  '[role="group"][aria-label*="attachment" i]',
+  '[data-testid*="attachment" i]:not([data-testid*="attachment-card" i]):not([data-testid*="file-attachment" i])',
+  '[class*="attachmentWell" i]',
+  '[class*="AttachmentWell" i]',
+].join(', ');
+const ATTACHMENT_CARD_SEL = [
+  '[aria-label*="Attached file" i]',
+  '[role="listitem"][aria-label*="attachment" i]',
+  '[role="option"][aria-label*="attachment" i]',
+  '[data-testid*="attachment-card" i]',
+  '[data-testid*="file-attachment" i]',
+  'a[download]',
+  'a[data-ped-att-download]',
+  'button[aria-label*="Download" i]',
+  'a[aria-label*="Download" i]',
+].join(', ');
+// Regions that never hold the sender: attachments and the (attacker-chosen) subject heading.
+const SENDER_EXCLUDE_SEL = `${ATTACHMENT_WELL_SEL}, ${ATTACHMENT_CARD_SEL}, [role="heading"], h1, h2`;
+
+type SenderHit = { senderName: string; senderAddress: string };
+
+/**
+ * The sender of the message around `hostEl`. `uncertain` marks an address found only by the scope-wide passes (2-3):
+ * without an explicit From node it may come from anywhere in the message chrome, so it is never allowlist-trusted.
+ */
+function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): SenderHit & { uncertain?: true } {
   const scope = findMessageScope(doc, hostEl);
   if (!scope) return { senderName: '', senderAddress: '' };
 
@@ -59,6 +89,7 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
     container.contains(el) ||
     el.closest('[role="banner"], nav, [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i], [data-testid*="recipient" i]') !== null ||
     /^(to|cc|bcc)\b/i.test(el.getAttribute('aria-label') ?? '');
+  const skipLoose = (el: Element): boolean => skip(el) || inExcludedRegion(el, scope, hostEl, SENDER_EXCLUDE_SEL);
 
   // Pass 1: explicit From / sender nodes inside scope
   for (const el of scope.querySelectorAll('[aria-label^="From" i], [data-testid*="sender" i], [data-testid*="from" i], span.OZZZK')) {
@@ -74,29 +105,31 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
 
   // Pass 2: header attribute nodes in DOM order inside scope
   for (const el of scope.querySelectorAll('[title*="@"], [aria-label*="@"], a[href^="mailto:"]')) {
-    if (skip(el)) continue;
+    if (skipLoose(el)) continue;
     const hit = extractSenderFromElement(el);
-    if (hit) return hit;
+    if (hit) return { ...hit, uncertain: true };
   }
 
-  // Pass 3: plain-text Name<addr@domain> or addr@domain inside header span/button in scope
-  let nonLeafHit: { senderName: string; senderAddress: string } | null = null;
-  let bareLeafHit: { senderName: string; senderAddress: string } | null = null;
+  // Pass 3: plain-text Name<addr@domain> or addr@domain inside header span/button in scope. The first address in DOM
+  // order wins. A first hit that wraps the address in a child (`<span>Name<span>&lt;addr&gt;</span></span>`) is
+  // narrowed to its first leaf, keeping the wrapper's display name for the same address; nothing after the wrapper
+  // (an attachment name, a later "Name <addr>" line) can replace it.
+  let outer: { el: Element; hit: SenderHit } | null = null;
   for (const el of scope.querySelectorAll('span, button')) {
-    if (skip(el)) continue;
+    if (skipLoose(el)) continue;
+    if (outer && !outer.el.contains(el)) break;
     const text = (el.textContent ?? '').trim();
     if (!text.includes('@') || text.length > 200) continue;
     const hit = extractSenderFromElement(el);
     if (!hit) continue;
-    const hasChildAt = [...el.children].some((c) => textOf(c).includes('@'));
-    if (!hasChildAt) {
-      if (hit.senderName) return hit;
-      bareLeafHit ??= hit;
-    } else {
-      nonLeafHit ??= hit;
+    if ([...el.children].some((c) => textOf(c).includes('@'))) {
+      outer ??= { el, hit };
+      continue;
     }
+    if (!hit.senderName && outer && outer.hit.senderAddress === hit.senderAddress) return { ...outer.hit, uncertain: true };
+    return { ...hit, uncertain: true };
   }
-  return (nonLeafHit?.senderName ? nonLeafHit : bareLeafHit) ?? nonLeafHit ?? { senderName: '', senderAddress: '' };
+  return outer ? { ...outer.hit, uncertain: true } : { senderName: '', senderAddress: '' };
 }
 
 function findSubject(doc: Document, container: HTMLElement): string {
@@ -155,30 +188,11 @@ function extractOutlookAttachments(
     return /^(?:attach|insert)\b/i.test(lbl);
   };
 
-  const wellSel = [
-    '[role="region"][aria-label*="attachment" i]',
-    '[role="group"][aria-label*="attachment" i]',
-    '[data-testid*="attachment" i]:not([data-testid*="attachment-card" i]):not([data-testid*="file-attachment" i])',
-    '[class*="attachmentWell" i]',
-    '[class*="AttachmentWell" i]',
-  ].join(', ');
-  for (const well of scope.querySelectorAll<HTMLElement>(wellSel)) {
+  for (const well of scope.querySelectorAll<HTMLElement>(ATTACHMENT_WELL_SEL)) {
     if (shouldSkip(well) || wells.some((prev) => prev.contains(well))) continue;
     wells.push(well);
     attachmentContainers.push(well);
   }
-
-  const cardSel = [
-    '[aria-label*="Attached file" i]',
-    '[role="listitem"][aria-label*="attachment" i]',
-    '[role="option"][aria-label*="attachment" i]',
-    '[data-testid*="attachment-card" i]',
-    '[data-testid*="file-attachment" i]',
-    'a[download]',
-    'a[data-ped-att-download]',
-    'button[aria-label*="Download" i]',
-    'a[aria-label*="Download" i]',
-  ].join(', ');
 
   const addCard = (el: HTMLElement) => {
     if (attachments.length - inlineCount >= MAX_ATTACHMENTS) return;
@@ -187,7 +201,7 @@ function extractOutlookAttachments(
     attachments.push({ name: outlookItemName(el), element: el });
   };
 
-  for (const card of scope.querySelectorAll<HTMLElement>(cardSel)) addCard(card);
+  for (const card of scope.querySelectorAll<HTMLElement>(ATTACHMENT_CARD_SEL)) addCard(card);
   for (const well of wells) {
     for (const card of well.querySelectorAll<HTMLElement>('[role="button"], button, a')) addCard(card);
   }
@@ -212,7 +226,7 @@ export const outlook: WebmailAdapter = {
   matches: (url) => HOSTS.has(url.hostname.toLowerCase().replace(/\.$/, '')),
   extractAll(doc) {
     return findBodies(doc).map(({ container, hostEl }) => {
-      const { senderName, senderAddress } = findSender(doc, container, hostEl);
+      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl);
       const subject = findSubject(doc, container);
       const body = withSubject(subject, bodyText(container));
       const linkInfo = linkFields(container); // unwraps Safe Links and other redirect wrappers
@@ -220,6 +234,7 @@ export const outlook: WebmailAdapter = {
       return {
         senderName,
         senderAddress,
+        ...(uncertain ? { pairingUncertain: true } : {}),
         body,
         ...linkInfo,
         ...(attachments.length ? { attachments } : {}),

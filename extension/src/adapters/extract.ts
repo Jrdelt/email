@@ -49,6 +49,21 @@ export function isNestedIn(el: Element, selectors: readonly string[]): boolean {
 }
 
 /**
+ * True when `el` sits in a region matching `sel` (attachment chips, the subject heading) strictly inside `scope`
+ * that does not also hold `hostEl` (the body, or the iframe hosting it): a wrapper around the whole message is not
+ * such a region. Sender lookups skip these, since their labels and text (file names, subject) are attacker-chosen,
+ * never the sender.
+ */
+export function inExcludedRegion(el: Element, scope: Element, hostEl: Element, sel: string): boolean {
+  for (let cur = closestEl(el, sel); cur && cur !== scope && scope.contains(cur); ) {
+    if (!cur.contains(hostEl)) return true;
+    const up = cur.parentElement;
+    cur = up ? closestEl(up, sel) : null;
+  }
+  return false;
+}
+
+/**
  * Longest header/label text parsed for an address. Real headers are far shorter; the cap plus excluding '@'
  * from the repeated classes keeps address matching linear on attacker text (e.g. a display name of 2,000 '@').
  */

@@ -13,6 +13,7 @@ import {
   sameOriginFrameDocs,
   isUnsafeNode,
   linkFields,
+  inExcludedRegion,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
@@ -59,13 +60,28 @@ const FROM_BLOCK_SELECTORS = [
   '[data-testid="message-header"]',
 ];
 
-function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
+const SUBJECT_SEL = '[data-testid="conversation-header:subject"], [data-testid="message-column:subject"], h1[title]';
+const ATTACHMENT_ITEM_SEL =
+  '[data-testid^="attachment-item"]:not([data-testid="attachment-item:name"]), a[download], a[data-ped-att-download]';
+// Regions that never hold the sender: the attachment list and items (attacker-chosen file names) and the subject.
+const SENDER_EXCLUDE_SEL = `[data-testid^="attachment-list"], [data-testid^="attachment-item"], ${ATTACHMENT_ITEM_SEL}, ${SUBJECT_SEL}`;
+
+/**
+ * The sender of the message view around `hostEl`. `uncertain` marks an address found without a From block: it may
+ * come from anywhere in the message view, so it is never allowlist-trusted.
+ */
+function findSender(
+  doc: Document,
+  container: HTMLElement,
+  hostEl: HTMLElement,
+): { senderName: string; senderAddress: string; uncertain?: true } {
   const scope = findScope(doc, hostEl);
   const skip = (el: Element): boolean =>
     isUnsafeNode(el) ||
     el === container ||
     container.contains(el) ||
-    el.closest('[data-testid*="recipients:to"], [data-testid*="recipients:cc"], [data-testid*="recipients:bcc"]') !== null;
+    el.closest('[data-testid*="recipients:to"], [data-testid*="recipients:cc"], [data-testid*="recipients:bcc"]') !== null ||
+    inExcludedRegion(el, scope, hostEl, SENDER_EXCLUDE_SEL);
 
   // Most specific first: the outer header also contains the display name and the recipients.
   const fromBlock =
@@ -85,15 +101,13 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
   )) {
     if (skip(el)) continue;
     const hit = extractSenderFromElement(el, fallbackName);
-    if (hit) return hit;
+    if (hit) return fromBlock ? hit : { ...hit, uncertain: true };
   }
   return { senderName: fallbackName, senderAddress: '' };
 }
 
 function findSubject(doc: Document, container: HTMLElement): string {
-  for (const el of doc.querySelectorAll<HTMLElement>(
-    '[data-testid="conversation-header:subject"], [data-testid="message-column:subject"], h1[title]',
-  )) {
+  for (const el of doc.querySelectorAll<HTMLElement>(SUBJECT_SEL)) {
     if (isUnsafeNode(el) || container.contains(el) || isHidden(el)) continue;
     const t = (el.textContent ?? '').trim();
     if (t && t.length <= 300) return t;
@@ -136,9 +150,7 @@ function extractProtonAttachments(
     attachmentContainers.push(list);
   }
 
-  for (const item of scope.querySelectorAll<HTMLElement>(
-    '[data-testid^="attachment-item"]:not([data-testid="attachment-item:name"]), a[download], a[data-ped-att-download]',
-  )) {
+  for (const item of scope.querySelectorAll<HTMLElement>(ATTACHMENT_ITEM_SEL)) {
     if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (shouldSkip(item)) continue;
     if (attachments.some((p) => p.element === item || p.element.contains(item))) continue;
@@ -164,13 +176,14 @@ export const proton: WebmailAdapter = {
   matches: (url) => url.hostname.toLowerCase().replace(/\.$/, '') === 'mail.proton.me',
   extractAll(doc): ExtractedEmail[] {
     return findBodies(doc).map(({ container, hostEl }) => {
-      const { senderName, senderAddress } = findSender(doc, container, hostEl);
+      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl);
       const subject = findSubject(doc, container);
       const body = withSubject(subject, bodyText(container));
       const { attachments, attachmentContainers } = extractProtonAttachments(doc, container, hostEl);
       return {
         senderName,
         senderAddress,
+        ...(uncertain ? { pairingUncertain: true } : {}),
         body,
         ...linkFields(container),
         ...(attachments.length ? { attachments } : {}),

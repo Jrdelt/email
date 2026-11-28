@@ -13,6 +13,7 @@ import {
   sameOriginFrameDocs,
   isUnsafeNode,
   linkFields,
+  inExcludedRegion,
 } from './extract';
 import type { AttachmentRef, ExtractedEmail, WebmailAdapter } from './types';
 
@@ -45,13 +46,29 @@ function findScope(doc: Document, hostEl: HTMLElement): HTMLElement {
   );
 }
 
-function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement): { senderName: string; senderAddress: string } {
+const SUBJECT_SEL = '[data-test-id="message-group-subject-text"], [data-test-id="message-subject"], main h1, [role="main"] h1';
+const ATTACHMENT_LIST_SEL = '[data-test-id="attachment-list"], [aria-label*="attachment" i][role="list"]';
+const ATTACHMENT_TILE_SEL =
+  '[data-test-id="attachment-tile"], [data-test-id="attachment-download-btn"], a[download], a[data-ped-att-download]';
+// Regions that never hold the sender: attachment lists/tiles (attacker-chosen file names) and the subject.
+const SENDER_EXCLUDE_SEL = `${ATTACHMENT_LIST_SEL}, ${ATTACHMENT_TILE_SEL}, [data-test-id="attachment-filename"], ${SUBJECT_SEL}`;
+
+/**
+ * The sender of the message card around `hostEl`. `uncertain` marks an address found only by the card-wide pass:
+ * without the header's own sender node it may come from anywhere in the card, so it is never allowlist-trusted.
+ */
+function findSender(
+  doc: Document,
+  container: HTMLElement,
+  hostEl: HTMLElement,
+): { senderName: string; senderAddress: string; uncertain?: true } {
   const scope = findScope(doc, hostEl);
   const skip = (el: Element): boolean =>
     isUnsafeNode(el) ||
     el === container ||
     container.contains(el) ||
-    el.closest('[data-test-id="recipient-list"], [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i]') !== null;
+    el.closest('[data-test-id="recipient-list"], [aria-label^="To" i], [aria-label^="Cc" i], [aria-label^="Bcc" i]') !== null ||
+    inExcludedRegion(el, scope, hostEl, SENDER_EXCLUDE_SEL);
 
   for (const el of scope.querySelectorAll(
     '[data-test-id="message-from"], [data-test-id="sender-name"], [data-test-id="message-header"] [title*="@"], [data-test-id="message-header"] [aria-label*="@"]',
@@ -63,15 +80,13 @@ function findSender(doc: Document, container: HTMLElement, hostEl: HTMLElement):
   for (const el of scope.querySelectorAll('[title*="@"], [aria-label*="@"], a[href^="mailto:"]')) {
     if (skip(el)) continue;
     const hit = extractSenderFromElement(el);
-    if (hit) return hit;
+    if (hit) return { ...hit, uncertain: true };
   }
   return { senderName: '', senderAddress: '' };
 }
 
 function findSubject(doc: Document, container: HTMLElement): string {
-  for (const el of doc.querySelectorAll<HTMLElement>(
-    '[data-test-id="message-group-subject-text"], [data-test-id="message-subject"], main h1, [role="main"] h1',
-  )) {
+  for (const el of doc.querySelectorAll<HTMLElement>(SUBJECT_SEL)) {
     if (isUnsafeNode(el) || container.contains(el) || isHidden(el)) continue;
     const t = (el.textContent ?? '').trim();
     if (t && t.length <= 300) return t;
@@ -109,15 +124,12 @@ function extractYahooAttachments(
     el.contains(container) ||
     (el instanceof HTMLElement && (isHidden(el) || isCompose(el)));
 
-  const listSel = '[data-test-id="attachment-list"], [aria-label*="attachment" i][role="list"]';
-  for (const list of scope.querySelectorAll<HTMLElement>(listSel)) {
+  for (const list of scope.querySelectorAll<HTMLElement>(ATTACHMENT_LIST_SEL)) {
     if (shouldSkip(list) || attachmentContainers.some((c) => c.contains(list))) continue;
     attachmentContainers.push(list);
   }
 
-  const tileSel =
-    '[data-test-id="attachment-tile"], [data-test-id="attachment-download-btn"], a[download], a[data-ped-att-download]';
-  for (const tile of scope.querySelectorAll<HTMLElement>(tileSel)) {
+  for (const tile of scope.querySelectorAll<HTMLElement>(ATTACHMENT_TILE_SEL)) {
     if (attachments.length - inlineCount >= MAX_ATTACHMENTS) break;
     if (shouldSkip(tile)) continue;
     if (attachments.some((p) => p.element === tile || p.element.contains(tile))) continue;
@@ -138,13 +150,14 @@ export const yahoo: WebmailAdapter = {
   matches: (url) => url.hostname.toLowerCase().replace(/\.$/, '') === 'mail.yahoo.com',
   extractAll(doc): ExtractedEmail[] {
     return findBodies(doc).map(({ container, hostEl }) => {
-      const { senderName, senderAddress } = findSender(doc, container, hostEl);
+      const { senderName, senderAddress, uncertain } = findSender(doc, container, hostEl);
       const subject = findSubject(doc, container);
       const body = withSubject(subject, bodyText(container));
       const { attachments, attachmentContainers } = extractYahooAttachments(doc, container, hostEl);
       return {
         senderName,
         senderAddress,
+        ...(uncertain ? { pairingUncertain: true } : {}),
         body,
         ...linkFields(container),
         ...(attachments.length ? { attachments } : {}),

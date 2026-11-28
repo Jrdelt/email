@@ -116,6 +116,55 @@ describe('outlook adapter', () => {
   });
 });
 
+describe('outlook sender: attachment names and the subject are never the sender', () => {
+  // The header as OWA renders it, but with its build-hashed class renamed (span.OZZZK no longer matches pass 1).
+  const page = (extra: string, subject = '') => `
+    <div data-app-section="ConversationContainer">
+      <div aria-label="Email message">${subject}
+        <div><span class="Xk2Pq">Mallory Ops<span>&lt;mallory@evil.example&gt;</span></span></div>
+        <div aria-label="Message body"><p>Please pay</p><a href="https://evil.example/pay">Pay now</a></div>
+        ${extra}
+      </div>
+    </div>`;
+  const cases: [string, string, string?][] = [
+    ['an attachment card text', '<div role="listitem" aria-label="Attached file" id="att"><span>Boss &lt;boss@corp.example&gt;.pdf</span></div>'],
+    ['an attachment option title', '<div role="region" aria-label="Attachments"><div role="option" title="Boss &lt;boss@corp.example&gt;.pdf"><span>Boss.pdf</span></div></div>'],
+    ['a parenthesised address in a file name', '<div role="listitem" aria-label="Attached file"><span>Invoice (boss@corp.example).pdf</span></div>'],
+    ['a download button label', '<button aria-label="Download Boss &lt;boss@corp.example&gt;.pdf">Download</button>'],
+    ['the subject heading', '', '<div role="heading" aria-level="2"><span>Boss &lt;boss@corp.example&gt;</span></div>'],
+  ];
+  for (const [label, extra, subject] of cases) {
+    it(`takes the header's address, not ${label}`, () => {
+      document.body.innerHTML = page(extra, subject);
+      const e = outlook.extract(document)!;
+      expect(e.senderAddress).toBe('mallory@evil.example');
+      expect(e.senderName).toBe('Mallory Ops');
+    });
+  }
+
+  it('marks an address found only by the scope-wide passes as uncertain (never allowlist-trusted)', () => {
+    document.body.innerHTML = page('');
+    expect(outlook.extract(document)!.pairingUncertain).toBe(true);
+    document.body.innerHTML = `<div aria-label="Reading Pane"><div aria-label="Email message">
+      <span title="alerts@bank.com">Bank Alerts</span><div aria-label="Message body">x</div></div></div>`;
+    expect(outlook.extract(document)).toMatchObject({ senderAddress: 'alerts@bank.com', pairingUncertain: true });
+  });
+
+  it('keeps an explicit From node certain', () => {
+    document.body.innerHTML = `<div data-app-section="ConversationContainer"><div aria-label="Email message">
+      <span class="OZZZK">Mallory Ops&lt;mallory@evil.example&gt;</span><div aria-label="Message body">x</div></div></div>`;
+    expect(outlook.extract(document)!.pairingUncertain).toBeUndefined();
+  });
+
+  it('uses the first address in DOM order, not a later leaf that also carries a name', () => {
+    document.body.innerHTML = `<div data-app-section="ConversationContainer"><div aria-label="Email message">
+      <div><span class="Xk2Pq">&lt;mallory@evil.example&gt;</span></div>
+      <div><span>Boss &lt;boss@corp.example&gt;</span></div>
+      <div aria-label="Message body">x</div></div></div>`;
+    expect(outlook.extract(document)!.senderAddress).toBe('mallory@evil.example');
+  });
+});
+
 describe('unwrapSafeLink', () => {
   it('unwraps Microsoft Safe Links to http(s) targets', () => {
     expect(
