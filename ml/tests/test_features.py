@@ -24,6 +24,22 @@ def test_unicode_database_is_the_pinned_one():
     assert unicodedata.unidata_version == "15.1.0", "run the ML pipeline with the Python version in ml/.python-version"
 
 
+def test_features_refuse_another_unicode_database(monkeypatch):
+    # train.py and evaluate.py never run the test above: importing the features on another interpreter must fail.
+    import phishml.features as features
+
+    source = Path(features.__file__).read_text(encoding="utf-8")
+    monkeypatch.setattr(unicodedata, "unidata_version", "16.0.0")
+    with pytest.raises(RuntimeError, match=r"Unicode 15\.1\.0 \(Python 3\.13"):
+        exec(compile(source, features.__file__, "exec"), {"__name__": "phishml_features_probe"})
+
+
+def test_python_requirement_is_the_pinned_version():
+    pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    pinned = (Path(__file__).parents[1] / ".python-version").read_text(encoding="utf-8").strip()
+    assert f'requires-python = "=={pinned}.*"' in pyproject
+
+
 def test_parity_fixture_count_and_schema():
     assert len(PARITY_CASES) >= 20
     for case in PARITY_CASES:

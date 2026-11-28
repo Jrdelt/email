@@ -7,6 +7,16 @@ import unicodedata
 from dataclasses import dataclass
 from urllib.parse import unquote
 
+# NFKC and the Unicode classes the features use come from the interpreter's Unicode database. The parity fixture
+# (tests/fixtures/parity.json) was generated with that of ml/.python-version (Python 3.13: Unicode 15.1), so features
+# computed on another one would silently differ from the extension's: refuse to run there.
+UNIDATA_VERSION = "15.1.0"
+if unicodedata.unidata_version != UNIDATA_VERSION:
+    raise RuntimeError(
+        f"phishml.features needs Unicode {UNIDATA_VERSION} (Python 3.13, see ml/.python-version); "
+        f"this interpreter has {unicodedata.unidata_version}"
+    )
+
 URGENCY = (
     "urgent", "immediately", "verify", "suspended", "locked", "password", "confirm", "act now", "expires",
     "expiration", "expired", "will be deleted", "billing details", "payment method", "unauthorized",
