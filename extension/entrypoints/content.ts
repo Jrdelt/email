@@ -766,6 +766,9 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   }
 
   let showingUndoPill = false;
+  // What "I trust this email" changed, so that Undo restores exactly the earlier trust: messages of the thread that
+  // were already trusted (stored fingerprint or this session) stay trusted.
+  let undoState: { item: (typeof items)[number]; emailTrusted: boolean; inSession: boolean }[] | null = null;
   const containerDocs = messages.flatMap((m) => {
     const c = (m as { container?: HTMLElement }).container;
     return c ? [ownerDocOf(c)] : [];
@@ -856,6 +859,11 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
       {
         onUnlock: async () => {
           showingUndoPill = true;
+          undoState = evaluated.map(({ item }) => ({
+            item,
+            emailTrusted: item.emailTrusted,
+            inSession: trustedThisSession.has(item.hash),
+          }));
           addBounded(trustedThisSession, threadHashKey);
           for (const { item } of evaluated) {
             addBounded(trustedThisSession, item.hash);
@@ -873,19 +881,25 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
             intel: primaryEntry.intel,
             trusted: true,
           });
-          await trustEmails(kv, evaluated.map((e) => e.item.hash));
+          // Only the newly trusted messages: Undo removes exactly these again. The trust above already applies for
+          // this session; a failed write (e.g. storage of a script orphaned by an update) must not undo it or keep
+          // the warning card up while the links are open.
+          const added = undoState.filter((u) => !u.emailTrusted).map((u) => u.item.hash);
+          await trustEmails(kv, added).catch(() => undefined);
         },
         onUndoUnlock: async () => {
           showingUndoPill = false;
           trustedThisSession.delete(threadHashKey);
-          const hashes = evaluated.map((e) => e.item.hash);
-          for (const { item } of evaluated) {
-            trustedThisSession.delete(item.hash);
-            item.emailTrusted = false;
-            Object.assign(item, trustState(item, false, item.allowlistTrusted));
+          const prior = undoState ?? evaluated.map(({ item }) => ({ item, emailTrusted: false, inSession: false }));
+          undoState = null;
+          for (const { item, emailTrusted, inSession } of prior) {
+            if (!inSession) trustedThisSession.delete(item.hash);
+            item.emailTrusted = emailTrusted;
+            Object.assign(item, trustState(item, emailTrusted, item.allowlistTrusted));
           }
-          await untrustEmails(kv, hashes);
+          // Re-lock first: the lock must never depend on the storage write, which can fail.
           render();
+          await untrustEmails(kv, prior.filter((u) => !u.emailTrusted).map((u) => u.item.hash)).catch(() => undefined);
         },
         onTrustSender: async () => {
           if (!canTrustByAllowlist(primaryEntry.item.rawSender)) return false;

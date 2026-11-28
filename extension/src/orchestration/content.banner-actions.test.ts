@@ -113,7 +113,8 @@ describe('content.ts: the banner buttons on an email from a sender Gmail could n
     expect(linksLocked(), 'links locked by Undo itself (before any rescan)').toBe(true);
     expect(downloadLocked(), 'download locked').toBe(true);
     expect($('agenda').hasAttribute('href')).toBe(false);
-    expect(await local('trustedEmails')).toEqual([]);
+    // The fingerprint is forgotten after the re-lock (which must not depend on that storage write).
+    await until(async () => expect(await local('trustedEmails')).toEqual([]));
     expect(lastVerdict(sent)).toMatchObject({ trusted: false, sender: { address: ADDRESS } });
     expect(banner.button('I trust this email').disabled).toBe(false);
   });
