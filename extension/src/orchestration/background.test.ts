@@ -211,6 +211,17 @@ describe('B2 message validation', () => {
       reasons: ['Looks like a fake login page'],
       warnTabId: expect.any(Number),
     });
+    expect(entry).not.toHaveProperty('kind');
+  });
+
+  it("openWarning keeps a form submission's kind (and only that value)", async () => {
+    const { send, createTab } = await boot();
+    for (const kind of ['form', 'bogus']) {
+      await send({ type: 'openWarning', href: 'http://forms.example/submit', level: 'warning', kind }, gmailTop());
+    }
+    const ids = createTab.mock.calls.map((c) => new URL((c[0] as { url: string }).url).searchParams.get('id'));
+    expect(await session(`warn:${ids[0]}`)).toMatchObject({ kind: 'form' });
+    expect(await session(`warn:${ids[1]}`)).not.toHaveProperty('kind');
   });
 });
 

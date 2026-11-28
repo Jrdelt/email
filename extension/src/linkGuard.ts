@@ -33,6 +33,39 @@ const FREE_SITE_SUFFIXES = [
 /** The free hosting service a host is a site on (never the service's own apex), or ''. */
 const freeSiteSuffix = (host: string): string => FREE_SITE_SUFFIXES.find((s) => host.endsWith(`.${s}`)) ?? '';
 
+/**
+ * A host that is a site on a free hosting service: the service (`suffix`) and the site on it, the one label left of
+ * the suffix ('evil.pages.dev' for www.paypal.com.evil.pages.dev, as the Public Suffix List's private section would
+ * name it). null for any other host. The service's own record says nothing about the site, so it is never looked up.
+ */
+export function freeHostingSite(host: string): { suffix: string; site: string } | null {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  const suffix = freeSiteSuffix(h);
+  if (!suffix) return null;
+  const label = h.slice(0, -suffix.length - 1).split('.').pop() ?? '';
+  return label ? { suffix, site: `${label}.${suffix}` } : null;
+}
+
+/**
+ * Why a destination analyzeLinkDestination rated 'warning' was paused, for the warning page's lead: an archive
+ * download, a site on a free hosting service, an unencrypted connection, or (shorteners, ambiguous redirects and
+ * anything else) an address that hides where it goes.
+ */
+export function linkWarningKind(href: string): 'archive' | 'freeHost' | 'http' | 'hides' {
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return 'hides';
+  }
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  if (SHORTENER_HOSTS.has(host) || SHORTENER_HOSTS.has(registrableDomain(host))) return 'hides';
+  const ext = safePercentDecode(u.pathname).match(PATH_EXT_RE)?.[1]?.toLowerCase() ?? '';
+  if (ext && ARCHIVE_EXTS.has(ext)) return 'archive';
+  if (freeSiteSuffix(host)) return 'freeHost';
+  return u.protocol === 'http:' ? 'http' : 'hides';
+}
+
 /** Returns true strictly for valid http(s) URLs. */
 export function isSafeHttpUrl(raw: string): boolean {
   try {

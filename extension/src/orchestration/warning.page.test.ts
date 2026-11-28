@@ -19,6 +19,7 @@ interface Entry {
   level: 'warning' | 'danger';
   reasons: string[];
   intel?: DomainIntel;
+  kind?: 'form';
   createdAt?: number;
 }
 
@@ -263,5 +264,86 @@ describe('warning.html: Back and "Open anyway"', () => {
     document.getElementById('proceed-btn')!.click();
     await until(() => expect(replace).toHaveBeenCalledWith('https://bit.ly/3xYz'));
     expect(await fakeBrowser.storage.session.get('warn:w1')).toEqual({});
+  });
+});
+
+describe('warning.html: a site on a free hosting service', () => {
+  // The click guard sends these here without a lookup: the service's own years-old record (pages.dev, github.io)
+  // says nothing about who runs the site, so the page must not look it up either, or show it as the site's.
+  const FREE = entry({
+    href: 'https://www.paypal.com.secure.pages.dev/login',
+    host: 'www.paypal.com.secure.pages.dev',
+    registrable: 'pages.dev',
+    reasons: [
+      "This link goes to a site on a free hosting service (pages.dev): anyone can publish there, so who runs it can't be checked",
+    ],
+  });
+
+  it('sends no lookup for the hosting service and shows none of its details', async () => {
+    const { sent } = await openPage(FREE, { answer: intel({ domain: 'pages.dev' }) });
+    expect(sent).toEqual([]);
+    expect(text('dest-meta')).toMatch(/^Not looked up: anyone can publish a site on pages\.dev/);
+    expect(text('dest-meta')).not.toMatch(/Domain|Registrar/);
+  });
+
+  it('names the site on the service (not the service, not the brand-prefixed full host)', async () => {
+    await openPage(FREE, { answer: intel({ domain: 'pages.dev' }) });
+    expect(text('dest-host')).toBe('secure.pages.dev');
+    expect(text('dest-fullhost')).toBe('Full host name: www.paypal.com.secure.pages.dev');
+    expect(text('proceed-btn')).toBe('I understand the risk — open secure.pages.dev');
+  });
+
+  it('shows a GitHub Pages site as itself', async () => {
+    await openPage(
+      entry({ href: 'https://myorg.github.io/handbook/', host: 'myorg.github.io', registrable: 'github.io', reasons: [] }),
+    );
+    expect(text('dest-host')).toBe('myorg.github.io');
+    expect(shown('dest-fullhost')).toBe(false);
+    expect(text('lead')).toMatch(/free hosting service, where anyone can publish/);
+    expect(text('lead')).not.toMatch(/hides/);
+  });
+});
+
+describe('warning.html: the lead says why a warning-level link was paused', () => {
+  it.each([
+    ['https://files.example/report.zip', /downloads an archive file/],
+    ['http://news.example.org/story', /unencrypted connection \(http:\/\/\)/],
+    ['https://bit.ly/3xYz', /hides or weakens the destination address/],
+  ])('%s', async (href, lead) => {
+    const host = new URL(href).hostname;
+    await openPage(entry({ href, host, registrable: host }), { answer: intel() });
+    expect(text('lead')).toMatch(lead);
+  });
+});
+
+describe('warning.html: a stopped form submission', () => {
+  const FORM = entry({
+    href: 'http://feedback.example/submit',
+    host: 'feedback.example',
+    registrable: 'feedback.example',
+    kind: 'form',
+    reasons: ['This link uses an unencrypted connection (http:// instead of https://)'],
+  });
+
+  it('speaks of a form, and that its answers were not sent', async () => {
+    await openPage(FORM, { answer: intel({ domain: 'feedback.example' }) });
+    expect(text('title')).toBe('Check where this form sends your answers');
+    expect(text('lead')).toMatch(/^Your answers were not sent\. This form uses an unencrypted connection/);
+    expect(document.title).toBe('Check Form — Phishing Email Detector');
+    expect(document.querySelector('#dest-box .dest-label')!.textContent).toBe('Where this form sends your answers');
+  });
+
+  it('says "Open anyway" opens the address without the answers', async () => {
+    await openPage(FORM, { answer: intel({ domain: 'feedback.example' }) });
+    expect(text('proceed-btn')).toBe('I understand the risk — open feedback.example without the form');
+    expect(document.querySelector('#advanced-details .muted')!.textContent).toMatch(/your answers are not sent/);
+  });
+
+  it('keeps the form wording when a lookup escalates it to danger', async () => {
+    await openPage(FORM, {
+      answer: intel({ domain: 'feedback.example', rdap: { status: 'ok', registered: new Date().toISOString() } }),
+    });
+    expect(text('title')).toBe('Dangerous form stopped');
+    expect(text('lead')).toMatch(/^Your answers were not sent\./);
   });
 });

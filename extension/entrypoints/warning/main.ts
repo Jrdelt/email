@@ -1,5 +1,12 @@
 import { ageDays, type DomainIntel } from '../../src/domainIntel';
-import { WARN_TTL_MS, destinationIntelWarnings, isSafeHttpUrl, proceedTarget } from '../../src/linkGuard';
+import {
+  WARN_TTL_MS,
+  destinationIntelWarnings,
+  freeHostingSite,
+  isSafeHttpUrl,
+  linkWarningKind,
+  proceedTarget,
+} from '../../src/linkGuard';
 import { getSettings } from '../../src/settings';
 import { ellipsizeMiddle, showable } from '../../src/text';
 import { formatAge } from '../../src/ui/details';
@@ -14,8 +21,26 @@ interface StoredWarning {
   level: 'warning' | 'danger';
   reasons: string[];
   intel?: DomainIntel;
+  /** 'form' for a form submission the click guard stopped (its fields are never stored). */
+  kind?: 'form';
   createdAt?: number;
 }
+
+/** What the page is about: the stopped navigation's noun and, for a warning, why it was paused. */
+interface Subject {
+  noun: 'link' | 'form';
+  why: ReturnType<typeof linkWarningKind>;
+}
+
+const WARNING_LEADS: Record<Subject['why'], (noun: string) => string> = {
+  archive: (noun) =>
+    `This ${noun} downloads an archive file, a common way to deliver malware. Only continue if you expected this file.`,
+  freeHost: (noun) =>
+    `This ${noun} goes to a site on a free hosting service, where anyone can publish in minutes, so who runs it can't be checked. Only continue if you expected this site.`,
+  http: (noun) =>
+    `This ${noun} uses an unencrypted connection (http://), so what you see or send can be read or changed on the way. Confirm where it goes before continuing.`,
+  hides: (noun) => `This ${noun} hides or weakens the destination address. Confirm where it goes before continuing.`,
+};
 
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -77,20 +102,30 @@ function describeDestIntel(intel: DomainIntel): string {
   return parts.join(' • ');
 }
 
-function applyAlertSeverity(kind: 'warning' | 'danger') {
+function applyAlertSeverity(kind: 'warning' | 'danger', subject: Subject = { noun: 'link', why: 'hides' }) {
+  const form = subject.noun === 'form';
   document.title =
-    kind === 'danger' ? 'Dangerous Link Stopped — Phishing Email Detector' : 'Check Link — Phishing Email Detector';
+    kind === 'danger'
+      ? `Dangerous ${form ? 'Form' : 'Link'} Stopped — Phishing Email Detector`
+      : `Check ${form ? 'Form' : 'Link'} — Phishing Email Detector`;
   const sticker = $('sticker');
   sticker.className = `sticker ${kind}`;
-  sticker.textContent = kind === 'danger' ? 'PHISHING RISK' : 'CHECK LINK';
+  sticker.textContent = kind === 'danger' ? 'PHISHING RISK' : form ? 'CHECK FORM' : 'CHECK LINK';
   const iconBox = $('icon-box');
   iconBox.className = kind === 'warning' ? 'icon-box warning' : 'icon-box';
   iconBox.replaceChildren(createStatusIcon(document, kind, 24));
-  $('title').textContent = kind === 'danger' ? 'Dangerous link stopped' : 'Check where this link goes';
+  $('title').textContent =
+    kind === 'danger'
+      ? `Dangerous ${subject.noun} stopped`
+      : form
+        ? 'Check where this form sends your answers'
+        : 'Check where this link goes';
   $('lead').textContent =
     kind === 'danger'
-      ? 'Opening this link could expose your passwords, accounts, or device.'
-      : 'This link hides or weakens the destination address. Confirm where it goes before continuing.';
+      ? form
+        ? 'Your answers were not sent. Sending this form could expose your passwords, accounts, or device.'
+        : 'Opening this link could expose your passwords, accounts, or device.'
+      : `${form ? 'Your answers were not sent. ' : ''}${WARNING_LEADS[subject.why](subject.noun)}`;
 }
 
 function renderHelpMode() {
@@ -142,14 +177,21 @@ async function init() {
   card.setAttribute('role', 'alert');
 
   const kind = stored.level === 'warning' ? 'warning' : 'danger';
-  applyAlertSeverity(kind);
+  const subject: Subject = { noun: stored.kind === 'form' ? 'form' : 'link', why: linkWarningKind(stored.href) };
+  applyAlertSeverity(kind, subject);
 
   $('dest-box').hidden = false;
+  if (subject.noun === 'form') {
+    const label = document.querySelector('#dest-box .dest-label');
+    if (label) label.textContent = 'Where this form sends your answers';
+  }
   // The site is the registrable domain: "www.paypal.com.account-review.example" is account-review.example, which the
-  // full host name alone lets read as PayPal. The full host name follows, smaller.
-  const site = stored.registrable || stored.host;
+  // full host name alone lets read as PayPal. On a free hosting service it is the site on it ("evil.pages.dev"), not
+  // the service: anyone can publish there. The full host name follows, smaller.
+  const free = freeHostingSite(stored.host);
+  const site = free?.site || stored.registrable || stored.host;
   $('dest-host').textContent = site || 'Unknown destination';
-  if (stored.host && stored.registrable && stored.host !== stored.registrable) {
+  if (stored.host && site && stored.host !== site) {
     $('dest-fullhost').textContent = `Full host name: ${stored.host}`;
     $('dest-fullhost').hidden = false;
   }
@@ -162,7 +204,10 @@ async function init() {
   const reasons = [...stored.reasons];
   renderReasons(reasons);
 
-  if (stored.intel) {
+  if (free) {
+    // Never looked up: the service's years-old record would read as this site's (docs/privacy.md section 4).
+    $('dest-meta').textContent = `Not looked up: anyone can publish a site on ${free.suffix}, so its record says nothing about who runs ${free.site}.`;
+  } else if (stored.intel) {
     $('dest-meta').textContent = describeDestIntel(stored.intel);
   } else if (stored.registrable) {
     const settings = await getSettings(browser.storage.local, browser.storage.managed);
@@ -180,7 +225,7 @@ async function init() {
           const extra = destinationIntelWarnings(intel);
           if (extra.length) {
             renderReasons([...new Set([...reasons, ...extra])]);
-            applyAlertSeverity('danger');
+            applyAlertSeverity('danger', subject);
           }
         } else if (intel === null) {
           $('dest-meta').textContent = 'Domain lookup skipped (Strict Local Mode).';
@@ -196,7 +241,17 @@ async function init() {
   const adv = $('advanced-details') as HTMLDetailsElement;
   adv.hidden = false;
   const proceed = $('proceed-btn');
-  proceed.textContent = `I understand the risk — open ${site || 'link'}`;
+  if (subject.noun === 'form') {
+    // "Open anyway" opens the address the form submits to, never with the answers: say so rather than lose them.
+    const summary = adv.querySelector('summary');
+    if (summary) summary.textContent = 'Advanced: open the address anyway (not recommended)';
+    const note = adv.querySelector('.muted');
+    if (note) {
+      note.textContent =
+        'This only opens the address the form submits to: your answers are not sent. Only continue if you expected this exact address.';
+    }
+  }
+  proceed.textContent = `I understand the risk — open ${site || 'link'}${subject.noun === 'form' ? ' without the form' : ''}`;
   // Through the organisation's link protection when the email's link went through it, so its time-of-click check,
   // block page and click log are not skipped (proceedTarget checks again that it leads exactly to the shown address).
   const target = proceedTarget(stored.href, stored.via);

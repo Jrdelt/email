@@ -155,6 +155,7 @@ export default defineBackground(() => {
           frameIds?: unknown;
           href?: unknown;
           via?: unknown;
+          kind?: unknown;
           host?: unknown;
           registrable?: unknown;
           level?: unknown;
@@ -215,6 +216,8 @@ export default defineBackground(() => {
         level: m.level === 'warning' ? 'warning' : 'danger',
         reasons,
         intel: m.intel && typeof m.intel === 'object' ? m.intel : undefined,
+        // A form submission: the page then speaks of a form (its fields are never sent here).
+        ...(m.kind === 'form' ? { kind: 'form' } : {}),
         createdAt: now,
       };
       return (async () => {

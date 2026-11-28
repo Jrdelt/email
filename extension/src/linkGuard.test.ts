@@ -3,7 +3,9 @@ import type { DomainIntel } from './domainIntel';
 import {
   analyzeLinkDestination,
   destinationIntelWarnings,
+  freeHostingSite,
   isSafeHttpUrl,
+  linkWarningKind,
   mergeLinkIntel,
   unwrapRedirectUrl,
 } from './linkGuard';
@@ -304,6 +306,24 @@ describe('sites on free hosting services', () => {
     for (const href of ['https://pages.dev/', 'https://evilpages.dev/x', 'https://pages.dev.shop-files.example/', 'https://github.com/a/b']) {
       expect(analyzeLinkDestination(href, 'shop.example').reasons.join(' '), href).not.toContain('free hosting');
     }
+  });
+});
+
+describe('freeHostingSite and linkWarningKind (warning page)', () => {
+  it('names the site on a free hosting service by the one label left of the service', () => {
+    expect(freeHostingSite('www.paypal.com.secure.pages.dev')).toEqual({ suffix: 'pages.dev', site: 'secure.pages.dev' });
+    expect(freeHostingSite('MyOrg.GitHub.io.')).toEqual({ suffix: 'github.io', site: 'myorg.github.io' });
+    expect(freeHostingSite('github.io')).toBeNull(); // the service's own apex
+    expect(freeHostingSite('pages.dev.evil.example')).toBeNull();
+  });
+
+  it('tells why a warning-level destination was paused', () => {
+    expect(linkWarningKind('https://files.example/a.zip')).toBe('archive');
+    expect(linkWarningKind('https://x.github.io/a.zip')).toBe('archive');
+    expect(linkWarningKind('http://x.github.io/')).toBe('freeHost');
+    expect(linkWarningKind('http://news.example.org/')).toBe('http');
+    expect(linkWarningKind('http://bit.ly/x')).toBe('hides');
+    expect(linkWarningKind('not a url')).toBe('hides');
   });
 });
 
