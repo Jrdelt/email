@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,13 @@ FEATURE_NAMES_PATH = Path(__file__).parent / "fixtures" / "feature_names.json"
 def test_feature_order_matches_the_shared_fixture():
     assert FEATURE_NAMES == json.loads(FEATURE_NAMES_PATH.read_text(encoding="utf-8"))
     assert list(extract_features("a@b.example", "x", [Link("t", "https://c.example/")])) == FEATURE_NAMES
+
+
+def test_unicode_database_is_the_pinned_one():
+    # features.py normalises and classifies text with the interpreter's Unicode database (NFKC, case folding, bidi
+    # classes), which changes with every minor Python version (3.11: 14.0, 3.12: 15.0, 3.13: 15.1). Training features
+    # are only reproducible, and only match parity.json, on the interpreter pinned in ml/.python-version.
+    assert unicodedata.unidata_version == "15.1.0", "run the ML pipeline with the Python version in ml/.python-version"
 
 
 def test_parity_fixture_count_and_schema():
