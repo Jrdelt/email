@@ -203,6 +203,70 @@ describe('redirect wrappers', () => {
   });
 });
 
+describe('Google /url with an empty or non-URL q=', () => {
+  // Real search-result redirects carry q= empty (or the search words) and the target in url=; the first present name
+  // used to win, so the destination checks saw www.google.com.
+  it('falls through to url= and warns when q= and url= name different targets', () => {
+    const exe = analyzeLinkDestination('https://www.google.com/url?q=&url=https%3A%2F%2Fevil.example%2Fpayload.exe', 'shop.example');
+    expect(exe.host).toBe('evil.example');
+    expect(exe.level).toBe('danger');
+    expect(exe.reasons.join(' ')).toMatch(/risky file type \(\.exe\)/);
+    expect(
+      unwrapRedirectUrl('https://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=1&url=https://evil.example/login&usg=x'),
+    ).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://www.google.com/url?sa=t&q=invoice+portal&url=https%3A%2F%2Fevil.example%2F')).toBe(
+      'https://evil.example/',
+    );
+    const both = analyzeLinkDestination(
+      'https://www.google.com/url?q=https%3A%2F%2Fpaypal.com%2F&url=https%3A%2F%2Fevil.example%2Flogin',
+      'shop.example',
+    );
+    expect(both.level).not.toBe('safe');
+    expect(both.reasons.join(' ')).toMatch(/more than one destination/);
+    // Same target in both: not ambiguous.
+    const same = analyzeLinkDestination('https://www.google.com/url?q=https://shop.example/a&url=https://shop.example/a', 'shop.example');
+    expect(same).toMatchObject({ host: 'shop.example', level: 'safe' });
+  });
+});
+
+describe('redirectors that carry their target in the URL', () => {
+  const b64 = (s: string) =>
+    btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  it('unwraps Google /url on Google country domains', () => {
+    expect(unwrapRedirectUrl('https://www.google.co.uk/url?q=https%3A%2F%2Fevil.example%2Flogin')).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://google.com.au/url?url=https://evil.example/login')).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://www.google.de/url?sa=t&q=&url=https://evil.example/x')).toBe('https://evil.example/x');
+    // Not Google's: a look-alike wrapper host is never unwrapped (only its target would be checked).
+    for (const fake of ['https://www.google.evil/url?q=https://shop.example/', 'https://google.co.zz/url?q=https://shop.example/',
+      'https://www.google.com.evil.example/url?q=https://shop.example/']) {
+      expect(unwrapRedirectUrl(fake)).toBe(fake);
+    }
+  });
+
+  it('unwraps the Google AMP viewer', () => {
+    expect(unwrapRedirectUrl('https://www.google.com/amp/s/evil.example/login')).toBe('https://evil.example/login');
+    expect(unwrapRedirectUrl('https://www.google.co.uk/amp/s/evil.example/a/b?x=1')).toBe('https://evil.example/a/b?x=1');
+    expect(unwrapRedirectUrl('https://www.google.com/amp/evil.example/page')).toBe('http://evil.example/page');
+    const r = analyzeLinkDestination('https://www.google.com/amp/s/evil.example/invoice.exe', 'shop.example');
+    expect(r).toMatchObject({ host: 'evil.example', level: 'danger' });
+  });
+
+  it("decodes Bing's /ck/a click tracker and fails closed on a target it cannot decode", () => {
+    const href = `https://www.bing.com/ck/a?!&&p=1b2c3d&u=a1${b64('https://evil.example/login')}&ntb=1`;
+    expect(unwrapRedirectUrl(href)).toBe('https://evil.example/login');
+    const r = analyzeLinkDestination(href, 'shop.example');
+    expect(r).toMatchObject({ host: 'evil.example', registrable: 'evil.example', needsDomainCheck: true });
+    expect(unwrapRedirectUrl(`https://bing.com/ck/a?u=a1${b64('https://café.example/é')}`)).toBe('https://café.example/é');
+    for (const bad of ['https://www.bing.com/ck/a?u=zz' + b64('https://evil.example/'), 'https://www.bing.com/ck/a?u=a1%%%%']) {
+      const risk = analyzeLinkDestination(bad, 'shop.example');
+      expect(risk.level, bad).not.toBe('safe');
+      expect(risk.reasons.join(' ')).toMatch(/more than one destination|could not be read/);
+    }
+    // Without a u= target it is just a Bing page.
+    expect(analyzeLinkDestination('https://www.bing.com/ck/a?p=1', 'shop.example').level).toBe('safe');
+  });
+});
+
 describe('click-time risky download list', () => {
   it('covers the attachment danger types but not ordinary web pages', () => {
     for (const p of ['setup.exe', 'macro.dotm', 'reg.reg', 'x.cpl', 'note.one', 'disk.vhd', 'image.svg', 'a.ps1']) {
