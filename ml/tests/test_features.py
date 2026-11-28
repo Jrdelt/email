@@ -7,12 +7,19 @@ from phishml.features import FEATURE_NAMES, Link, extract_features, is_cloud_htm
 
 PARITY_PATH = Path(__file__).parent / "fixtures" / "parity.json"
 PARITY_CASES = json.loads(PARITY_PATH.read_text(encoding="utf-8"))
+# The order is the index of each weight in the exported model (shared with extension/src/features.test.ts).
+FEATURE_NAMES_PATH = Path(__file__).parent / "fixtures" / "feature_names.json"
+
+
+def test_feature_order_matches_the_shared_fixture():
+    assert FEATURE_NAMES == json.loads(FEATURE_NAMES_PATH.read_text(encoding="utf-8"))
+    assert list(extract_features("a@b.example", "x", [Link("t", "https://c.example/")])) == FEATURE_NAMES
 
 
 def test_parity_fixture_count_and_schema():
     assert len(PARITY_CASES) >= 20
     for case in PARITY_CASES:
-        assert sorted(case["expected"].keys()) == sorted(FEATURE_NAMES)
+        assert list(case["expected"].keys()) == FEATURE_NAMES, case["name"]
 
 
 @pytest.mark.parametrize("case", PARITY_CASES, ids=[c["name"] for c in PARITY_CASES])

@@ -13,12 +13,21 @@ interface ParityCase {
 const PARITY_CASES = JSON.parse(
   readFileSync(new URL('../../ml/tests/fixtures/parity.json', import.meta.url), 'utf8'),
 ) as ParityCase[];
+// The order is the index of each weight in the exported model (shared with ml/tests/test_features.py).
+const SHARED_FEATURE_NAMES = JSON.parse(
+  readFileSync(new URL('../../ml/tests/fixtures/feature_names.json', import.meta.url), 'utf8'),
+) as string[];
 
 describe('parity.json contract (TS <-> Python)', () => {
-  it('contains at least 20 cross-language parity cases covering all FEATURE_NAMES', () => {
+  it('lists the features in the same order as features.py (the model weight index)', () => {
+    expect(FEATURE_NAMES).toEqual(SHARED_FEATURE_NAMES);
+    expect(Object.keys(extractFeatures('a@b.example', 'x', [{ text: 't', href: 'https://c.example/' }]))).toEqual(FEATURE_NAMES);
+  });
+
+  it('contains at least 20 cross-language parity cases covering all FEATURE_NAMES in order', () => {
     expect(PARITY_CASES.length).toBeGreaterThanOrEqual(20);
     for (const c of PARITY_CASES) {
-      expect(Object.keys(c.expected).sort()).toEqual([...FEATURE_NAMES].sort());
+      expect(Object.keys(c.expected), c.name).toEqual(FEATURE_NAMES);
     }
   });
 

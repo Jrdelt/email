@@ -1,0 +1,12 @@
+[
+  "n_links",
+  "n_text_href_mismatch",
+  "n_ip_links",
+  "n_punycode_links",
+  "n_cloud_html_links",
+  "n_shortener_links",
+  "n_iplogger_links",
+  "n_external_links",
+  "urgency_hits",
+  "body_len"
+]
