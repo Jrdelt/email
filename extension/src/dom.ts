@@ -94,30 +94,47 @@ const MAX_USE_LINKS = 20;
 /**
  * Links an SVG `<use>` renders. A click on its (closed) shadow instance is retargeted to the `<use>` element, so
  * `closest('a')` finds nothing, yet an instanced `<a>` still navigates. Follows same-document `#id` references,
- * including `<use>` chains (bounded), and returns the referenced `<a>` (or the one containing it) or the links in it.
+ * including `<use>` chains, and returns the referenced `<a>` (or the one containing it) or the links in it.
+ *
+ * The walk is bounded (nesting depth, links, `<use>` elements visited) but the browser renders everything: when a
+ * bound is reached while links (or further `<use>`) remain, `truncated` is true and callers must fail closed,
+ * because the clicked link may be one that was never looked at. A cycle is not truncation: browsers render nothing
+ * for a `<use>` that references itself.
  */
-export function useLinks(use: Element): Element[] {
+export function useLinks(use: Element): { links: Element[]; truncated: boolean } {
   const out = new Set<Element>();
   const seen = new Set<Element>();
+  let truncated = false;
+  const add = (link: Element): void => {
+    if (out.has(link)) return;
+    if (out.size >= MAX_USE_LINKS) truncated = true;
+    else out.add(link);
+  };
   const visit = (u: Element, depth: number): void => {
-    if (depth >= MAX_USE_DEPTH || seen.has(u) || out.size >= MAX_USE_LINKS) return;
-    seen.add(u);
+    if (truncated || seen.has(u)) return;
     const ref = useReference(u);
     if (!ref) return;
     // The instance clones the referenced element and its descendants only, never an <a> around it.
     const tag = tagOf(ref);
-    if (tag === 'a' || tag === 'area') {
-      out.add(ref);
+    const isLink = tag === 'a' || tag === 'area';
+    if (depth >= MAX_USE_DEPTH || seen.size >= MAX_USE_LINKS) {
+      // Link-free icon sprites nest freely; only a reference that can still render a link is unknowable.
+      if (isLink || queryAll(ref, 'a, area, use').length > 0) truncated = true;
+      return;
+    }
+    seen.add(u);
+    if (isLink) {
+      add(ref);
       return;
     }
     for (const el of queryAll(ref, 'a, area, use')) {
-      if (out.size >= MAX_USE_LINKS || seen.size > MAX_USE_LINKS) return;
+      if (truncated) return;
       if (tagOf(el) === 'use') visit(el, depth + 1);
-      else out.add(el);
+      else add(el);
     }
   };
   visit(use, 0);
-  return [...out];
+  return { links: [...out], truncated };
 }
 
 /** The same-document element a `<use>` points at (`href`, SMIL-animated href, or xlink:href), if any. */

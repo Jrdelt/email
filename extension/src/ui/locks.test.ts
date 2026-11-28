@@ -118,8 +118,8 @@ describe('lock gaps found in review', () => {
   it('blocks a click on an SVG <use> instance of a link inside a locked email', () => {
     document.body.innerHTML = `<div id="m"><svg><defs><a id="L" href="https://evil.example/"><rect/></a></defs>
       <use id="u" href="#L"/></svg></div><svg><use id="icon" href="#sprite"/><symbol id="sprite"><path/></symbol></svg>`;
-    expect(useLinks($('u')).map((e) => e.id)).toEqual(['L']);
-    expect(useLinks($('icon'))).toEqual([]); // webmail icon sprites are not links
+    expect(useLinks($('u')).links.map((e) => e.id)).toEqual(['L']);
+    expect(useLinks($('icon'))).toEqual({ links: [], truncated: false }); // webmail icon sprites are not links
     lockLinks($('m'));
     expect(clickPrevented($('u'))).toBe(true);
     unlockLinks($('m'));
@@ -129,7 +129,53 @@ describe('lock gaps found in review', () => {
   it('follows <use> chains without looping', () => {
     document.body.innerHTML = `<svg><g id="g1"><use id="u2" href="#g2"/></g><g id="g2"><use href="#g1"/><a id="a" href="https://x.example/"><rect/></a></g>
       <use id="u1" href="#g1"/></svg>`;
-    expect(useLinks($('u1')).map((e) => e.id)).toEqual(['a']);
+    expect(useLinks($('u1'))).toMatchObject({ truncated: false }); // a cycle renders nothing: not a cap
+    expect(useLinks($('u1')).links.map((e) => e.id)).toEqual(['a']);
+  });
+
+  // The browser renders every link behind a <use>, however many or deeply nested. Past useLinks' own bounds the
+  // clicked link cannot be identified, so the result says so (callers fail closed) instead of silently stopping.
+  const EVIL = 'https://files.example/invoice.exe';
+  const nested = (levels: number) =>
+    `<svg><defs><a id="l0" href="${EVIL}"><rect/></a>` +
+    Array.from({ length: levels - 1 }, (_, i) => `<g id="g${i + 1}"><use href="#${i ? `g${i}` : 'l0'}"/></g>`).join('') +
+    `</defs><use id="t" href="#${levels > 1 ? `g${levels - 1}` : 'l0'}"/></svg>`;
+
+  it('reports truncation when a <use> renders more links than it follows', () => {
+    const filler = '<a href="https://shop.example/p"><rect/></a>'.repeat(20);
+    document.body.innerHTML = `<svg><defs><g id="grp">${filler}<a id="x" href="${EVIL}"><rect/></a></g></defs><use id="t" href="#grp"/></svg>`;
+    const r = useLinks($('t'));
+    expect(r.truncated).toBe(true);
+    expect(r.links.some((l) => l.id === 'x')).toBe(false);
+  });
+
+  it('reports truncation for a link behind more nested <use> levels than it follows', () => {
+    document.body.innerHTML = nested(5);
+    expect(useLinks($('t'))).toEqual({ links: [], truncated: true });
+  });
+
+  it('blocks a click on a <use> past the bounds inside a locked email', () => {
+    document.body.innerHTML = `<div id="m">${nested(5)}</div>`;
+    lockLinks($('m'));
+    expect(clickPrevented($('t'))).toBe(true);
+    unlockLinks($('m'));
+    expect(clickPrevented($('t'))).toBe(false);
+  });
+
+  it('follows four nested <use> levels in full', () => {
+    document.body.innerHTML = nested(4);
+    const r = useLinks($('t'));
+    expect(r.truncated).toBe(false);
+    expect(r.links.map((e) => e.id)).toEqual(['l0']);
+  });
+
+  it('does not report truncation when the depth bound lands on a link-free icon sprite', () => {
+    // Five nested <use>: the fifth references a symbol with no link or <use> in it, so nothing is unknown.
+    document.body.innerHTML = `<svg><defs><symbol id="s0"><path/></symbol>${Array.from(
+      { length: 4 },
+      (_, i) => `<g id="s${i + 1}"><use href="#s${i}"/></g>`,
+    ).join('')}</defs><use id="t" href="#s4"/></svg>`;
+    expect(useLinks($('t'))).toEqual({ links: [], truncated: false });
   });
 
   it('reads an SVG link target from its SMIL-animated value before the #fragment href', () => {

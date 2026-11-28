@@ -50,15 +50,18 @@ function matchesLockedTarget(el: Element): boolean {
   // Any SVG <a> is a navigation target, even without href: SMIL <set>/<animate> can supply one.
   const a = closestEl(el, 'a');
   if (a && (a.namespaceURI === SVG_NS || getAttrNS(a, XLINK_NS, 'href') !== null || hasAttr(a, 'xlink:href'))) return true;
-  // A click on an SVG <use> instance of a link reaches us retargeted to the <use> element.
+  // A click on an SVG <use> instance of a link reaches us retargeted to the <use> element. One whose links could not
+  // all be followed may render a link too (fail closed).
   const use = closestEl(el, 'use');
-  return Boolean(use && useLinks(use).length > 0);
+  if (!use) return false;
+  const rendered = useLinks(use);
+  return rendered.links.length > 0 || rendered.truncated;
 }
 
 function targetHostOf(el: Element): string {
   const use = closestEl(el, 'use');
   const node =
-    closestEl(el, `a, area, [formaction], [${FORMACTION_ATTR}], form`) ?? (use ? (useLinks(use)[0] ?? null) : null);
+    closestEl(el, `a, area, [formaction], [${FORMACTION_ATTR}], form`) ?? (use ? (useLinks(use).links[0] ?? null) : null);
   if (!node) return '';
   const raw =
     getAttr(node, HREF_ATTR) ??

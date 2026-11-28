@@ -277,16 +277,24 @@ function matchAttachmentInMessages(
 /**
  * The link a click activates: the closest <a>/<area>, or the link an SVG <use> instance renders (the click is
  * retargeted to the <use>). `at` is where the click landed, for finding its message. 'ambiguous' when a <use>
- * renders several different links and the clicked one cannot be told apart.
+ * renders several different links and the clicked one cannot be told apart; `uncheckable` when it renders more
+ * than useLinks follows, so the clicked link may not be among `ambiguous` at all.
  */
-function clickedLink(el: Element): { anchor: Element; at: Element } | { ambiguous: string[] } | null {
+function clickedLink(
+  el: Element,
+): { anchor: Element; at: Element } | { ambiguous: string[]; uncheckable?: boolean } | null {
   const a = closestEl(el, 'a, area');
   if (a) return { anchor: a, at: a };
   const use = closestEl(el, 'use');
-  const links = use ? useLinks(use) : [];
-  if (!use || links.length === 0) return null;
-  const targets = [...new Set(links.map((l) => resolveAnchorHref(l)).filter(Boolean))];
-  return targets.length > 1 ? { ambiguous: targets } : { anchor: links[0]!, at: use };
+  if (!use) return null;
+  const { links, truncated } = useLinks(use);
+  const hrefs = links.map((l) => resolveAnchorHref(l));
+  const targets = [...new Set(hrefs.filter(Boolean))];
+  if (truncated) return { ambiguous: targets, uncheckable: true };
+  if (targets.length > 1) return { ambiguous: targets };
+  // Check the link that navigates, never a target-less one rendered beside it.
+  const index = hrefs.findIndex(Boolean);
+  return index < 0 ? null : { anchor: links[index]!, at: use };
 }
 
 /** Navigate as the click itself would have (used once a held click is cleared by a local-only check). */
@@ -355,9 +363,10 @@ function installClickGuard(opts: {
     if ('ambiguous' in clicked) {
       // Several links behind one <use>: which one was clicked is unknowable. Let it through only when every one of
       // them would pass unchecked anyway; otherwise pause rather than guess (a locked message is the lock's job).
+      // A <use> with more links than were followed is always paused: the clicked one may never have been seen.
       const amb = opts.findTarget(el);
       if (!amb || isLocked(amb.container)) return;
-      const allSafe = clicked.ambiguous.every((href) => {
+      const allSafe = !clicked.uncheckable && clicked.ambiguous.every((href) => {
         if (!isSafeHttpUrl(href)) return true;
         const r = analyzeLinkDestination(href, amb.senderRegistrable, location.origin);
         return r.level === 'safe' && !r.needsDomainCheck;
