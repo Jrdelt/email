@@ -64,6 +64,39 @@ INVISIBLE_RE = re.compile(
     "\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0000-\U000e0fff]"
 )
 DOT_LOOKALIKE_RE = re.compile("[\u0660\u06f0\u0701\u0702\u3002\ua4f8\uff0e\uff61]")
+# Letters that NFKC keeps but that look Latin (mirror of features.ts CONFUSABLE_LATIN; spelled out, no \p classes).
+CONFUSABLE_LATIN = {
+    # Cyrillic lower case
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y", "\u0445": "x",
+    "\u0456": "i", "\u0458": "j", "\u0455": "s", "\u0501": "d", "\u04bb": "h", "\u04cf": "l", "\u051b": "q",
+    "\u051d": "w",
+    # Cyrillic upper case
+    "\u0410": "A", "\u0412": "B", "\u0415": "E", "\u041a": "K", "\u041c": "M", "\u041d": "H", "\u041e": "O",
+    "\u0420": "P", "\u0421": "C", "\u0422": "T", "\u0425": "X", "\u0406": "I", "\u0408": "J", "\u0405": "S",
+    # Greek lower case
+    "\u03bf": "o", "\u03b1": "a", "\u03bd": "v", "\u03c1": "p", "\u03c4": "t", "\u03b9": "i", "\u03ba": "k",
+    "\u03c5": "u",
+    # Greek upper case
+    "\u0391": "A", "\u0392": "B", "\u0395": "E", "\u0396": "Z", "\u0397": "H", "\u0399": "I", "\u039a": "K",
+    "\u039c": "M", "\u039d": "N", "\u039f": "O", "\u03a1": "P", "\u03a4": "T", "\u03a5": "Y", "\u03a7": "X",
+    # Latin IPA / dotless and Armenian
+    "\u0131": "i", "\u0251": "a", "\u0261": "g", "\u0585": "o",
+}
+CONFUSABLE_RE = re.compile("[" + "".join(CONFUSABLE_LATIN) + "]")
+ASCII_LETTER_RE = re.compile("[A-Za-z]")
+JS_NON_WS_RUN_RE = re.compile("[^" + re.escape(JS_WS) + "]+")  # JavaScript's \S+
+
+
+def _fold_word(m: re.Match[str]) -> str:
+    w = m.group(0)
+    if ASCII_LETTER_RE.search(w) and CONFUSABLE_RE.search(w):
+        return CONFUSABLE_RE.sub(lambda c: CONFUSABLE_LATIN[c.group(0)], w)
+    return w
+
+
+def _fold_mixed_script_words(text: str) -> str:
+    """Fold look-alike letters only inside words that mix them with ASCII letters (mirror of features.ts)."""
+    return JS_NON_WS_RUN_RE.sub(_fold_word, text)
 # Quotes/parentheses around a bare domain and sentence punctuation after it (mirror of WRAP_OPEN/WRAP_CLOSE).
 WRAP_OPEN = "\"'(<{\u00ab\u201c\u2018"  # not "[": bracketed IPv6 literals
 WRAP_CLOSE = "\"')>}\u00bb\u201d\u2019.,;:!?"
@@ -375,7 +408,7 @@ def _sender_domain(sender: str) -> str:
 
 
 def extract_features(sender: str, body: str, links: list[Link]) -> dict[str, float]:
-    lower = body.lower()
+    lower = _fold_mixed_script_words(body).lower()
     sender_reg = _registrable(_sender_domain(sender))
     mismatch = 0
     ip_links = 0

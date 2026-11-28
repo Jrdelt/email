@@ -1247,5 +1247,64 @@
       "urgency_hits": 0,
       "body_len": 5
     }
+  },
+  {
+    "name": "urgency_words_with_cyrillic_greek_lookalike_letters",
+    "sender": "it@corp.example",
+    "body": "Your p\u0430ssword expir\u0435d. V\u0435rify imm\u0435diately or your mailbox will be susp\u0435nded. \u0391ct now: c\u03bfnfirm \u03c5rgent",
+    "links": [
+      {
+        "text": "Keep my mailbox",
+        "href": "https://evil.example/owa"
+      }
+    ],
+    "expected": {
+      "n_links": 1,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 1,
+      "urgency_hits": 8,
+      "body_len": 100
+    }
+  },
+  {
+    "name": "cyrillic_and_greek_words_not_folded_for_urgency",
+    "sender": "a@b.example",
+    "body": "\u0421\u0440\u043e\u0447\u043d\u043e \u0441\u043c\u0435\u043d\u0438\u0442\u0435 \u043f\u0430\u0440\u043e\u043b\u044c: \u0441\u043e\u0441\u043d\u0430 \u0440\u043e\u0441 \u0435\u0445\u0435. \u039f\u03c1\u03ad\u03c3\u03c4\u03b7\u03c2",
+    "links": [],
+    "expected": {
+      "n_links": 0,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 0,
+      "body_len": 45
+    }
+  },
+  {
+    "name": "lookalike_fold_word_boundaries_follow_js_whitespace",
+    "sender": "a@b.example",
+    "body": "\u0440ass\u001cword pass\u0430\u0085word lo\u0441ked\u00a0v\u0435rify\u2028\u0441onfirm\ufeffurg\u0435nt",
+    "links": [],
+    "expected": {
+      "n_links": 0,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 0,
+      "n_shortener_links": 0,
+      "n_iplogger_links": 0,
+      "n_external_links": 0,
+      "urgency_hits": 4,
+      "body_len": 49
+    }
   }
 ]

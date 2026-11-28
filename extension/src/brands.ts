@@ -64,6 +64,20 @@ export const SERVICE_WORDS = new RegExp(`\\b(?:${SERVICE_WORD_LIST.join('|')})\\
 /** Start-anchored version for all-lowercase concatenated display names like "gmailsupportteam". */
 export const SERVICE_PREFIX = new RegExp(`^(?:${SERVICE_WORD_LIST.map((w) => w.replace(/-/g, '')).join('|')})`, 'i');
 
+/**
+ * Words that, right after a brand, name the brand's own organisation or product rather than a person's surname:
+ * "Amazon.com", "PayPal Inc.", "Apple ID", "DHL Express", "Microsoft 365" (but not "Chase Smith"). Only matched
+ * directly after the brand, so "Chase Smith (Acme Inc)" stays a person.
+ */
+const ORG_WORD_LIST = [
+  'com', 'net', 'org', 'gov', 'inc', 'llc', 'ltd', 'corp', 'id', 'express', 'bank', 'online', 'prime', 'pro', 'pay',
+  '365', 'workspace', 'outlook', 'office', 'teams', 'onedrive', 'icloud', 'gmail', 'wallet',
+];
+const ORG_SUFFIX = `\\s+(?:${ORG_WORD_LIST.join('|')})\\b`;
+
+/** Per brand (same order as BRANDS): the brand followed by an organisation word. */
+export const BRAND_ORG_PATTERNS: readonly RegExp[] = BRANDS.map((br) => new RegExp(br.pattern.source + ORG_SUFFIX, 'i'));
+
 export const FREEMAIL = new Set([
   'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com', 'aol.com',
   'icloud.com', 'me.com', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'zoho.com',

@@ -1,7 +1,7 @@
 import { normalizeSender } from './allowlist';
-import { BRANDS, FREEMAIL, KNOWN_ESP_DOMAINS, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
+import { BRAND_ORG_PATTERNS, BRANDS, FREEMAIL, KNOWN_ESP_DOMAINS, SERVICE_PREFIX, SERVICE_WORDS } from './brands';
 import { hostOf, isInternational, isMultiPartSuffix, isValidDomain, registrableDomain } from './domain';
-import { INVISIBLE_RE, type Link } from './features';
+import { DOT_LOOKALIKE_RE, foldConfusables, INVISIBLE_RE, type Link } from './features';
 import { ellipsizeMiddle, showable } from './text';
 
 export interface SenderInfo {
@@ -104,9 +104,12 @@ export function analyzeSender(
 
   // '@' is excluded from the repeated classes and the input is capped so attacker display names cannot cause
   // catastrophic regex backtracking.
-  // Match on what the reader sees: fullwidth letters fold to ASCII (NFKC) and characters that render as nothing
-  // ("Pay\u00adPal", "Pay\u200bPal") are dropped. The original name is still what warnings display.
-  const seenName = displayName.slice(0, 1000).normalize('NFKC').replace(INVISIBLE_RE, '');
+  // Match on what the reader sees: fullwidth letters fold to ASCII (NFKC), characters that render as nothing
+  // ("Pay\u00adPal", "Pay\u200bPal") are dropped, look-alike dots read as '.', and Cyrillic/Greek letters that look
+  // Latin ("P\u0430yPal") read as those Latin letters. The original name is still what warnings display.
+  const visibleName = displayName.slice(0, 1000).normalize('NFKC').replace(INVISIBLE_RE, '');
+  const seenName = foldConfusables(visibleName.replace(DOT_LOOKALIKE_RE, '.'));
+  const lookalikeLetters = seenName !== visibleName;
   const shownAddr = seenName
     .slice(0, 1000)
     .match(/[^\s<>"'()@]+@[^\s<>"'()@]+\.[a-z]{2,}/i)?.[0]
@@ -130,16 +133,21 @@ export function analyzeSender(
   // form "Pay Pal" does not.
   const plainName = seenName.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
   const compactName = seenName.toLowerCase().replace(/[\s_.-]+/g, '');
-  for (const brand of BRANDS) {
+  // A display name written as a domain ("paypal.com", "www.amazon.co.uk") claims the brand whose label it uses.
+  const nameDomainLabel = seenName.trim().toLowerCase().match(/^(?:www\.)?([a-z0-9-]+)(?:\.[a-z]{2,}){1,2}$/)?.[1];
+  for (const [i, brand] of BRANDS.entries()) {
     const brandCompact = brand.name.toLowerCase().replace(/\s+/g, '');
     const names = [normalizedName, plainName];
+    const orgClaim = BRAND_ORG_PATTERNS[i]!;
     const tokenizedClaim =
       names.some((n) => brand.pattern.test(n)) &&
-      (names.some((n) => SERVICE_WORDS.test(n)) || compactName === brandCompact);
+      (names.some((n) => SERVICE_WORDS.test(n) || orgClaim.test(n)) || compactName === brandCompact);
     const compactClaim =
       compactName.startsWith(brandCompact) && SERVICE_PREFIX.test(compactName.slice(brandCompact.length));
-    if ((tokenizedClaim || compactClaim) && registrable && !brand.domains.includes(registrable)) {
-      warnings.push(`Claims to be ${brand.name}, but was sent from ${registrable}`);
+    const domainClaim = nameDomainLabel === brandCompact;
+    if ((tokenizedClaim || compactClaim || domainClaim) && registrable && !brand.domains.includes(registrable)) {
+      const how = lookalikeLetters ? ' using look-alike letters' : '';
+      warnings.push(`Claims to be ${brand.name}${how}, but was sent from ${registrable}`);
       break;
     }
   }

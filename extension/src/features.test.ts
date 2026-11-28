@@ -158,3 +158,19 @@ describe('a look-alike letter in the TLD of shown link text', () => {
     expect(shownHost('пример.рф')).toBe('');
   });
 });
+
+describe('urgency words spelled with look-alike letters', () => {
+  // NFKC keeps Cyrillic/Greek letters, so 'pаssword expirеd' (Cyrillic а, е) used to count no urgency words.
+  const body = 'Your pаssword expirеd. Vеrify immеdiately or your mailbox will be suspеnded.';
+  it('counts them as the reader reads them', () => {
+    expect(extractFeatures('it@corp.example', body, []).urgency_hits).toBe(5);
+    expect(scoreEmail('it@corp.example', body, [{ text: 'Keep my mailbox', href: 'https://evil.example/owa' }]).level).toBe(
+      'suspicious',
+    );
+  });
+  it('leaves words written wholly in Cyrillic or Greek alone', () => {
+    expect(extractFeatures('a@b.example', 'Срочно смените пароль: аккаунт заблокирован. Ορέστης', []).urgency_hits).toBe(0);
+    expect(extractFeatures('a@b.example', 'сосна рос ехе', []).urgency_hits).toBe(0);
+    expect(extractFeatures('a@b.example', 'Verify your password', []).urgency_hits).toBe(2);
+  });
+});

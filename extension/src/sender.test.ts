@@ -128,3 +128,52 @@ describe('a relay that cannot be checked', () => {
     expect(canTrustByAllowlist(analyzeSender('Alex Kim', 'alex@corp.example', [], { viaDomain: 'em1.sendgrid.net' }))).toBe(true);
   });
 });
+
+describe("brand claims in the brands' own sender names", () => {
+  // "Amazon.com", "Apple ID", "DHL Express"... carry no service word, so they used to pass as a person's name.
+  const claims = (n: string, a = 'notice@mailer-evil.xyz') => analyzeSender(n, a, []).warnings.join(' | ');
+  it.each([
+    ['Amazon.com', 'Amazon'], ['Apple ID', 'Apple'], ['DHL Express', 'DHL'], ['Microsoft Outlook', 'Microsoft'],
+    ['PayPal Inc.', 'PayPal'], ['paypal.com', 'PayPal'], ['www.paypal.com', 'PayPal'], ['IRS.gov', 'IRS'],
+    ['Amazon Prime', 'Amazon'], ['Microsoft 365', 'Microsoft'], ['Chase Bank', 'Chase'], ['Google Workspace', 'Google'],
+    ['amazon.co.uk', 'Amazon'], ['bankofamerica.com', 'Bank of America'], ['Apple Pay', 'Apple'],
+  ])('%s from a stranger claims %s', (name, brand) => {
+    expect(claims(name)).toContain(`Claims to be ${brand}, but was sent from mailer-evil.xyz`);
+  });
+  it.each([
+    ['Amazon.com', 'auto-confirm@amazon.com'], ['Apple ID', 'appleid@id.apple.com'], ['DHL Express', 'noreply@dhl.com'],
+    ['Microsoft 365', 'no-reply@microsoft.com'], ['PayPal Inc.', 'service@paypal.co.uk'], ['IRS.gov', 'x@irs.gov'],
+    ['Chase Smith', 'chase.smith@gmail.com'], ['Chase Norton', 'chase.norton@gmail.com'], ['chasesmith', 'c@gmail.com'],
+    ['Chase Smith (Acme Inc)', 'chase@acme.com'], ['Adobe Smith', 'a@x.com'], ['Olga Express Logistics', 'olga@logistics.example'],
+    ['acme.com', 'news@acme.com'], ['www.example.org', 'hi@example.org'],
+  ])('%s <%s> is not a claim', (name, addr) => {
+    expect(claims(name, addr)).not.toMatch(/Claims to be/);
+  });
+});
+
+describe('display names written with look-alike letters', () => {
+  // NFKC keeps Cyrillic/Greek letters that look Latin, and look-alike dots were only folded in link text.
+  it.each([
+    ['PаyPаl Sеrvice', 'PayPal'], ['PаyPal Support', 'PayPal'], ['PаyPal', 'PayPal'], ['Аpple Support', 'Apple'],
+    ['Micrоsoft account team', 'Microsoft'], ['Αmazon.com', 'Amazon'], ['paypalꓸcom', 'PayPal'],
+  ])('%s claims %s', (name, brand) => {
+    expect(analyzeSender(name, 'service@attacker.example', []).warnings.join(' | ')).toMatch(
+      new RegExp(`Claims to be ${brand} using look-alike letters, but was sent from attacker\\.example`),
+    );
+  });
+  it.each(['ceo@acme-corpꓸcom', 'ceo@acme-corp。com', 'ceo@acme-corp.сom', 'сeo@aсme-corp.com'])(
+    '%s shows an address it was not sent from',
+    (name) => {
+      expect(analyzeSender(name, 'acme.ceo.office@gmail.com', []).warnings.join(' | ')).toMatch(
+        /The display name shows ceo@acme-corp\.com, but it was really sent from acme\.ceo\.office@gmail\.com/,
+      );
+    },
+  );
+  it('leaves names in Cyrillic or Greek and a look-alike copy of the real address alone', () => {
+    expect(analyzeSender('Иван Петров', 'ivan@post.example', []).warnings).toEqual([]);
+    expect(analyzeSender('Сергей Иванов', 'sergey@post.example', []).warnings).toEqual([]);
+    expect(analyzeSender('Ορέστης Παπαδόπουλος', 'orestis@example.gr', []).warnings).toEqual([]);
+    expect(analyzeSender('аlex@corp.example', 'alex@corp.example', []).warnings).toEqual([]);
+    expect(analyzeSender('PаyPal', 'service@paypal.com', []).warnings).toEqual([]);
+  });
+});

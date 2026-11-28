@@ -122,7 +122,47 @@ function trimTrailingPunct(s: string): string {
 // reader. The class is spelled out (not \p{...}) so it cannot drift with the Unicode version of the runtime.
 export const INVISIBLE_RE =
   /[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb\u{1bca0}-\u{1bca3}\u{1d173}-\u{1d17a}\u{e0000}-\u{e0fff}]/gu;
-const DOT_LOOKALIKE_RE = /[\u0660\u06f0\u0701\u0702\u3002\ua4f8\uff0e\uff61]/g;
+export const DOT_LOOKALIKE_RE = /[\u0660\u06f0\u0701\u0702\u3002\ua4f8\uff0e\uff61]/g;
+
+// Cyrillic, Greek and other letters that NFKC keeps but that look like Latin ones ("pаssword" with a Cyrillic а).
+// Spelled out (mirrored in features.py CONFUSABLE_LATIN) so it cannot drift with the runtime's Unicode data.
+const CONFUSABLE_LATIN: Readonly<Record<string, string>> = {
+  // Cyrillic lower case
+  '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
+  '\u0456': 'i', '\u0458': 'j', '\u0455': 's', '\u0501': 'd', '\u04bb': 'h', '\u04cf': 'l', '\u051b': 'q',
+  '\u051d': 'w',
+  // Cyrillic upper case
+  '\u0410': 'A', '\u0412': 'B', '\u0415': 'E', '\u041a': 'K', '\u041c': 'M', '\u041d': 'H', '\u041e': 'O',
+  '\u0420': 'P', '\u0421': 'C', '\u0422': 'T', '\u0425': 'X', '\u0406': 'I', '\u0408': 'J', '\u0405': 'S',
+  // Greek lower case
+  '\u03bf': 'o', '\u03b1': 'a', '\u03bd': 'v', '\u03c1': 'p', '\u03c4': 't', '\u03b9': 'i', '\u03ba': 'k',
+  '\u03c5': 'u',
+  // Greek upper case
+  '\u0391': 'A', '\u0392': 'B', '\u0395': 'E', '\u0396': 'Z', '\u0397': 'H', '\u0399': 'I', '\u039a': 'K',
+  '\u039c': 'M', '\u039d': 'N', '\u039f': 'O', '\u03a1': 'P', '\u03a4': 'T', '\u03a5': 'Y', '\u03a7': 'X',
+  // Latin IPA / dotless and Armenian
+  '\u0131': 'i', '\u0251': 'a', '\u0261': 'g', '\u0585': 'o',
+};
+const CONFUSABLE_CLASS = `[${Object.keys(CONFUSABLE_LATIN).join('')}]`;
+const CONFUSABLE_RE = new RegExp(CONFUSABLE_CLASS, 'g');
+const HAS_CONFUSABLE_RE = new RegExp(CONFUSABLE_CLASS);
+
+/** Replace every look-alike letter with the Latin letter it imitates (for matching only; never for display). */
+export const foldConfusables = (s: string): string => s.replace(CONFUSABLE_RE, (c) => CONFUSABLE_LATIN[c]!);
+
+/**
+ * Fold look-alike letters only inside words that mix them with ASCII letters ("pаssword", "Vеrify"), so text
+ * written in Cyrillic or Greek keeps its own words (mirror of features.py _fold_mixed_script_words).
+ */
+function foldMixedScriptWords(text: string): string {
+  return text.replace(/\S+/g, (w) => (/[A-Za-z]/.test(w) && HAS_CONFUSABLE_RE.test(w) ? foldConfusables(w) : w));
+}
+
+/** Count urgency phrases as the reader reads them (look-alike letters inside Latin words folded). */
+const urgencyHits = (body: string): number => {
+  const lower = foldMixedScriptWords(body).toLowerCase();
+  return URGENCY.reduce((n, w) => n + lower.split(w).length - 1, 0);
+};
 // Quotes and parentheses around a bare domain, and sentence punctuation after it: "(www.paypal.com)." shows paypal.com.
 const WRAP_OPEN = '"\'(<{\u00ab\u201c\u2018'; // not '[': bracketed IPv6 literals
 const WRAP_CLOSE = '"\')>}\u00bb\u201d\u2019.,;:!?';
@@ -210,7 +250,6 @@ function isOpaqueShortTokenLink(link: Link): boolean {
 
 /** Extract numerical feature vector matching ml/src/phishml/features.py extract_features(). */
 export function extractFeatures(sender: string, body: string, links: readonly Link[]): Record<string, number> {
-  const lower = body.toLowerCase();
   const senderReg = registrableDomain(senderDomainOf(sender));
   let mismatch = 0;
   let ipLinks = 0;
@@ -231,7 +270,6 @@ export function extractFeatures(sender: string, body: string, links: readonly Li
     if (shown && h && registrableDomain(shown) !== reg) mismatch += 1;
     if (senderReg && reg && reg !== senderReg) external += 1;
   }
-  const urgencyHits = URGENCY.reduce((n, w) => n + lower.split(w).length - 1, 0);
   const codePointLen = [...body].length;
   return {
     n_links: links.length,
@@ -242,7 +280,7 @@ export function extractFeatures(sender: string, body: string, links: readonly Li
     n_shortener_links: shortenerLinks,
     n_iplogger_links: ipLoggerLinks,
     n_external_links: external,
-    urgency_hits: urgencyHits,
+    urgency_hits: urgencyHits(body),
     body_len: codePointLen,
   };
 }
@@ -252,9 +290,8 @@ export const FEATURE_NAMES = Object.keys(extractFeatures('', '', []));
 export function scoreEmail(sender: string, body: string, links: Link[]): Verdict {
   const reasons: string[] = [];
   let score = 0;
-  const lower = body.toLowerCase();
   const senderReg = registrableDomain(senderDomainOf(sender));
-  const hits = URGENCY.reduce((n, w) => n + lower.split(w).length - 1, 0);
+  const hits = urgencyHits(body);
   let hasExternalOrUnknownLink = false;
   let hasOpaqueUrgentShortToken = false;
 

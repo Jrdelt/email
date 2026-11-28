@@ -80,3 +80,10 @@ def test_lookalike_letter_in_shown_tld_mismatches():
         assert extract_features("x@sender.example", "Hello", [Link(text, href)])["n_text_href_mismatch"] == 1, text
     assert shown_host("https://пример.рф/") == "xn--e1afmkfd.xn--p1ai"
     assert shown_host("Нажмите.здесь") == ""
+
+
+def test_urgency_words_with_lookalike_letters_are_counted():
+    body = "Your pаssword expirеd. Vеrify immеdiately or your mailbox will be suspеnded."
+    assert extract_features("it@corp.example", body, [])["urgency_hits"] == 5
+    russian = "Срочно смените пароль"
+    assert extract_features("a@b.example", russian, [])["urgency_hits"] == 0
