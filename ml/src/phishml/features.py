@@ -23,6 +23,7 @@ SHORTENER_HOSTS = frozenset({
     "bit.ly", "tinyurl.com", "t.co", "rebrand.ly", "rb.gy", "cutt.ly", "shorturl.at", "is.gd",
     "ow.ly", "goo.gl", "buff.ly", "tiny.cc", "bl.ink", "s.id", "v.gd", "clck.ru", "t.ly", "surl.li",
     "lnkd.in", "mcaf.ee", "su.pr", "adf.ly", "bc.vc", "ouo.io", "shrinke.me",
+    "j.mp", "qrco.de", "bit.do", "tr.im", "x.co", "shorturl.asia", "tiny.one", "u.to",
 })
 IP_V4_RE = re.compile(r"^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\Z", re.ASCII)
 IPV6_CHARS_RE = re.compile(r"^[0-9a-f:.]+\Z", re.IGNORECASE | re.ASCII)
@@ -39,9 +40,13 @@ DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}
 
 CLOUD_STORAGE_HOSTS = frozenset({
     "storage.googleapis.com",
+    "commondatastorage.googleapis.com",
     "storage.cloud.google.com",
     "firebasestorage.googleapis.com",
     "ipfs.io",
+    "dweb.link",
+    "w3s.link",
+    "nftstorage.link",
     "cloudflare-ipfs.com",
     "gateway.pinata.cloud",
     "s3.amazonaws.com",
@@ -54,6 +59,9 @@ CLOUD_STORAGE_SUFFIXES = (
     ".digitaloceanspaces.com",
     ".storage.googleapis.com",
     ".web.core.windows.net",
+    ".ipfs.dweb.link",
+    ".ipfs.w3s.link",
+    ".ipfs.nftstorage.link",
 )
 REGIONAL_S3_HOST = re.compile(r"^s3[.-][a-z0-9-]+\.amazonaws\.com\Z", re.ASCII)
 VIRTUAL_REGIONAL_S3_HOST = re.compile(r"\.s3[.-](?:website[.-])?(?:dualstack\.)?[a-z0-9-]+\.amazonaws\.com\Z", re.ASCII)
@@ -106,7 +114,7 @@ MAX_SHOWN_AUTHORITY = 300  # longer than any real host plus port; never sent thr
 def _js_len(s: str) -> int:
     """String length in UTF-16 code units, as JavaScript's .length counts it."""
     return len(s.encode("utf-16-le", "surrogatepass")) // 2
-HTML_EXT_RE = re.compile(r"\.(?:html?|shtml|xhtml)\Z", re.IGNORECASE | re.ASCII)
+HTML_EXT_RE = re.compile(r"\.(?:html?|shtml|xhtml|xht)\Z", re.IGNORECASE | re.ASCII)
 
 MULTI_SUFFIXES = frozenset({
     "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "edu.au", "gov.au",

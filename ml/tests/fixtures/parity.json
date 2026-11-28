@@ -1306,5 +1306,88 @@
       "urgency_hits": 4,
       "body_len": 49
     }
+  },
+  {
+    "name": "cloud_ipfs_xht_and_more_shorteners",
+    "sender": "a@shop.example",
+    "body": "See the files.",
+    "links": [
+      {
+        "text": "Review",
+        "href": "https://commondatastorage.googleapis.com/example-bucket/login.html"
+      },
+      {
+        "text": "Open",
+        "href": "https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.dweb.link/login.html"
+      },
+      {
+        "text": "Open",
+        "href": "https://dweb.link/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/index.htm"
+      },
+      {
+        "text": "Open",
+        "href": "https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.w3s.link/a.xht"
+      },
+      {
+        "text": "Open",
+        "href": "https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.nftstorage.link/verify.html"
+      },
+      {
+        "text": "Open",
+        "href": "https://storage.googleapis.com/example-bucket/page.xht"
+      },
+      {
+        "text": "Gateway home",
+        "href": "https://dweb.link/"
+      },
+      {
+        "text": "Page",
+        "href": "https://www.example.com/a.xht"
+      },
+      {
+        "text": "Short",
+        "href": "https://j.mp/3abcd"
+      },
+      {
+        "text": "QR",
+        "href": "https://qrco.de/bfXyz"
+      },
+      {
+        "text": "s",
+        "href": "https://bit.do/fAbc"
+      },
+      {
+        "text": "s",
+        "href": "https://tr.im/abc"
+      },
+      {
+        "text": "s",
+        "href": "https://x.co/abc"
+      },
+      {
+        "text": "s",
+        "href": "https://shorturl.asia/AbCd1"
+      },
+      {
+        "text": "s",
+        "href": "https://tiny.one/abc"
+      },
+      {
+        "text": "s",
+        "href": "https://u.to/AbCd"
+      }
+    ],
+    "expected": {
+      "n_links": 16,
+      "n_text_href_mismatch": 0,
+      "n_ip_links": 0,
+      "n_punycode_links": 0,
+      "n_cloud_html_links": 6,
+      "n_shortener_links": 8,
+      "n_iplogger_links": 0,
+      "n_external_links": 16,
+      "urgency_hits": 0,
+      "body_len": 14
+    }
   }
 ]

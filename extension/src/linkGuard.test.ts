@@ -57,6 +57,8 @@ describe('analyzeLinkDestination', () => {
     expect(analyzeLinkDestination('https://xn--pple-43d.com/verify').level).toBe('danger');
     expect(analyzeLinkDestination('https://storage.googleapis.com/hmdbox/hmd_v2.html#?act=cl').level).toBe('danger');
     expect(analyzeLinkDestination('https://storage.googleapis.com./hmdbox/hmd_v2.html').level).toBe('danger');
+    expect(analyzeLinkDestination('https://commondatastorage.googleapis.com/example-bucket/login.html').level).toBe('danger');
+    expect(analyzeLinkDestination('https://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi.ipfs.dweb.link/login.html').level).toBe('danger');
     for (const ext of ['exe', 'dmg', 'svg', 'hta', 'lnk', 'iso', 'docm', 'mhtml', 'jar', 'rdp', 'iqy', 'searchConnector-ms']) {
       const risk = analyzeLinkDestination(`https://cdn.example.com/files/doc.${ext}`);
       expect(risk.level).toBe('danger');
@@ -91,7 +93,7 @@ describe('analyzeLinkDestination', () => {
   });
 
   it('flags warning for URL shorteners (including trailing-dot FQDNs) and unencrypted http links', () => {
-    for (const u of ['https://bit.ly/3xyz', 'https://bit.ly./3xyz', 'https://rebrand.ly/abc']) {
+    for (const u of ['https://bit.ly/3xyz', 'https://bit.ly./3xyz', 'https://rebrand.ly/abc', 'https://j.mp/3xyz', 'https://qrco.de/bfXy']) {
       const r = analyzeLinkDestination(u);
       expect(r.level).toBe('warning');
       expect(r.needsDomainCheck).toBe(false);

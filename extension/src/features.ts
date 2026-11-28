@@ -32,6 +32,8 @@ export const SHORTENER_HOSTS = new Set([
   'bit.ly', 'tinyurl.com', 't.co', 'rebrand.ly', 'rb.gy', 'cutt.ly', 'shorturl.at', 'is.gd',
   'ow.ly', 'goo.gl', 'buff.ly', 'tiny.cc', 'bl.ink', 's.id', 'v.gd', 'clck.ru', 't.ly', 'surl.li',
   'lnkd.in', 'mcaf.ee', 'su.pr', 'adf.ly', 'bc.vc', 'ouo.io', 'shrinke.me',
+  // bit.ly's own alias, QR-code phishing's usual shortener, and other public shorteners.
+  'j.mp', 'qrco.de', 'bit.do', 'tr.im', 'x.co', 'shorturl.asia', 'tiny.one', 'u.to',
 ]);
 
 // Email services' click-tracking domains (registrable): with link tracking on, every link in a newsletter or
@@ -44,9 +46,13 @@ const ESP_CLICK_TRACKERS = new Set([
 
 const CLOUD_STORAGE_HOSTS = new Set([
   'storage.googleapis.com',
+  'commondatastorage.googleapis.com', // legacy GCS endpoint
   'storage.cloud.google.com',
   'firebasestorage.googleapis.com',
   'ipfs.io',
+  'dweb.link', // IPFS path gateways (/ipfs/<cid>/...)
+  'w3s.link',
+  'nftstorage.link',
   'cloudflare-ipfs.com',
   'gateway.pinata.cloud',
   's3.amazonaws.com',
@@ -59,6 +65,9 @@ const CLOUD_STORAGE_SUFFIXES = [
   '.digitaloceanspaces.com',
   '.storage.googleapis.com', // GCS virtual-hosted buckets
   '.web.core.windows.net', // Azure Storage static websites
+  '.ipfs.dweb.link', // IPFS subdomain gateways (<cid>.ipfs.<gateway>)
+  '.ipfs.w3s.link',
+  '.ipfs.nftstorage.link',
 ];
 const REGIONAL_S3_HOST = /^s3[.-][a-z0-9-]+\.amazonaws\.com$/;
 // <bucket>.s3.<region>, .s3-<region>, .s3-website-<region>, .s3.dualstack.<region> (AWS's default URL shapes)
@@ -111,7 +120,7 @@ export function isCloudHtmlLink(href: string): boolean {
     const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
     if (!isCloudStorageHost(host)) return false;
     const path = safePercentDecode(u.pathname);
-    return !path.endsWith('\n') && /\.(?:html?|shtml|xhtml)$/i.test(path);
+    return !path.endsWith('\n') && /\.(?:html?|shtml|xhtml|xht)$/i.test(path);
   } catch {
     return false;
   }
