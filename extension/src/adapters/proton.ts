@@ -139,9 +139,11 @@ function extractProtonAttachments(
   const attachmentContainers: HTMLElement[] = [];
   const scope = findScope(doc, hostEl);
 
+  // Native attachment lists and tiles are webmail chrome beside the body, never inside it (inline downloads in the
+  // email HTML come from inlineAttachmentsIn). Node.contains is inclusive, so this also skips the body itself.
   const shouldSkip = (el: Element): boolean =>
     isUnsafeNode(el) ||
-    el === container ||
+    container.contains(el) ||
     el.contains(container) ||
     (el instanceof HTMLElement && (isHidden(el) || isCompose(el)));
 

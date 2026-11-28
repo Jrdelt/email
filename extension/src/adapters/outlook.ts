@@ -180,8 +180,11 @@ function extractOutlookAttachments(
     doc.querySelector<HTMLElement>('[data-app-section="ConversationContainer"], [aria-label*="Reading Pane" i], [role="main"]');
   if (!scope) return { attachments, attachmentContainers };
 
+  // Native wells and cards are OWA chrome beside the body, never inside it: in the email HTML, a "Download on the
+  // App Store" badge or a data-testid="attachment-..." element is not an attachment (inline downloads come from
+  // inlineAttachmentsIn). Node.contains is inclusive, so this also skips the body itself.
   const shouldSkip = (el: Element): boolean => {
-    if (isUnsafeNode(el) || el === container || el.contains(container)) return true;
+    if (isUnsafeNode(el) || container.contains(el) || el.contains(container)) return true;
     if (el instanceof HTMLElement && isHidden(el)) return true;
     if (el.closest('[role="banner"], nav, [contenteditable="true"], [aria-label*="Compose" i]') !== null) return true;
     const lbl = (el.getAttribute('aria-label') ?? el.getAttribute('title') ?? '').trim();

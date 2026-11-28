@@ -97,6 +97,14 @@ function gmailChipName(chip: HTMLElement): string {
   return text.length <= 180 ? cleanAttachmentName(text) : '';
 }
 
+// Gmail's attachment URLs carry the exact query parameter view=att (not view=attendees or preview=att).
+const VIEW_ATT_SEL = (attr: string): string[] => [
+  `a[${attr}*="?view=att&"]`,
+  `a[${attr}*="&view=att&"]`,
+  `a[${attr}$="?view=att"]`,
+  `a[${attr}$="&view=att"]`,
+];
+
 function extractGmailAttachments(
   scope: Document | HTMLElement | null,
   container: HTMLElement,
@@ -108,9 +116,11 @@ function extractGmailAttachments(
 
   if (!scope) return { attachments, attachmentContainers };
 
+  // Shelves and chips are Gmail chrome beside the body, never inside it: in the email HTML, class="hq" or a
+  // ?view=att link is not an attachment (inline downloads come from inlineAttachmentsIn).
   const shouldSkip = (el: Element): boolean =>
     isUnsafeNode(el) ||
-    el === container ||
+    container.contains(el) ||
     el.contains(container) ||
     (el instanceof HTMLElement && isHidden(el)) ||
     el.closest('div.M9, [role="dialog"], [contenteditable="true"]') !== null;
@@ -129,8 +139,8 @@ function extractGmailAttachments(
     'a[data-ped-att-download]',
     'a[href*="mail-attachment.googleusercontent.com"]',
     'a[data-ped-att-href*="mail-attachment.googleusercontent.com"]',
-    'a[href*="view=att"]',
-    'a[data-ped-att-href*="view=att"]',
+    ...VIEW_ATT_SEL('href'),
+    ...VIEW_ATT_SEL('data-ped-att-href'),
   ].join(', ');
 
   for (const chip of scope.querySelectorAll<HTMLElement>(chipSel)) {
