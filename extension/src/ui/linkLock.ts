@@ -284,10 +284,13 @@ export function lockLinks(container: HTMLElement): void {
 }
 
 export function unlockLinks(container: HTMLElement): void {
+  // Every render "unlocks" each message whose links are not paused: only lifting a lock that was in place takes the
+  // toast away, not the re-render a blocked click itself triggers (it would remove the toast explaining that click).
+  const wasLocked = stashedIn.has(container);
   watchers.get(container)?.disconnect();
   watchers.delete(container);
   rmAttr(container, LOCK_ATTR);
-  removePausedLinkToast(ownerDocOf(container));
+  if (wasLocked) removePausedLinkToast(ownerDocOf(container));
   for (const el of stashedIn.get(container) ?? []) {
     const st = stashes.get(el);
     stashes.delete(el);

@@ -227,3 +227,28 @@ describe('lock gaps found in review', () => {
     expect(m.querySelectorAll('a[href]').length).toBe(100);
   });
 });
+
+describe('paused toast lifetime', () => {
+  const toastShown = () => document.getElementById('ped-toast-host') !== null;
+
+  it('stays when a render "unlocks" a container that was never locked, and goes when a real lock is lifted', () => {
+    document.body.innerHTML = `<div id="m1"><a id="dl" download="minutes.pdf" href="data:application/pdf,x">pdf</a></div>
+      <div id="m2"><a id="l" href="https://evil.example/">l</a></div>`;
+    lockAttachments([$('dl')]);
+    clickPrevented($('dl'));
+    expect(toastShown()).toBe(true);
+    unlockLinks($('m1')); // never link-locked: a re-render's no-op
+    unlockAttachments([$('m2')]); // never attachment-locked
+    expect(toastShown()).toBe(true);
+    unlockAttachments([$('dl')]);
+    expect(toastShown()).toBe(false);
+
+    lockLinks($('m2'));
+    clickPrevented($('l'));
+    expect(toastShown()).toBe(true);
+    unlockLinks($('m1'));
+    expect(toastShown()).toBe(true);
+    unlockLinks($('m2'));
+    expect(toastShown()).toBe(false);
+  });
+});

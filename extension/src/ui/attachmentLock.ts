@@ -205,6 +205,8 @@ export function lockAttachments(elements: readonly HTMLElement[], names?: Readon
 export function unlockAttachments(elements: readonly HTMLElement[]): void {
   const docs = new Set<Document>();
   for (const root of elements) {
+    // Only a lock that was in place takes the toast away (see unlockLinks): not a re-render's no-op unlock.
+    if (stashedIn.has(root)) docs.add(ownerDocOf(root));
     watchers.get(root)?.disconnect();
     watchers.delete(root);
     rmAttr(root, ATT_LOCK_ATTR);
@@ -234,7 +236,6 @@ export function unlockAttachments(elements: readonly HTMLElement[]): void {
       releaseDisabled(el, ARIA_HOLDER);
     }
     stashedIn.delete(root);
-    docs.add(ownerDocOf(root));
   }
   for (const doc of docs) removePausedLinkToast(doc);
 }
