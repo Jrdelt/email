@@ -1128,9 +1128,19 @@ function runICloudSandbox() {
     if (m?.type === 'icloudLock') {
       // A decision made for an earlier body of this (pooled) frame must not unlock or release the current one.
       if (typeof m.sig === 'string' && m.sig !== lastSigHash) return;
-      desiredLocked = Boolean(m.locked);
-      desiredAttachmentsLocked = Boolean(m.attachmentsLocked);
-      releaseVerdictWaiters();
+      const locked = Boolean(m.locked);
+      const attachmentsLocked = Boolean(m.attachmentsLocked);
+      if (typeof m.sig !== 'string' && lastSigHash !== '') {
+        // No signature: the app frame decided before it saw this body. Such a decision may only tighten; it never
+        // releases held clicks or unlocks, because this body's own decision is still to come.
+        if (!locked && !attachmentsLocked) return;
+        desiredLocked ||= locked;
+        desiredAttachmentsLocked ||= attachmentsLocked;
+      } else {
+        desiredLocked = locked;
+        desiredAttachmentsLocked = attachmentsLocked;
+        releaseVerdictWaiters();
+      }
       if (document.body) {
         if (desiredLocked) lockLinks(document.body);
         else unlockLinks(document.body);
@@ -1282,7 +1292,11 @@ function runICloudApp(kv: typeof browser.storage.local) {
             sig: email.sig,
           });
         }
-        for (const [frameId, state] of frameLockMap) setFrameLocked(frameId, state.links, state.atts, state.sig);
+        for (const [frameId, state] of frameLockMap) {
+          // No signature: this frame's body (if it has one yet) was not part of the decision, so it may only lock.
+          if (!state.sig && !state.links && !state.atts) continue;
+          setFrameLocked(frameId, state.links, state.atts, state.sig);
+        }
       },
       unlockAll: (all) => {
         for (const m of all) unlockMessageAttachments(m);
