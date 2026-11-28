@@ -33,6 +33,31 @@ describe('display-name address spoofing', () => {
       </span></h3><div class="a3s">Verify now</div></div>`;
     expect(gmail.extract(document)!.senderAddress).toBe('x@evil.example');
   });
+
+  // A Gmail sender chip written into the email HTML (the sanitizer keeping the non-standard email attribute).
+  const PLANTED = '<span class="gD" email="alex@corp.example" name="Alex Kim" style="display:none"></span>';
+
+  it('Gmail spam layout: a sender chip written into the body is ignored', () => {
+    document.body.innerHTML = `<div class="adn"><h3 class="iw"><span class="qu">
+        <span class="gD"><span>Alex Kim</span></span><span class="go gD">x@evil.example</span>
+      </span></h3><div class="a3s">${PLANTED}Verify now</div></div>`;
+    expect(gmail.extract(document)).toMatchObject({ senderAddress: 'x@evil.example', senderName: 'Alex Kim' });
+  });
+
+  it('Gmail without a message card: the header chip wins over a later chip in the body', () => {
+    document.body.innerHTML = `<div class="gE"><span class="gD" email="x@evil.example" name="X">X</span></div>
+      <div class="a3s">${PLANTED}Verify now</div>`;
+    expect(gmail.extract(document)).toMatchObject({ senderAddress: 'x@evil.example', senderName: 'X' });
+  });
+
+  it('Gmail: a chip in a quoted message body nested in the card is ignored too', () => {
+    document.body.innerHTML = `<div class="adn"><span class="gD" email="x@evil.example" name="X">X</span>
+      <div class="a3s">Verify now<div class="a3s">${PLANTED}quoted</div></div></div>`;
+    document.querySelector('.adn')!.prepend(document.createRange().createContextualFragment(
+      `<div class="a3s" hidden>${PLANTED}</div>`,
+    ));
+    expect(gmail.extract(document)).toMatchObject({ senderAddress: 'x@evil.example', senderName: 'X' });
+  });
 });
 
 describe('message scope is the card around the body, not the body wrapper', () => {

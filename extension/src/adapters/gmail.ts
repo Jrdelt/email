@@ -215,9 +215,13 @@ export const gmail: WebmailAdapter = {
     return containers.map((container) => {
       const msg = container.closest<HTMLElement>('.adn, [role="listitem"]');
       const scope = msg ?? (containers.length === 1 ? doc : null);
+      // Sender chips are Gmail's header markup: never one written into a message body (this one or any other
+      // div.a3s), whose HTML the sender controls. Without a card, the last chip outside every body wins.
+      const inBody = (el: Element): boolean => container.contains(el) || closestEl(el, 'div.a3s') !== null;
+      const headerChips = (root: Document | HTMLElement): HTMLElement[] =>
+        [...root.querySelectorAll<HTMLElement>('span.gD[email]')].filter((el) => !inBody(el));
       const emailChip =
-        msg?.querySelector<HTMLElement>('span.gD[email]') ??
-        (containers.length === 1 ? [...doc.querySelectorAll<HTMLElement>('span.gD[email]')].pop() : undefined);
+        (msg ? headerChips(msg)[0] : undefined) ?? (containers.length === 1 ? headerChips(doc).pop() : undefined);
 
       let senderAddress = emailChip?.getAttribute('email')?.trim() ?? '';
       if (!senderAddress && scope) {
@@ -225,7 +229,7 @@ export const gmail: WebmailAdapter = {
         // the sender controls ("service@paypal.com via sendgrid.net").
         for (const sel of ['span.go.gD', 'span.go']) {
           for (const el of scope.querySelectorAll<HTMLElement>(sel)) {
-            if (container.contains(el) || el.closest(DISPLAY_NAME_SEL)) continue;
+            if (inBody(el) || el.closest(DISPLAY_NAME_SEL)) continue;
             senderAddress = extractEmailText(el.textContent ?? '');
             if (senderAddress) break;
           }
@@ -240,7 +244,7 @@ export const gmail: WebmailAdapter = {
       }
       if (!senderName && scope) {
         for (const el of scope.querySelectorAll<HTMLElement>('span.gD')) {
-          if (container.contains(el)) continue;
+          if (inBody(el)) continue;
           const t = (el.textContent ?? '').trim();
           if (t && !t.includes('@')) {
             senderName = t;
