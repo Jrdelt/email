@@ -160,12 +160,15 @@ const stringsOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x 
 /**
  * True when a storage change should trigger a rescan. Trust the user removed elsewhere (popup "Clear", another
  * tab's Undo) is also dropped from this tab's in-memory session trust, so a cleared email re-locks here too.
- * Additions do not rescan: they come from this tab's own trust buttons, which already re-render.
+ * Trust added elsewhere (another tab with the same email or sender open) rescans too. Only the fingerprints this
+ * tab's own "I trust this email" stored (`ownWrites`, consumed here) do not: that action already applied them, and
+ * a rescan would tear down its Undo pill. ("Always trust sender" does rescan: its banner is gone anyway.)
  */
 function storageChangeAffectsVerdicts(
   changes: Record<string, { oldValue?: unknown; newValue?: unknown }>,
   areaName: string,
   trustedThisSession: Set<string>,
+  ownWrites: Set<string>,
 ): boolean {
   if (areaName === 'managed') return true;
   if (areaName !== 'local') return false;
@@ -175,11 +178,16 @@ function storageChangeAffectsVerdicts(
     if (!change) continue;
     const next = new Set(stringsOf(change.newValue));
     const prev = new Set(stringsOf(change.oldValue));
-    // A revocation removes entries without adding any; adding at the list cap also evicts the oldest entries,
-    // which must not tear down this tab's just-shown Undo pill.
     const removed = [...prev].some((v) => !next.has(v));
-    const added = [...next].some((v) => !prev.has(v));
-    if (!removed || added) continue;
+    const added = [...next].filter((v) => !prev.has(v));
+    if (added.length > 0) {
+      // Adding at the list cap also evicts the oldest entries: that is no revocation.
+      const own = added.every((v) => ownWrites.has(v));
+      for (const v of added) ownWrites.delete(v);
+      if (!own) affected = true;
+      continue;
+    }
+    if (!removed) continue;
     affected = true;
     if (key === 'trustedEmails') {
       for (const entry of [...trustedThisSession]) {
@@ -656,6 +664,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   /** Leading messages (oldest) that exceed MAX_THREAD_MESSAGES: locked unless trusted, never scored or looked up. */
   overflowCount?: number;
   trustedThisSession: Set<string>;
+  /** Fingerprints this tab's "I trust this email" is storing, which storage.onChanged then need not rescan for. */
+  ownWrites: Set<string>;
   dismissed: Set<string>;
   /** The webmail's sender-verification signals are visible to the adapter (only Gmail today). */
   authSignals: boolean;
@@ -840,7 +850,8 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     }
 
     const reopenBanner = () => {
-      if (!dismissed.delete(threadHashKey)) return;
+      // A newer scan owns the page (its own render replaces this handler): never reapply this scan's state.
+      if (isStale() || !dismissed.delete(threadHashKey)) return;
       render();
     };
     setBlockedHandlers(reopenBanner, containerDocs);
@@ -885,6 +896,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
           // this session; a failed write (e.g. storage of a script orphaned by an update) must not undo it or keep
           // the warning card up while the links are open.
           const added = undoState.filter((u) => !u.emailTrusted).map((u) => u.item.hash);
+          for (const hash of added) addBounded(opts.ownWrites, hash);
           await trustEmails(kv, added).catch(() => undefined);
         },
         onUndoUnlock: async () => {
@@ -898,14 +910,16 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
             Object.assign(item, trustState(item, emailTrusted, item.allowlistTrusted));
           }
           // Re-lock first: the lock must never depend on the storage write, which can fail.
-          render();
+          if (!isStale()) render();
           await untrustEmails(kv, prior.filter((u) => !u.emailTrusted).map((u) => u.item.hash)).catch(() => undefined);
         },
         onTrustSender: async () => {
           if (!canTrustByAllowlist(primaryEntry.item.rawSender)) return false;
           const addr = primaryEntry.item.rawSender.address;
           const ok = await trustSender(kv, addr);
-          if (ok) {
+          // If a newer scan rendered meanwhile, this scan's render would reapply its old locks, verdict and banner
+          // over it. The stored trust reaches the current scan through the storage change's rescan instead.
+          if (ok && !isStale()) {
             const matched: T[] = [];
             for (const { item } of evaluated) {
               if (item.rawSender.address === addr && canTrustByAllowlist(item.rawSender) && !item.email.pairingUncertain) {
@@ -956,6 +970,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
 
 function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAdapter | undefined) {
   const trustedThisSession = new Set<string>();
+  const ownWrites = new Set<string>();
   const dismissed = new Set<string>();
   const containerSender = new WeakMap<HTMLElement, { address: string; registrable: string }>();
   const intelPending = new Map<string, Promise<void>>();
@@ -1022,6 +1037,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
       overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
       intelPending,
       trustedThisSession,
+      ownWrites,
       authSignals: adapter?.authSignals === true,
       dismissed,
       isStale: () => my !== token,
@@ -1180,7 +1196,7 @@ function runStandardWebmail(kv: typeof browser.storage.local, adapter: WebmailAd
     if (!document.hidden) scheduler.schedule();
   });
   browser.storage?.onChanged?.addListener((changes, areaName) => {
-    if (storageChangeAffectsVerdicts(changes, areaName, trustedThisSession)) {
+    if (storageChangeAffectsVerdicts(changes, areaName, trustedThisSession, ownWrites)) {
       lastKey = '';
       scheduler.schedule();
     }
@@ -1380,6 +1396,7 @@ function runICloudSandbox() {
 function runICloudApp(kv: typeof browser.storage.local) {
   const sandboxBodies = new Map<number, ICloudSandboxPayload>();
   const trustedThisSession = new Set<string>();
+  const ownWrites = new Set<string>();
   const dismissed = new Set<string>();
   let lastKey = '';
   let lastHeaderIds = '';
@@ -1479,6 +1496,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
       messages,
       overflowCount: Math.max(0, messages.length - MAX_THREAD_MESSAGES),
       trustedThisSession,
+      ownWrites,
       authSignals: false, // iCloud shows no per-message sender verification the adapter can read
       dismissed,
       isStale: () => my !== token,
@@ -1587,7 +1605,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
     if (!document.hidden) scheduler.schedule();
   });
   browser.storage?.onChanged?.addListener((changes, areaName) => {
-    if (storageChangeAffectsVerdicts(changes, areaName, trustedThisSession)) {
+    if (storageChangeAffectsVerdicts(changes, areaName, trustedThisSession, ownWrites)) {
       lastKey = '';
       scheduler.schedule();
     }
