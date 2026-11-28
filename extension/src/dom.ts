@@ -49,7 +49,8 @@ export const closestEl = (el: Element, selector: string): Element | null =>
   builtin<Element['closest']>(el, 'closest').call(el, selector);
 export const textOf = (node: Node): string => builtin<string | null>(node, 'textContent') ?? '';
 export const ownerDocOf = (node: Node): Document => builtin<Document>(node, 'ownerDocument');
-const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;
+export const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;
+export const nodeTypeOf = (node: Node): number => builtin<number>(node, 'nodeType');
 
 /** Resolve event.target to an Element even when dispatched on a Text node (clobbering-safe). */
 export function eventElement(e: Event): Element | null {

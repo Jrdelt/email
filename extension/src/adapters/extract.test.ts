@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
+import { scoreEmail } from '../features';
 import { analyzeSender } from '../sender';
 import {
   MAX_ATTACHMENTS,
@@ -229,7 +230,8 @@ describe('filler cannot hide content past the work caps', () => {
     const t = bodyText(body(`<div style="display:none">${'a '.repeat(150_000)}</div><p>URGENT verify your password</p>`));
     expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
     expect(t).toContain('URGENT verify your password');
-    expect(t.startsWith('a a a')).toBe(true);
+    // The shown text comes first; the hidden filler only fills the room it leaves.
+    expect(t.startsWith('URGENT verify your password\na a a')).toBe(true);
   });
 
   it('returns short bodies whole and joins head and tail without a gap when they meet', () => {
@@ -456,5 +458,81 @@ describe('link text is read once per element, within a work budget', () => {
     const r = scanLinks(m);
     expect(r.truncated).toBe(false);
     expect(r.links.map((l) => l.text)).toEqual(['Sign in to https://www.paypal.com', 'x'.repeat(MAX_LINK_TEXT_CHARS - 1)]);
+  });
+});
+
+describe('text hidden by CSS cannot push the shown message out of the sample', () => {
+  const PHISH = `<p>URGENT: we noticed unusual activity on your account and it has been suspended.</p>
+    <p>Verify your password immediately to restore access within 24 hours.</p>
+    <p><a href="https://login-review.example/Xk3Pq9">Verify now</a></p>`;
+  const FILL = 'Thanks for being a valued member of our community. We hope you enjoy the newsletter this season. '.repeat(135);
+  const sandwich = (open: string, close = '</div>', css = '') =>
+    body(`${css}${open}${FILL}${close}${PHISH}${open}${FILL}${close}`);
+  const shown = (t: string) => {
+    expect(t.trimStart().startsWith('URGENT: we noticed unusual activity')).toBe(true); // shown text first
+    expect(t).toContain('Verify your password immediately to restore access within 24 hours.');
+    expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+  };
+
+  it('keeps the shown text whole between ~13 KB of hidden filler on each side', () => {
+    shown(bodyText(sandwich('<div style="display:none;font-size:0">')));
+  });
+
+  it('passes a hidden node of any length cheaply (over a million characters on each side)', () => {
+    const huge = 'Thanks for being a valued member. '.repeat(35_000);
+    shown(bodyText(body(`<div style="display:none">${huge}</div>${PHISH}<div style="display:none">${huge}</div>`)));
+  });
+
+  it('covers each common way of hiding the filler, inline or from a stylesheet', () => {
+    for (const open of [
+      '<div style="font-size:0">',
+      '<div style="visibility:hidden">',
+      '<div style="opacity:0">',
+      '<div style="max-height:0;overflow:hidden">',
+      '<div style="width:0;height:0;overflow:hidden">',
+      '<div hidden>',
+      '<div style="display:none"><span>',
+    ]) {
+      shown(bodyText(sandwich(open, open.includes('<span>') ? '</span></div>' : '</div>')));
+    }
+    shown(bodyText(sandwich('<div class="f">', '</div>', '<style>.f{display:none}</style>')));
+  });
+
+  it('scores the sandwiched phishing email as it scores without the filler', () => {
+    const plain = body(PHISH);
+    const before = scoreEmail('security@acct-notice.example', bodyText(plain), scanLinks(plain).links);
+    const m = sandwich('<div style="display:none;max-height:0;overflow:hidden;font-size:0">');
+    const after = scoreEmail('security@acct-notice.example', bodyText(m), scanLinks(m).links);
+    expect(before.level).not.toBe('safe');
+    expect(after.level).toBe(before.level);
+  });
+
+  it('counts text a stylesheet shows again as shown (responsive display:none overrides)', () => {
+    const css = '<style>.v{display:block!important}</style>';
+    const t = bodyText(body(`${css}<div style="display:none;font-size:0">${FILL}</div>
+      <div class="v" style="display:none">URGENT verify your password now</div><div style="display:none;font-size:0">${FILL}</div>`));
+    expect(t.trimStart().startsWith('URGENT verify your password now\nThanks')).toBe(true);
+  });
+
+  it('returns a body that fits whole and in document order, hidden parts included (as before)', () => {
+    const t = bodyText(body('<div style="display:none">Your March statement</div>\n<p>Hello Sam, your statement is ready.</p>'));
+    expect(t).toBe('Your March statement Hello Sam, your statement is ready.');
+  });
+
+  it('still samples hidden text into the room the shown text leaves', () => {
+    const t = bodyText(body(`<p>Hello</p><div style="display:none">${'hidden words '.repeat(3000)}</div>`));
+    expect(t.startsWith('Hello\nhidden words')).toBe(true);
+    expect(t.length).toBeLessThanOrEqual(MAX_BODY_CHARS + 1);
+  });
+
+  it('reads a form-hidden filler through the prototype (named controls cannot shadow nodeType)', () => {
+    const m = sandwich('<form style="display:none"><input name="nodeType"><input name="parentElement">', '</form>');
+    // happy-dom does not clobber; emulate what a browser does with the named controls (see src/clobbering.test.ts).
+    for (const form of m.querySelectorAll('form')) {
+      for (const input of form.querySelectorAll('input')) {
+        Object.defineProperty(form, input.name, { value: input, configurable: true });
+      }
+    }
+    shown(bodyText(m));
   });
 });

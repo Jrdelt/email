@@ -5,7 +5,9 @@ import {
   getAttr,
   hasAttr,
   isFormEl,
+  nodeTypeOf,
   ownerDocOf,
+  parentElementOf,
   rawLinkTarget,
   resolveAgainstBase,
   resolveAnchorHref,
@@ -289,33 +291,49 @@ export const withSubject = (subject: string, body: string): string =>
 const NON_TEXT_SEL = 'style, script, noscript, template';
 const TEXT_CHUNK = 4096; // raw characters normalised at a time (per-node regexes are slow on many tiny nodes)
 const RAW_SCAN_LIMIT = 50 * MAX_BODY_CHARS; // safety bound on raw characters read in each direction
+// Elements whose computed style is read per body (~15 ms in Chromium at worst); past it, text counts as shown.
+const STYLE_CHECKS = MAX_BODY_CHARS;
+// How much a text node skipped by a filter counts toward RAW_SCAN_LIMIT: skipping costs per node, not per character,
+// so one huge hidden node is cheap to pass, while very many tiny ones still end the read.
+const SKIPPED_NODE_COST = 16;
+
+/** Which text a sample keeps, by its parent element: true keeps it, false skips it (a skip still counts as read). */
+type TextFilter = (parent: Element) => boolean;
 
 /**
- * Message text for scoring, as a reader sees it: skips CSS/script text, drops characters that render as nothing
- * and collapses whitespace runs (so invisible or blank filler does not use up the sample), and when longer than
- * MAX_BODY_CHARS keeps the first and last halves. Work stays bounded however long the body is: the start is read
- * forwards and the end backwards, and the middle is never visited.
+ * The streaming head+tail sample behind bodyText: skips CSS/script text and, with `keep`, text whose parent it
+ * rejects. `cut` is set when text was left out (the middle was not read, or the sample was trimmed to `max`);
+ * `skipped` when `keep` rejected any text that was read.
  */
-export function bodyText(el: HTMLElement): string {
+function sampleText(el: HTMLElement, max: number, keep: TextFilter | null): { text: string; cut: boolean; skipped: boolean } {
   const doc = ownerDocOf(el);
-  const half = Math.floor(MAX_BODY_CHARS / 2);
+  const half = Math.floor(max / 2);
   // Text inside style/script/noscript/template is not message text (checked per parent, only if there are any).
   const hasNonText = Element.prototype.querySelector.call(el, NON_TEXT_SEL) !== null;
   let lastParent: Node | null = null;
   let lastSkip = false;
-  const raw = (n: Node): string => {
-    if (hasNonText) {
+  let lastReject = false;
+  let skipped = false;
+  // The text to sample, or null for text `keep` rejects (not sampled; counts SKIPPED_NODE_COST toward RAW_SCAN_LIMIT).
+  const raw = (n: Node): string | null => {
+    if (hasNonText || keep) {
       const parent = n.parentNode;
       if (parent !== lastParent) {
         lastParent = parent;
-        lastSkip = parent !== null && parent.nodeType === 1 && closestEl(parent as Element, NON_TEXT_SEL) !== null;
+        const pe = parent !== null && nodeTypeOf(parent) === 1 ? (parent as Element) : null;
+        lastSkip = hasNonText && pe !== null && closestEl(pe, NON_TEXT_SEL) !== null;
+        lastReject = !lastSkip && keep !== null && pe !== null && !keep(pe);
       }
       if (lastSkip) return '';
+      if (lastReject) {
+        skipped = true;
+        return null;
+      }
     }
     return n.nodeValue ?? '';
   };
 
-  // Forwards from the start until MAX_BODY_CHARS visible characters are collected. Long text nodes are read in
+  // Forwards from the start until `max` visible characters are collected. Long text nodes are read in
   // TEXT_CHUNK slices, so one huge filler node costs a few slices, not a pass over all of it.
   const head: string[] = [];
   let headLen = 0;
@@ -337,6 +355,14 @@ export function bodyText(el: HTMLElement): string {
     const t = raw(n);
     lastHead = n;
     lastHeadUsed = 0;
+    if (t === null) {
+      headRaw += SKIPPED_NODE_COST;
+      if (headRaw >= RAW_SCAN_LIMIT) {
+        stopped = true;
+        break;
+      }
+      continue;
+    }
     for (let i = 0; i < t.length; i += TEXT_CHUNK) {
       const part = t.slice(i, i + TEXT_CHUNK);
       chunk.push(part);
@@ -345,7 +371,7 @@ export function bodyText(el: HTMLElement): string {
       lastHeadUsed = i + part.length;
       if (chunkLen >= TEXT_CHUNK) {
         flushHead();
-        if (headLen >= MAX_BODY_CHARS || headRaw >= RAW_SCAN_LIMIT) {
+        if (headLen >= max || headRaw >= RAW_SCAN_LIMIT) {
           stopped = true;
           break read;
         }
@@ -354,6 +380,7 @@ export function bodyText(el: HTMLElement): string {
   }
   flushHead();
   let text = head.join('');
+  let cut = false;
 
   if (stopped && lastHead) {
     // More text may follow: read the end backwards until half a body is collected or the head is reached.
@@ -373,28 +400,132 @@ export function bodyText(el: HTMLElement): string {
     const backward = doc.createTreeWalker(el, 0x4);
     tailRead: for (let m = backward.lastChild(); m; m = backward.previousNode()) {
       const t = raw(m);
-      const stopAt = m === lastHead ? lastHeadUsed : 0;
-      for (let end = t.length; end > stopAt; end -= TEXT_CHUNK) {
-        const part = t.slice(Math.max(stopAt, end - TEXT_CHUNK), end);
-        back.push(part);
-        backLen += part.length;
-        tailRaw += part.length;
-        if (backLen >= TEXT_CHUNK) {
-          flushTail();
-          if (tailLen >= half || tailRaw >= RAW_SCAN_LIMIT) break tailRead;
+      if (t === null) {
+        tailRaw += SKIPPED_NODE_COST;
+      } else {
+        const stopAt = m === lastHead ? lastHeadUsed : 0;
+        for (let end = t.length; end > stopAt; end -= TEXT_CHUNK) {
+          const part = t.slice(Math.max(stopAt, end - TEXT_CHUNK), end);
+          back.push(part);
+          backLen += part.length;
+          tailRaw += part.length;
+          if (backLen >= TEXT_CHUNK) {
+            flushTail();
+            if (tailLen >= half || tailRaw >= RAW_SCAN_LIMIT) break tailRead;
+          }
         }
       }
       if (m === lastHead) {
         joined = true;
         break;
       }
+      if (t === null && tailRaw >= RAW_SCAN_LIMIT) break;
     }
     flushTail();
     text = `${text}${joined ? '' : '\n'}${tail.reverse().join('')}`;
+    cut = !joined;
   }
   text = text.replace(/ {2,}/g, ' ');
-  if (text.length <= MAX_BODY_CHARS) return text;
-  return `${text.slice(0, half)}\n${text.slice(text.length - half)}`;
+  if (text.length <= max) return { text, cut, skipped };
+  return { text: `${text.slice(0, half)}\n${text.slice(text.length - half)}`, cut: true, skipped };
+}
+
+const isZero = (v: string): boolean => parseFloat(v) === 0;
+
+/**
+ * The element's own box keeps its content from being seen: not rendered (also the `hidden` attribute, whose UA
+ * display:none a stylesheet may lack), transparent, or clipped to nothing.
+ */
+function hidesBox(el: Element, cs: CSSStyleDeclaration): boolean {
+  if (cs.display === 'none' || cs.getPropertyValue('content-visibility') === 'hidden' || isZero(cs.opacity)) return true;
+  if (hasAttr(el, 'hidden')) return true;
+  const overflow = `${cs.getPropertyValue('overflow')} ${cs.overflowX} ${cs.overflowY}`;
+  return (
+    /hidden|clip/.test(overflow) && (isZero(cs.height) || isZero(cs.maxHeight) || isZero(cs.width) || isZero(cs.maxWidth))
+  );
+}
+
+/**
+ * Text CSS keeps from the reader, by its parent (computed style, so stylesheets count): the parent's inherited
+ * visibility is hidden/collapse or its font size is under 1px, or the parent or an ancestor below `root` is not
+ * rendered (display:none, content-visibility:hidden), has opacity 0, or clips its content to nothing (zero
+ * height/width with hidden overflow). Each element's style is read once, for at most STYLE_CHECKS elements; past
+ * that, text counts as shown. Null when the body's document has no window to compute styles with.
+ */
+function cssHiddenText(root: Element): TextFilter | null {
+  const win = ownerDocOf(root).defaultView;
+  if (!win || typeof win.getComputedStyle !== 'function') return null;
+  let checks = STYLE_CHECKS;
+  const styles = new Map<Element, CSSStyleDeclaration | null>();
+  const style = (el: Element): CSSStyleDeclaration | null => {
+    let cs = styles.get(el);
+    if (cs !== undefined) return cs;
+    cs = null;
+    if (checks > 0) {
+      checks--;
+      try {
+        cs = win.getComputedStyle(el);
+      } catch {
+        /* not an element of this window */
+      }
+    }
+    styles.set(el, cs);
+    return cs;
+  };
+  const boxes = new Map<Element, boolean>(); // the element or an ancestor below root hides its box
+  const boxHidden = (el: Element): boolean => {
+    const chain: Element[] = [];
+    let hidden = false;
+    for (let a: Element | null = el; a && a !== root; a = parentElementOf(a)) {
+      const known = boxes.get(a);
+      if (known !== undefined) {
+        hidden = known;
+        break;
+      }
+      chain.push(a);
+    }
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (!hidden) {
+        const cs = style(chain[i]);
+        hidden = cs !== null && hidesBox(chain[i], cs);
+      }
+      boxes.set(chain[i], hidden);
+    }
+    return hidden;
+  };
+  const texts = new Map<Element, boolean>();
+  return (parent) => {
+    let hidden = texts.get(parent);
+    if (hidden !== undefined) return hidden;
+    hidden = boxHidden(parent);
+    if (!hidden) {
+      const cs = style(parent);
+      hidden = cs !== null && (cs.visibility === 'hidden' || cs.visibility === 'collapse' || parseFloat(cs.fontSize) < 1);
+    }
+    texts.set(parent, hidden);
+    return hidden;
+  };
+}
+
+/**
+ * Message text for scoring, as a reader sees it: skips CSS/script text, drops characters that render as nothing
+ * and collapses whitespace runs (so invisible or blank filler does not use up the sample), and when longer than
+ * MAX_BODY_CHARS keeps the first and last halves. Work stays bounded however long the body is: the start is read
+ * forwards and the end backwards, and the middle is never visited.
+ * When the text does not fit, text that CSS hides from the reader (display:none, font-size:0, zero-height
+ * clipping...) is sampled only after the shown text and only into the room it leaves, so hidden filler on both
+ * sides cannot push the shown message out of the sample. A body that fits is returned whole, as before.
+ */
+export function bodyText(el: HTMLElement): string {
+  const all = sampleText(el, MAX_BODY_CHARS, null);
+  if (!all.cut) return all.text;
+  const hidden = cssHiddenText(el);
+  if (!hidden) return all.text;
+  const shown = sampleText(el, MAX_BODY_CHARS, (p) => !hidden(p));
+  if (!shown.skipped) return all.text;
+  const room = MAX_BODY_CHARS - shown.text.length - 1;
+  const rest = room > 1 ? sampleText(el, room, hidden).text : '';
+  return shown.text && rest ? `${shown.text}\n${rest}` : shown.text || rest;
 }
 
 /** Parse a header string like `PayPal <a@b.com>`, `PayPal (a@b.com)`, or bare `a@b.com`. */
