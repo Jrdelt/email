@@ -14,7 +14,8 @@ import {
   tagOf,
   textOf,
 } from '../dom';
-import { EXPLICIT_URL, INVISIBLE_RE, safePercentDecode, type Link } from '../features';
+import { hostOf, registrableDomain } from '../domain';
+import { EXPLICIT_URL, INVISIBLE_RE, safePercentDecode, shownHost, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
@@ -277,10 +278,87 @@ function textEnds(el: Element, max: number, steps: number): string {
 // SMIL <set> in one <a>) cannot multiply the work.
 const LINK_TEXT_BUDGET = 25 * MAX_BODY_CHARS;
 const LINK_TEXT_STEPS = 256; // nodes visited per direction for a sampled link text
+// Computed styles read per scan to work out rendered link text (~10 ms in Chromium at worst); past it the scan
+// reports truncation (fail closed), so padding links full of styled markup cannot hide a later one's hidden splitter.
+const LINK_STYLE_CHECKS = 2000;
 
-/** Per-scan link text reader: each element's text is read once, in full while the budget lasts. */
-function linkTextReader(): { read(el: Element): string; exceeded(): boolean } {
-  const memo = new Map<Element, string>();
+/**
+ * A link's text as read for scoring: `text` from the DOM as before, and `rendered`, the text the reader sees, when
+ * that differs (CSS-hidden parts dropped, RTL bidi overrides reversed). Both capped like link text.
+ */
+type LinkText = { text: string; rendered?: string };
+
+// Link text that can show a host or URL needs a dot or a colon, or a non-ASCII stand-in (look-alike dots, full-width
+// colons, bidi controls). Without any of them it shows no host however it is rendered, so it is read as before.
+const HOSTISH_RE = /[.:]|[^\x00-\x7f]/;
+const RLO_RE = /\u202e/;
+const RLO_RUN_RE = /\u202e([^\u202c]*)(?:\u202c|$)/g; // right-to-left override up to its pop (or the end)
+const OVERRIDE_RE = /(?:bidi|isolate)-override/i;
+const NOT_RENDERED_TAGS = new Set(['style', 'script', 'noscript', 'template']);
+
+const reverseText = (t: string): string => [...t].reverse().join('');
+
+/** The element that sets the bidi override for text in `el` (`el` or its nearest such ancestor up to `root`). */
+type BidiOverride = { owner: Element; rtl: boolean } | null;
+
+/**
+ * True when a style sheet that can apply to `root` mentions `re`: the `<style>` elements inside it, or in its whole
+ * document when `root` is a frame's body (an email rendered in its own document). Read through the prototypes, as
+ * email HTML can clobber a frame document's properties.
+ */
+function cssMentions(root: Element, re: RegExp): boolean {
+  const doc = ownerDocOf(root);
+  const sheets =
+    tagOf(root) === 'body'
+      ? Document.prototype.querySelectorAll.call(doc, 'style')
+      : Element.prototype.querySelectorAll.call(root, 'style');
+  for (const s of sheets) if (re.test(textOf(s))) return true;
+  return false;
+}
+
+/**
+ * Nearest bidi override at or above an element, up to and including `root`: `<bdo>`, or `unicode-bidi:
+ * bidi-override | isolate-override` from the computed style (`style`), or from the inline style when `style` is null.
+ * Memoised per element.
+ */
+function bidiOverrides(root: Element, style: StyleOf | null): (el: Element) => BidiOverride {
+  const memo = new Map<Element, BidiOverride>();
+  const own = (el: Element): BidiOverride => {
+    const dir = (getAttr(el, 'dir') ?? '').trim().toLowerCase();
+    const cs = style?.(el) ?? null;
+    const inline = cs ? '' : (getAttr(el, 'style') ?? '');
+    const rtl = (): boolean => dir === 'rtl' || cs?.direction === 'rtl' || /direction\s*:\s*rtl/i.test(inline);
+    if (tagOf(el) === 'bdo') return { owner: el, rtl: dir === 'rtl' || (dir !== 'ltr' && rtl()) };
+    const bidi = cs ? cs.unicodeBidi || cs.getPropertyValue('unicode-bidi') : inline;
+    return OVERRIDE_RE.test(bidi) ? { owner: el, rtl: rtl() } : null;
+  };
+  return (start) => {
+    const chain: Element[] = [];
+    let found: BidiOverride = null;
+    for (let a: Element | null = start; a; a = a === root ? null : parentElementOf(a)) {
+      const known = memo.get(a);
+      if (known !== undefined) {
+        found = known;
+        break;
+      }
+      chain.push(a);
+      found = own(a);
+      if (found) break;
+    }
+    for (const a of chain) memo.set(a, found);
+    return found;
+  };
+}
+
+/**
+ * Per-scan link text reader for the links inside `root`: each element's text is read once, in full while the budget
+ * lasts. For link text that could show a host, the rendered text is worked out too when the link holds markup or
+ * sits in a bidi override: text that CSS hides from the reader (computed style, as bodyText reads it) is dropped and
+ * runs under a right-to-left override are reversed, so "https://<span hidden>x </span>www.paypal.com" or a reversed
+ * "moc.lapyap.www" in <bdo dir=rtl> shows www.paypal.com as the reader sees it. It shares the work budget.
+ */
+function linkTextReader(root: Element): { read(el: Element): LinkText; exceeded(): boolean } {
+  const memo = new Map<Element, LinkText>();
   let left = LINK_TEXT_BUDGET;
   let over = false;
   const full = (el: Element): string | null => {
@@ -297,6 +375,52 @@ function linkTextReader(): { read(el: Element): string; exceeded(): boolean } {
     }
     return parts.join('');
   };
+  // Created on first use: most links never need them. Every link's ancestors are checked for a bidi override only
+  // when the body can have one (a <bdo>, an inline unicode-bidi, or CSS that mentions an override), and from the
+  // computed style only in that last case.
+  let styles: { style: StyleOf | null; bidi: (el: Element) => BidiOverride } | null = null;
+  const styling = () => {
+    if (!styles) {
+      const style = styleReader(ownerDocOf(root), LINK_STYLE_CHECKS, () => {
+        over = true;
+      });
+      const css = cssMentions(root, OVERRIDE_RE);
+      const markup = css || Element.prototype.querySelector.call(root, 'bdo, [style*="bidi" i]') !== null;
+      styles = { style, bidi: markup ? bidiOverrides(root, css ? style : null) : () => null };
+    }
+    return styles;
+  };
+  const rendered = (el: Element): string | null => {
+    const { style, bidi } = styling();
+    // Only what hides part of the link counts (elements inside it): a link hidden as a whole is not read at all.
+    const hidden = cssHiddenText(el, style);
+    const w = ownerDocOf(el).createTreeWalker(el, 0x4 /* SHOW_TEXT */);
+    let out = '';
+    let run = '';
+    let runOwner: BidiOverride = null;
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      left -= 1;
+      if (left < 0) return null;
+      const parent = n.parentNode;
+      const pe = parent !== null && nodeTypeOf(parent) === 1 ? (parent as Element) : null;
+      if (!pe || NOT_RENDERED_TAGS.has(tagOf(pe)) || hidden?.(pe)) continue;
+      const t = n.nodeValue ?? '';
+      left -= t.length;
+      if (left < 0) return null;
+      const ov = bidi(pe);
+      if ((ov?.owner ?? null) !== (runOwner?.owner ?? null)) {
+        out += runOwner?.rtl ? reverseText(run) : run;
+        run = '';
+        runOwner = ov;
+      }
+      run += t;
+    }
+    out += runOwner?.rtl ? reverseText(run) : run;
+    return out.replace(RLO_RUN_RE, (_, inner: string) => reverseText(inner));
+  };
+  const needsRendered = (el: Element, raw: string): boolean =>
+    HOSTISH_RE.test(raw) &&
+    (RLO_RE.test(raw) || Element.prototype.querySelector.call(el, '*') !== null || styling().bidi(el) !== null);
   return {
     read(el) {
       let v = memo.get(el);
@@ -306,13 +430,33 @@ function linkTextReader(): { read(el: Element): string; exceeded(): boolean } {
         over = true;
         raw = textEnds(el, MAX_LINK_TEXT_CHARS, LINK_TEXT_STEPS);
       }
-      v = capLinkText(raw);
+      v = { text: capLinkText(raw) };
+      if (!over && needsRendered(el, raw)) {
+        const shown = rendered(el);
+        if (shown === null) over = true;
+        else if (shown !== raw) v.rendered = capLinkText(shown);
+      }
       memo.set(el, v);
       return v;
     },
     exceeded: () => over,
   };
 }
+
+/** True when `text` shows a host whose registrable domain is not the destination's (scoreEmail's mismatch rule). */
+function showsOtherHost(text: string, href: string): boolean {
+  const shown = shownHost(text);
+  const h = hostOf(href);
+  return Boolean(shown && h && registrableDomain(shown) !== registrableDomain(h));
+}
+
+/**
+ * The text scored for a link to `href`: the rendered text when it shows another host than the destination, else the
+ * DOM text. Either reading counts (fail closed), so hiding a URL in the markup cannot clear a mismatch the reader
+ * sees, and a misjudged style cannot clear one the DOM text shows.
+ */
+const scoredText = (t: LinkText, href: string): string =>
+  t.rendered !== undefined && showsOtherHost(t.rendered, href) ? t.rendered : t.text;
 
 /** Prepend the subject (bounded) without cutting the end of the already-sampled body. */
 export const withSubject = (subject: string, body: string): string =>
@@ -462,6 +606,37 @@ function sampleText(el: HTMLElement, max: number, keep: TextFilter | null): { te
 
 const isZero = (v: string): boolean => parseFloat(v) === 0;
 
+/** An element's computed style, or null (past the budget, or not an element of the document's window). */
+type StyleOf = (el: Element) => CSSStyleDeclaration | null;
+
+/**
+ * Computed styles for one document, each element's read once and at most `budget` of them (past it, null, and
+ * `refused` is called); null when the document has no window to compute styles with.
+ */
+function styleReader(doc: Document, budget = STYLE_CHECKS, refused?: () => void): StyleOf | null {
+  const win = doc.defaultView;
+  if (!win || typeof win.getComputedStyle !== 'function') return null;
+  let checks = budget;
+  const styles = new Map<Element, CSSStyleDeclaration | null>();
+  return (el) => {
+    let cs = styles.get(el);
+    if (cs !== undefined) return cs;
+    cs = null;
+    if (checks > 0) {
+      checks--;
+      try {
+        cs = win.getComputedStyle(el);
+      } catch {
+        /* not an element of this window */
+      }
+    } else {
+      refused?.();
+    }
+    styles.set(el, cs);
+    return cs;
+  };
+}
+
 /**
  * The element's own box keeps its content from being seen: not rendered (also the `hidden` attribute, whose UA
  * display:none a stylesheet may lack), transparent, or clipped to nothing.
@@ -482,26 +657,8 @@ function hidesBox(el: Element, cs: CSSStyleDeclaration): boolean {
  * height/width with hidden overflow). Each element's style is read once, for at most STYLE_CHECKS elements; past
  * that, text counts as shown. Null when the body's document has no window to compute styles with.
  */
-function cssHiddenText(root: Element): TextFilter | null {
-  const win = ownerDocOf(root).defaultView;
-  if (!win || typeof win.getComputedStyle !== 'function') return null;
-  let checks = STYLE_CHECKS;
-  const styles = new Map<Element, CSSStyleDeclaration | null>();
-  const style = (el: Element): CSSStyleDeclaration | null => {
-    let cs = styles.get(el);
-    if (cs !== undefined) return cs;
-    cs = null;
-    if (checks > 0) {
-      checks--;
-      try {
-        cs = win.getComputedStyle(el);
-      } catch {
-        /* not an element of this window */
-      }
-    }
-    styles.set(el, cs);
-    return cs;
-  };
+function cssHiddenText(root: Element, style: StyleOf | null = styleReader(ownerDocOf(root))): TextFilter | null {
+  if (!style) return null;
   const boxes = new Map<Element, boolean>(); // the element or an ancestor below root hides its box
   const boxHidden = (el: Element): boolean => {
     const chain: Element[] = [];
@@ -658,7 +815,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
   };
   const sel = 'a, area, form, [formaction], [data-ped-formaction], [data-ped-att-formaction], set, animate';
   const nodes = [...el.querySelectorAll(sel)];
-  const linkText = linkTextReader();
+  const linkText = linkTextReader(el);
   // Past the examination bound, look at the first and last nodes and report truncation (fail closed): thousands
   // of identical filler links must not keep the real one from being examined.
   let truncated = nodes.length > MAX_LINK_SCAN;
@@ -674,7 +831,7 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
       // The animated link: the element the animation aims at with its own href, or the <a> around it.
       const { target } = animationTarget(node);
       const anchor = target ? closestEl(target, 'a') : null;
-      const text = anchor ? linkText.read(anchor) : '';
+      const text: LinkText = anchor ? linkText.read(anchor) : { text: '' };
       for (const raw of animValues(node)) {
         const href = resolveAgainstBase(raw, base);
         if (!href) continue;
@@ -682,12 +839,15 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
           truncated = true;
           break;
         }
-        out.push({ text, href });
+        out.push({ text: scoredText(text, href), href });
       }
     } else if (tag === 'a' || tag === 'area') {
       const href = resolveAnchorHref(node, true);
       // Score the real destination behind redirect/link-rewriting wrappers (Safe Links, Proofpoint, google.com/url…).
-      if (href) out.push({ text: linkText.read(node), href: unwrapCached(href) });
+      if (href) {
+        const dest = unwrapCached(href);
+        out.push({ text: scoredText(linkText.read(node), dest), href: dest });
+      }
     } else if (tag === 'form') {
       const raw = getAttr(node, 'action') ?? getAttr(node, 'data-ped-action') ?? getAttr(node, 'data-ped-att-action') ?? '';
       const href = resolveAgainstBase(raw, base);
@@ -699,8 +859,10 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
         getAttr(node, 'data-ped-att-formaction') ??
         '';
       const href = resolveAgainstBase(raw, base);
-      const text = (linkText.read(node) || capLinkText(getAttr(node, 'value') || '')).trim();
-      if (href) out.push({ text, href });
+      if (href) {
+        const text = (scoredText(linkText.read(node), href) || capLinkText(getAttr(node, 'value') || '')).trim();
+        out.push({ text, href });
+      }
     }
   }
   // Identical links add nothing; past the cap keep the first and last ones for scoring and report the truncation.
