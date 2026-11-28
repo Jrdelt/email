@@ -51,7 +51,7 @@ export const textOf = (node: Node): string => builtin<string | null>(node, 'text
 export const ownerDocOf = (node: Node): Document => builtin<Document>(node, 'ownerDocument');
 /** A document's window. Email markup in a frame document can clobber `document.defaultView` (`<img name=...>`). */
 export const defaultViewOf = (doc: Document): Window | null => builtin<Window | null>(doc, 'defaultView') ?? null;
-const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;
+export const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;
 
 const NON_TEXT_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'file', 'color', 'range', 'hidden']);
 

@@ -36,6 +36,7 @@ import { getSettings } from '../src/settings';
 import {
   isAttachmentLocked,
   lockAttachments,
+  lockedAttachmentName,
   setAttachmentBlockedHandler,
   unlockAttachments,
 } from '../src/ui/attachmentLock';
@@ -583,7 +584,7 @@ function installClickGuard(opts: {
         if (isAttachmentLocked(post.element) || closestEl(post.element, '[data-ped-att-locked]')) {
           showPausedAttachmentToast(
             document,
-            getAttr(post.element, 'data-ped-att-name') ?? post.name,
+            lockedAttachmentName(post.element) ?? post.name,
             el instanceof HTMLElement ? el : post.element,
           );
         }

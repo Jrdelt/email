@@ -7,11 +7,13 @@ import {
   getAttrNS,
   hasAttr,
   ownerDocOf,
+  queryAll,
   resolveAgainstBase,
   rmAttr,
   rmAttrNS,
   setAttr,
   setAttrNS,
+  tagOf,
   useLinks,
 } from '../dom';
 import { hostOf } from '../domain';
@@ -58,22 +60,41 @@ function matchesLockedTarget(el: Element): boolean {
   return rendered.links.length > 0 || rendered.truncated;
 }
 
+/**
+ * The unresolved target of one locked control as the lock recorded it in the isolated world, or its live attribute
+ * (one the lock has not stashed yet). Only the attribute that element type navigates with counts: a form posts to
+ * its action, a button or input to its formaction, a link to its href. Never the page-visible data-ped-* copies:
+ * the email can write those itself, and the toast would then name a host the action does not go to.
+ */
+function recordedTarget(node: Element): string | null {
+  const st = stashes.get(node);
+  const tag = tagOf(node);
+  if (tag === 'form') return st?.get('action') ?? getAttr(node, 'action');
+  if (tag === 'button' || tag === 'input') return st?.get('formaction') ?? getAttr(node, 'formaction');
+  return (
+    st?.get('href') ??
+    getAttr(node, 'href') ??
+    st?.get('xlink:href') ??
+    getAttrNS(node, XLINK_NS, 'href') ??
+    getAttr(node, 'xlink:href')
+  );
+}
+
+/** Where a blocked action goes, for the toast; '' (a generic message) when that cannot be told for sure. */
 function targetHostOf(el: Element): string {
   const use = closestEl(el, 'use');
-  const node =
-    closestEl(el, `a, area, [formaction], [${FORMACTION_ATTR}], form`) ?? (use ? (useLinks(use).links[0] ?? null) : null);
+  const node = closestEl(el, 'a, area, button, input, form') ?? (use ? (useLinks(use).links[0] ?? null) : null);
   if (!node) return '';
-  const raw =
-    getAttr(node, HREF_ATTR) ??
-    getAttr(node, 'href') ??
-    getAttr(node, XLINK_ATTR) ??
-    getAttrNS(node, XLINK_NS, 'href') ??
-    getAttr(node, 'xlink:href') ??
-    getAttr(node, FORMACTION_ATTR) ??
-    getAttr(node, 'formaction') ??
-    getAttr(node, ACTION_ATTR) ??
-    getAttr(node, 'action') ??
-    '';
+  // SMIL can retarget an SVG link to somewhere its href does not say (the lock pauses the animation, so its value
+  // is not live now): name no host rather than one the link may not go to once unlocked.
+  if (node.namespaceURI === SVG_NS && queryAll(ownerDocOf(node).documentElement, 'set, animate').length > 0) return '';
+  let raw = recordedTarget(node);
+  // A submit button without its own formaction posts to its form's action.
+  if (raw === null && tagOf(node) !== 'form' && tagOf(node) !== 'a' && tagOf(node) !== 'area') {
+    const form = closestEl(node, 'form');
+    raw = form ? recordedTarget(form) : null;
+  }
+  raw = (raw ?? '').trim();
   if (!raw) return '';
   return hostOf(resolveAgainstBase(raw, ownerDocOf(el).baseURI || 'https://invalid.local'));
 }

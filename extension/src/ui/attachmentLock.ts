@@ -7,6 +7,7 @@ import {
   getAttrNS,
   hasAttr,
   ownerDocOf,
+  parentElementOf,
   rmAttr,
   rmAttrNS,
   setAttr,
@@ -16,7 +17,6 @@ import { holdDisabled, releaseDisabled } from './ariaDisabled';
 import { removePausedLinkToast, showPausedAttachmentToast } from './linkToast';
 
 const ATT_LOCK_ATTR = 'data-ped-att-locked';
-const ATT_NAME_ATTR = 'data-ped-att-name';
 const ATT_HREF_ATTR = 'data-ped-att-href';
 const ATT_DL_ATTR = 'data-ped-att-download';
 const ATT_DLURL_ATTR = 'data-ped-att-download-url';
@@ -33,6 +33,19 @@ const STASHED_PAIRS: readonly [attr: string, stashAttr: string][] = [
 const styles = new WeakMap<Document, HTMLStyleElement>();
 const watchers = new WeakMap<HTMLElement, MutationObserver>();
 const blockedHandlers = new WeakMap<Document, () => void>();
+// The file name each attachment was locked with, kept in the isolated world. The toast never reads a name from the
+// page: email HTML can put an attribute of its own on any element inside an attachment ("invoice.pdf" on a span in
+// a link that downloads invoice.zip).
+const lockedNames = new WeakMap<Element, string>();
+
+/** The name the closest locked attachment at or around `el` was locked with, or null when it has none. */
+export function lockedAttachmentName(el: Element): string | null {
+  for (let n: Element | null = el; n; n = parentElementOf(n)) {
+    const name = lockedNames.get(n);
+    if (name !== undefined) return name;
+  }
+  return null;
+}
 
 /** Register a per-document callback fired when a user clicks a locked attachment. */
 export function setAttachmentBlockedHandler(doc: Document, handler: (() => void) | null): void {
@@ -59,8 +72,7 @@ function blockAttachmentEvent(e: Event): void {
     e.type === 'keydown' ||
     (e.type === 'auxclick' && (e as MouseEvent).button === 1);
   if (shouldToast) {
-    const namedEl = closestEl(el, `[${ATT_NAME_ATTR}]`);
-    const name = (namedEl ? getAttr(namedEl, ATT_NAME_ATTR) : null) ?? getAttr(lockedRoot, ATT_NAME_ATTR) ?? '';
+    const name = lockedAttachmentName(el) ?? '';
     const doc = ownerDocOf(lockedRoot);
     showPausedAttachmentToast(doc, name, el instanceof HTMLElement ? el : null);
     blockedHandlers.get(doc)?.();
@@ -157,7 +169,8 @@ export function lockAttachments(elements: readonly HTMLElement[], names?: Readon
     install(ownerDocOf(el));
     setAttr(el, ATT_LOCK_ATTR, '');
     const name = names?.get(el);
-    if (name) setAttr(el, ATT_NAME_ATTR, name);
+    if (name) lockedNames.set(el, name);
+    else lockedNames.delete(el);
     stashTarget(el);
     if (!watchers.has(el) && typeof MutationObserver !== 'undefined') {
       const obs = new MutationObserver((records) => {
@@ -179,7 +192,7 @@ export function unlockAttachments(elements: readonly HTMLElement[]): void {
     watchers.get(root)?.disconnect();
     watchers.delete(root);
     rmAttr(root, ATT_LOCK_ATTR);
-    rmAttr(root, ATT_NAME_ATTR);
+    lockedNames.delete(root);
     for (const el of stashedIn.get(root) ?? []) {
       // An element inside another still-locked attachment stays stashed and is handed to that root.
       const outer = closestEl(el, `[${ATT_LOCK_ATTR}]`) as HTMLElement | null;

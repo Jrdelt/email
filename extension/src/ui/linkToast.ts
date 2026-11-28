@@ -1,3 +1,4 @@
+import { ellipsizeMiddle, showable } from '../text';
 import { createCloseIcon, createLockIcon } from './icons';
 
 const TOAST_HOST_ID = 'ped-toast-host';
@@ -187,8 +188,10 @@ export function showPausedLinkToast(doc: Document, host: string, trigger: HTMLEl
 
 /** Shows a non-intrusive toast explaining why an untrusted attachment click was blocked. */
 export function showPausedAttachmentToast(doc: Document, filename: string, trigger: HTMLElement | null = null): void {
-  const message = filename
-    ? `Attachment blocked (${filename}) — untrusted emails cannot open attachments. Trust this email or sender in the banner above.`
+  // The name is the email's own text: an RLO in "invoice\u202efdp.exe" would show it as "invoiceexe.pdf".
+  const shown = showable(ellipsizeMiddle(filename.trim(), 80));
+  const message = shown
+    ? `Attachment blocked (${shown}) — untrusted emails cannot open attachments. Trust this email or sender in the banner above.`
     : 'Attachment blocked — untrusted emails cannot open attachments. Trust this email or sender in the banner above.';
   presentToast(doc, message, trigger);
 }
