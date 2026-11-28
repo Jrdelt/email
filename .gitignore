@@ -17,3 +17,6 @@ store-upload/
 !/ml/data/SOURCES.md
 .DS_Store
 .env
+# Any .env variant: `wxt submit init` writes the store-publishing API credentials to .env.submit.
+.env.*
+!.env.example

@@ -1,4 +1,4 @@
-"""The repository's ignore rules keep raw data out of commits.
+"""The repository's ignore rules keep raw data and store-publishing secrets out of commits.
 
 `git check-ignore --no-index` tests the rules themselves (not whether a path happens to be tracked), from the
 repository root. Skipped outside a git checkout (for example an unpacked sdist).
@@ -50,6 +50,16 @@ def test_ml_data_is_ignored(path):
 
 def test_ml_data_sources_stays_tracked():
     assert not _ignored("ml/data/SOURCES.md")
+
+
+# `wxt submit init` writes the Chrome/Edge/Firefox store API credentials to .env.submit.
+@pytest.mark.parametrize("path", [".env", ".env.submit", "extension/.env.submit", ".env.local", "ml/.env.production"])
+def test_env_files_are_ignored(path):
+    assert _ignored(path)
+
+
+def test_env_example_template_is_not_ignored():
+    assert not _ignored(".env.example")
 
 
 def test_no_tracked_file_matches_an_ignore_rule():
