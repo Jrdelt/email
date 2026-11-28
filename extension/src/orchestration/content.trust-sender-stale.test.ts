@@ -45,6 +45,7 @@ describe('content.ts: "Always trust sender" resolving after a newer scan rendere
     });
 
     banner.button('Always trust sender').click();
+    banner.button('Yes, always trust this sender').click(); // a danger banner asks first
     // While the write is pending, a phishing reply from someone else arrives and is scanned.
     const reply = document.createElement('div');
     reply.className = 'adn';

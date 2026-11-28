@@ -44,6 +44,8 @@ describe('content.ts: iCloud banner actions with an uncertain pairing', () => {
     expect(banner.root(), 'banner shown').not.toBeNull();
     const mark = sent.length;
     banner.button('Always trust sender').click();
+    // A danger banner asks first (the safe choice is focused); confirm, so the pairing guard is what is tested.
+    banner.button('Yes, always trust this sender').click();
     for (let i = 0; i < 5; i++) await tick();
     expect(unlocksAfter(mark), 'no frame unlocked').toEqual([]);
     expect(lastVerdict(sent), 'still untrusted').toMatchObject({ trusted: false });

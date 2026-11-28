@@ -475,16 +475,80 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   });
   report.title = 'Save a redacted false-alarm note on this device (does not unlock links)';
 
+  // Two-step confirmations for danger banners: a hidden bar under the actions that its trigger toggles, with the safe
+  // choice first and focused. Only one is open at a time.
+  const confirmBars: { bar: HTMLDivElement; trigger: HTMLButtonElement }[] = [];
+  const keepLabel = !anyLocked ? 'Not now' : attachmentsLocked && !linksLocked ? 'Keep attachments blocked' : 'Keep links paused';
+  const confirmStep = (
+    id: string,
+    message: string,
+    confirmLabel: string,
+    trigger: HTMLButtonElement,
+    onConfirm: (b: HTMLButtonElement, keepSafe: HTMLButtonElement) => void | Promise<void>,
+  ): HTMLDivElement => {
+    const bar = doc.createElement('div');
+    bar.id = id;
+    bar.className = 'confirm-bar';
+    bar.hidden = true;
+    const msg = doc.createElement('div');
+    msg.className = 'confirm-msg';
+    msg.textContent = message;
+    const row = doc.createElement('div');
+    row.className = 'confirm-actions';
+    const collapse = () => {
+      bar.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.focus();
+    };
+    const keepSafe = button(keepLabel, collapse, 'btn-mint');
+    const confirm = button(confirmLabel, (b) => onConfirm(b, keepSafe), 'btn-danger');
+    row.append(keepSafe, confirm);
+    bar.append(msg, row);
+    bar.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        collapse();
+      }
+    });
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', id);
+    confirmBars.push({ bar, trigger });
+    trigger.addEventListener('click', () => {
+      if (trigger.disabled) return;
+      const open = bar.hidden;
+      for (const other of confirmBars) {
+        other.bar.hidden = true;
+        other.trigger.setAttribute('aria-expanded', 'false');
+      }
+      bar.hidden = !open;
+      trigger.setAttribute('aria-expanded', String(open));
+      if (open) keepSafe.focus();
+    });
+    return bar;
+  };
+
+  let emailConfirm: HTMLDivElement | undefined;
+  let senderConfirm: HTMLDivElement | undefined;
   const canAllowlist = Boolean(model.sender && canTrustByAllowlist(model.sender));
-  const trust = button('Always trust sender', async (b) => {
+  const trustSenderNow = async (b: HTMLButtonElement, keepSafe?: HTMLButtonElement) => {
     b.disabled = true;
-    const ok = await actions.onTrustSender();
-    if (ok && host.isConnected) {
-      removeBanner(doc);
-    } else if (!ok) {
-      b.disabled = false;
+    if (keepSafe) keepSafe.disabled = true;
+    let ok = false;
+    try {
+      ok = await actions.onTrustSender();
+    } finally {
+      // Not stored (or the write failed): both choices stay available.
+      if (!ok) {
+        b.disabled = false;
+        if (keepSafe) keepSafe.disabled = false;
+      }
     }
-  });
+    if (ok && host.isConnected) removeBanner(doc);
+  };
+  // Trusting the sender is broader than trusting this email (every later email from the address skips the checks),
+  // so on a danger banner it takes the same two steps as "I trust this email"; a warning banner trusts in one click.
+  const dangerTrust = model.level === 'danger';
+  const trust = button('Always trust sender', dangerTrust ? () => {} : (b) => trustSenderNow(b));
   if (!canAllowlist || model.sender?.allowlisted) {
     trust.disabled = true;
     const reasonWhy = model.sender?.allowlisted
@@ -494,6 +558,15 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
         : 'Sender failed authentication or used an unexpected relay';
     trust.title = reasonWhy;
     trust.setAttribute('aria-description', reasonWhy);
+  } else if (dangerTrust) {
+    const address = showable(ellipsizeMiddle(model.sender?.address ?? '', 120));
+    senderConfirm = confirmStep(
+      'ped-confirm-sender',
+      `Always trust ${address}? This email and every future email from this address will skip phishing checks. Only do this if you verified the sender.`,
+      'Yes, always trust this sender',
+      trust,
+      (b, keepSafe) => trustSenderNow(b, keepSafe),
+    );
   }
 
   actionsBar.append(seeWhy, report, trust);
@@ -533,7 +606,6 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
     (undoBtn ?? dismiss).focus();
   };
 
-  let confirmBar: HTMLDivElement | undefined;
   if (anyLocked) {
     if (model.level === 'warning') {
       actionsBar.append(
@@ -544,72 +616,32 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
         }),
       );
     } else {
-      confirmBar = doc.createElement('div');
-      confirmBar.id = 'ped-confirm';
-      confirmBar.className = 'confirm-bar';
-      confirmBar.hidden = true;
-
-      const confirmMsg = doc.createElement('div');
-      confirmMsg.className = 'confirm-msg';
-      confirmMsg.textContent =
+      const triggerBtn = button('I trust this email', () => {});
+      emailConfirm = confirmStep(
+        'ped-confirm',
         linksLocked && attachmentsLocked
           ? 'Links and attachments in this email look dangerous. Only unlock if you verified the sender.'
           : attachmentsLocked
             ? 'An attachment in this email uses a high-risk file type. Only unlock if you verified the sender.'
-            : 'Links in this email look dangerous. Only unlock if you verified the sender.';
-
-      const confirmActions = doc.createElement('div');
-      confirmActions.className = 'confirm-actions';
-
-      let triggerBtn!: HTMLButtonElement;
-      const collapseConfirm = () => {
-        confirmBar!.hidden = true;
-        triggerBtn.setAttribute('aria-expanded', 'false');
-        triggerBtn.focus();
-      };
-
-      const keepSafe = button(
-        attachmentsLocked && !linksLocked ? 'Keep attachments blocked' : 'Keep links paused',
-        collapseConfirm,
-        'btn-mint',
-      );
-      const confirmUnlock = button(
+            : 'Links in this email look dangerous. Only unlock if you verified the sender.',
         attachmentsLocked && !linksLocked
           ? 'Yes, unlock attachments anyway'
           : linksLocked && attachmentsLocked
             ? 'Yes, unlock anyway'
             : 'Yes, unlock links anyway',
-        async (b) => {
+        triggerBtn,
+        async (b, keepSafe) => {
           b.disabled = true;
           keepSafe.disabled = true;
           await actions.onUnlock();
           renderTrustedPill();
         },
-        'btn-danger',
       );
-      confirmActions.append(keepSafe, confirmUnlock);
-      confirmBar.append(confirmMsg, confirmActions);
-      confirmBar.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          collapseConfirm();
-        }
-      });
-
-      triggerBtn = button('I trust this email', (b) => {
-        const nextOpen = confirmBar!.hidden;
-        confirmBar!.hidden = !nextOpen;
-        b.setAttribute('aria-expanded', String(nextOpen));
-        if (nextOpen) keepSafe.focus();
-      });
-      triggerBtn.setAttribute('aria-expanded', 'false');
-      triggerBtn.setAttribute('aria-controls', 'ped-confirm');
       actionsBar.append(triggerBtn);
     }
   }
 
-  if (confirmBar) card.append(topSticker, close, mainRow, actionsBar, confirmBar, drawer);
-  else card.append(topSticker, close, mainRow, actionsBar, drawer);
+  card.append(topSticker, close, mainRow, actionsBar, ...[emailConfirm, senderConfirm].filter((b) => b !== undefined), drawer);
   wrap.append(card);
   root.append(style, wrap);
   (doc.documentElement ?? doc.body).appendChild(host);

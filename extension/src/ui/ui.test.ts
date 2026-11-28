@@ -375,6 +375,83 @@ describe('banner', () => {
     }
   });
 
+  it('requires 2-step confirmation for "Always trust sender" on a danger banner', async () => {
+    document.body.innerHTML = '';
+    removeBanner();
+    const sender = analyzeSender('PayPal Security', 'security@paypa1-alerts.com', [
+      { text: 'https://www.paypal.com/signin', href: 'http://192.168.4.20/login' },
+    ]);
+    let root: ShadowRoot | undefined;
+    const origAttach = HTMLElement.prototype.attachShadow;
+    const spy = vi.spyOn(HTMLElement.prototype, 'attachShadow').mockImplementation(function (this: HTMLElement, init) {
+      root = origAttach.call(this, init);
+      return root;
+    });
+    const btn = (label: string) => [...root!.querySelectorAll('button')].find((b) => b.textContent === label)!;
+    try {
+      const act = actions();
+      showBanner(
+        {
+          level: 'danger',
+          title: 'Possible phishing.',
+          tag: 'PHISHING WARNING',
+          reasons: ['A link goes to a numeric web address instead of a real website'],
+          linksLocked: true,
+          attachmentsLocked: true,
+          sender,
+        },
+        act,
+      );
+      const trust = btn('Always trust sender');
+      expect(trust.disabled).toBe(false);
+      expect(trust.getAttribute('aria-expanded')).toBe('false');
+      trust.click();
+      await Promise.resolve();
+      expect(act.onTrustSender).not.toHaveBeenCalled();
+      expect(document.getElementById('ped-banner-host')).not.toBeNull();
+      const bar = root!.getElementById(trust.getAttribute('aria-controls')!) as HTMLElement;
+      expect(bar.classList.contains('confirm-bar')).toBe(true);
+      expect(bar.hidden).toBe(false);
+      expect(trust.getAttribute('aria-expanded')).toBe('true');
+      expect(bar.textContent).toContain('security@paypa1-alerts.com');
+      expect(root!.activeElement?.textContent).toBe('Keep links paused');
+
+      // The safe choice collapses it; nothing is trusted.
+      (root!.activeElement as HTMLButtonElement).click();
+      expect(bar.hidden).toBe(true);
+      expect(trust.getAttribute('aria-expanded')).toBe('false');
+      expect(act.onTrustSender).not.toHaveBeenCalled();
+
+      // Escape collapses it too and returns focus to the trigger.
+      trust.click();
+      bar.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(bar.hidden).toBe(true);
+      expect(root!.activeElement).toBe(trust);
+
+      // Opening one confirm bar closes the other.
+      const emailTrigger = btn('I trust this email');
+      emailTrigger.click();
+      const emailBar = root!.getElementById(emailTrigger.getAttribute('aria-controls')!) as HTMLElement;
+      expect(emailBar.hidden).toBe(false);
+      trust.click();
+      expect(emailBar.hidden).toBe(true);
+      expect(emailTrigger.getAttribute('aria-expanded')).toBe('false');
+      expect(bar.hidden).toBe(false);
+      emailTrigger.click();
+      expect(bar.hidden).toBe(true);
+      expect(emailBar.hidden).toBe(false);
+
+      trust.click();
+      btn('Yes, always trust this sender').click();
+      await vi.waitFor(() => expect(act.onTrustSender).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(document.getElementById('ped-banner-host')).toBeNull());
+      expect(act.onUnlock).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+      removeBanner();
+    }
+  });
+
   it('isolates host styles with all:initial and mounts on documentElement instead of body', () => {
     document.body.innerHTML = '';
     removeBanner();
