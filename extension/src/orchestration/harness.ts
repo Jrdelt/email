@@ -119,8 +119,9 @@ export const fire = (el: Element, type: string, init: MouseEventInit = {}): bool
 export const press = (el: Element, key = 'Enter'): boolean =>
   dispatch(el, new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
 
-/** Form submission event; true when the extension cancelled it. */
-export const submit = (form: Element): boolean => dispatch(form, new Event('submit', { bubbles: true, cancelable: true }));
+/** Form submission event (from `submitter`, a submit button, if given); true when the extension cancelled it. */
+export const submit = (form: Element, submitter: HTMLElement | null = null): boolean =>
+  dispatch(form, new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter }));
 
 /** Deliver a runtime message to the content script as the background (or its iCloud relay) would. */
 export const deliver = (msg: unknown): Promise<unknown> => {

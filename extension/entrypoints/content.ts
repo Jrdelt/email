@@ -12,9 +12,11 @@ import {
   closestEl,
   eventElement,
   getAttr,
+  hasAttr,
   ownerDocOf,
   queryAll,
   rawLinkTarget,
+  resolveAgainstBase,
   resolveAnchorHref,
   tagOf,
   textOf,
@@ -25,7 +27,7 @@ import type { DomainIntel } from '../src/domainIntel';
 import { type Link, type Verdict, scoreEmail } from '../src/features';
 import { recordFalsePositive } from '../src/feedback';
 import { icloudFrameRole, WEBMAIL_MATCHES } from '../src/hosts';
-import { analyzeLinkDestination, isSafeHttpUrl, mergeLinkIntel } from '../src/linkGuard';
+import { analyzeLinkDestination, isSafeHttpUrl, type LinkRisk, mergeLinkIntel } from '../src/linkGuard';
 import { analyzeSender, canTrustByAllowlist, type SenderInfo } from '../src/sender';
 import { createScheduler } from '../src/scheduler';
 import { getSettings } from '../src/settings';
@@ -306,33 +308,216 @@ function replayNavigation(anchor: Element, href: string, activeTab: boolean): vo
   else win.location.assign(href);
 }
 
+/**
+ * Where submitting `form` from `submitter` (a submit button, or null) navigates: the submitter's formaction, else
+ * the form's action, else the page itself, resolved as the browser does. Read through the prototype-bound attribute
+ * helpers: `<input name="action">` shadows `form.action`. null for method "dialog", which navigates nowhere. A GET
+ * submission replaces the query with the form's fields; its site and path are those of the action.
+ */
+function submissionTarget(form: Element, submitter: Element | null): string | null {
+  const attr = (own: string, formAttr: string): string =>
+    (submitter && hasAttr(submitter, own) ? getAttr(submitter, own) : getAttr(form, formAttr)) ?? '';
+  if (attr('formmethod', 'method').trim().toLowerCase() === 'dialog') return null;
+  const doc = ownerDocOf(form);
+  const raw = attr('formaction', 'action');
+  return raw.trim() ? resolveAgainstBase(raw, doc.baseURI || doc.URL) : doc.URL;
+}
+
+interface GuardTarget {
+  container: HTMLElement;
+  senderAddress: string;
+  senderRegistrable: string;
+  senderIntelPending?: boolean;
+  /** Settles once the pending sender lookup's verdict (and any lock it brings) has been rendered. */
+  senderSettled?: Promise<unknown>;
+}
+
+/** A navigation (link click or form submission) the click guard has cancelled and decides at click time. */
+interface HeldNavigation {
+  /** Absolute http(s) destination. */
+  href: string;
+  /** The message it started in, as found when it was held. */
+  hit: GuardTarget;
+  /** Where in that message it started (looked up again to see whether the message is locked now). */
+  at: Element;
+  /**
+   * The link or form whose destination it is (for a form outside the email, the email's submit button); looked up
+   * again for the sender's latest state.
+   */
+  source: Element;
+  /** The element the paused notice points at. */
+  trigger: Element;
+  /** Destination host named in the paused notice. */
+  host: string;
+}
+
 function installClickGuard(opts: {
-  findTarget: (
-    el: Element,
-  ) => {
-    container: HTMLElement;
-    senderAddress: string;
-    senderRegistrable: string;
-    senderIntelPending?: boolean;
-    /** Settles once the pending sender lookup's verdict (and any lock it brings) has been rendered. */
-    senderSettled?: Promise<unknown>;
-  } | null;
+  findTarget: (el: Element) => GuardTarget | null;
   findAttachment?: (el: Element) => { element: HTMLElement; name: string } | null;
   isPending: () => boolean;
   flushScan: () => Promise<void>;
 }) {
+  const lockedNow = (h: HeldNavigation): boolean => {
+    if (isLocked(h.hit.container)) return true;
+    const refreshed = opts.findTarget(h.at);
+    return Boolean(refreshed && isLocked(refreshed.container));
+  };
+  const pausedNotice = (h: HeldNavigation): void =>
+    showPausedLinkToast(ownerDocOf(h.trigger), h.host, h.trigger instanceof HTMLElement ? h.trigger : null);
+  // A navigation held for a scan or lookup that then locks the message gets the same notice as a click on a locked
+  // link. Checked after every wait of a held navigation and right before it goes ahead.
+  const pausedByLock = (h: HeldNavigation): boolean => {
+    if (!lockedNow(h)) return false;
+    pausedNotice(h);
+    return true;
+  };
+  // Settles once the sender's pending lookup has been rendered or the message is locked. A rescan of the thread
+  // replaces the pending lookup (the stale scan renders nothing), so follow it to the one that renders.
+  const senderVerdict = async (h: HeldNavigation, first: Promise<unknown> | undefined): Promise<void> => {
+    for (let settled = first; settled; ) {
+      await settled.catch(() => undefined);
+      if (lockedNow(h)) return;
+      if (opts.isPending()) await opts.flushScan();
+      const now = opts.findTarget(h.source);
+      const next = now?.senderIntelPending ? now.senderSettled : undefined;
+      settled = next === settled ? undefined : next;
+    }
+  };
+  // The warning page gets the destination only: never a form's fields.
+  const openWarning = (risk: LinkRisk, extra: { intel?: DomainIntel } = {}) =>
+    void sendRuntime({
+      type: 'openWarning',
+      href: risk.href,
+      host: risk.host,
+      registrable: risk.registrable,
+      level: risk.level,
+      reasons: risk.reasons,
+      ...extra,
+    });
+
+  /**
+   * Decide a held navigation: wait for a pending scan, check the destination locally and then (outside Strict
+   * Local Mode) its registrable domain online, re-checking the message's lock after every wait. True when it may go
+   * ahead; otherwise it was paused (notice) or sent to the warning page.
+   */
+  const decideHeld = async (h: HeldNavigation): Promise<boolean> => {
+    if (opts.isPending()) {
+      await opts.flushScan();
+      if (pausedByLock(h)) return false;
+    }
+
+    const latest = opts.findTarget(h.source) ?? h.hit;
+    const risk = analyzeLinkDestination(h.href, latest.senderRegistrable, location.origin);
+    if (risk.level !== 'safe') {
+      openWarning(risk);
+      return false;
+    }
+
+    if (risk.needsDomainCheck) {
+      const settings = await getSettings(browser.storage.local, managedStorage());
+      if (pausedByLock(h)) return false;
+      if (!settings.strictLocalMode) {
+        let timerId: ReturnType<typeof setTimeout> | undefined;
+        const waitMs = latest.senderIntelPending ? SENDER_INTEL_WAIT_MS : CLICK_INTEL_TIMEOUT_MS;
+        let intel: DomainIntel | undefined;
+        const destination = sendRuntime<DomainIntel>({ type: 'domainIntel', domain: risk.registrable }).then((r) => {
+          intel = r;
+        });
+        // While the sender's own lookup runs, wait (within the same bound) for its verdict too: a domain warning
+        // it brings locks the email, which pauses this navigation as well. Stop waiting as soon as such a lock lands.
+        const sender = latest.senderIntelPending ? senderVerdict(h, latest.senderSettled) : undefined;
+        const timeout = new Promise<void>((resolve) => {
+          timerId = setTimeout(resolve, waitMs);
+        });
+        await Promise.race(
+          sender
+            ? [
+                Promise.all([destination, sender]),
+                sender.then(() => (lockedNow(h) ? undefined : new Promise<never>(() => {}))),
+                timeout,
+              ]
+            : [destination, timeout],
+        ).finally(() => clearTimeout(timerId));
+        if (pausedByLock(h)) return false;
+        const finalRisk = mergeLinkIntel(risk, intel);
+        if (finalRisk.level !== 'safe') {
+          openWarning(finalRisk, { intel });
+          return false;
+        }
+      }
+    }
+
+    return !pausedByLock(h);
+  };
+
+  // A form whose held submission is being replayed, with the destination it was cleared for. requestSubmit fires its
+  // submit event synchronously, so the entry only lives for that call.
+  const replaying = new WeakMap<Element, string>();
+  const replaySubmit = (form: Element, submitter: HTMLElement | null, href: string): void => {
+    replaying.set(form, href);
+    try {
+      // The prototype's method: a control named "requestSubmit" shadows the form's own.
+      HTMLFormElement.prototype.requestSubmit.call(form as HTMLFormElement, submitter ?? undefined);
+    } catch {
+      // The submitter no longer submits this form: drop the submission rather than send it anywhere unchecked.
+    } finally {
+      replaying.delete(form);
+    }
+  };
+
+  const onSubmit = (e: Event, el: Element) => {
+    const form = closestEl(el, 'form');
+    if (!form) return;
+    const submitter = (e as SubmitEvent).submitter ?? null;
+    const href = submissionTarget(form, submitter);
+    if (href !== null && replaying.get(form) === href) return; // our own replay of a cleared submission
+    // A submit button inside an email can submit a form outside it (form="id"): that is the email's submission too.
+    const formHit = opts.findTarget(form);
+    const at = formHit ? form : submitter;
+    const hit = formHit ?? (submitter ? opts.findTarget(submitter) : null);
+    if (!at || !hit || isLocked(hit.container)) return; // a locked message's forms are the lock's job
+
+    const pending = opts.isPending();
+    // As for links, only http(s) destinations are checked here (inline data:/blob: downloads are the attachment
+    // lock's job). Others are held only while a scan is pending, then dropped: submit again once it is checked.
+    if (href === null || !isSafeHttpUrl(href)) {
+      if (!pending) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void opts.flushScan();
+      return;
+    }
+    const initialRisk = analyzeLinkDestination(href, hit.senderRegistrable, location.origin);
+    if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
+    const held: HeldNavigation = { href, hit, at, source: at, trigger: submitter ?? form, host: initialRisk.host };
+    if (!extensionAlive()) {
+      // Orphaned (see the link case below): risky submissions stay paused; safe ones wait for a pending scan.
+      if (initialRisk.level === 'safe' && !pending) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (initialRisk.level !== 'safe') {
+        pausedNotice(held);
+        return;
+      }
+      void (async () => {
+        await opts.flushScan();
+        if (!pausedByLock(held)) replaySubmit(form, submitter, href);
+      })();
+      return;
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    void (async () => {
+      if (await decideHeld(held)) replaySubmit(form, submitter, href);
+    })();
+  };
+
   const onEvent = (e: Event) => {
     const el = eventElement(e);
     if (!el) return;
 
     if (e.type === 'submit') {
-      const form = closestEl(el, 'form');
-      if (!form) return;
-      const hit = opts.findTarget(form);
-      if (!hit || isLocked(hit.container) || !opts.isPending()) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      void opts.flushScan();
+      onSubmit(e, el);
       return;
     }
 
@@ -402,30 +587,7 @@ function installClickGuard(opts: {
     const activeTab = !(me.metaKey || me.ctrlKey || (e.type === 'auxclick' && me.button === 1));
     const initialRisk = analyzeLinkDestination(rawHref, hit.senderRegistrable, location.origin);
     if (!pending && initialRisk.level === 'safe' && !initialRisk.needsDomainCheck) return;
-    const lockedNow = () => {
-      if (isLocked(hit.container)) return true;
-      const refreshed = opts.findTarget(at);
-      return Boolean(refreshed && isLocked(refreshed.container));
-    };
-    // Clicks held for a scan or lookup that then locks the message get the same notice as a click on a locked link.
-    // Checked after every wait of a held click and right before it navigates.
-    const lockedAfterScan = () => {
-      if (!lockedNow()) return false;
-      showPausedLinkToast(ownerDocOf(a), initialRisk.host, a instanceof HTMLElement ? a : null);
-      return true;
-    };
-    // Settles once the sender's pending lookup has been rendered or the message is locked. A rescan of the thread
-    // replaces the pending lookup (the stale scan renders nothing), so follow it to the one that renders.
-    const senderVerdict = async (first: Promise<unknown> | undefined): Promise<void> => {
-      for (let settled = first; settled; ) {
-        await settled.catch(() => undefined);
-        if (lockedNow()) return;
-        if (opts.isPending()) await opts.flushScan();
-        const now = opts.findTarget(a);
-        const next = now?.senderIntelPending ? now.senderSettled : undefined;
-        settled = next === settled ? undefined : next;
-      }
-    };
+    const held: HeldNavigation = { href: rawHref, hit, at, source: a, trigger: a, host: initialRisk.host };
     if (!extensionAlive()) {
       // Orphaned by an extension update: the background can no longer check or open links for us. Risky links
       // stay paused until the tab is reloaded; safe ones still wait for a pending scan (which runs locally) and
@@ -434,12 +596,12 @@ function installClickGuard(opts: {
       e.preventDefault();
       e.stopImmediatePropagation();
       if (initialRisk.level !== 'safe') {
-        showPausedLinkToast(ownerDocOf(a), initialRisk.host, a instanceof HTMLElement ? a : null);
+        pausedNotice(held);
         return;
       }
       void (async () => {
         await opts.flushScan();
-        if (!lockedAfterScan()) replayNavigation(a, rawHref, activeTab);
+        if (!pausedByLock(held)) replayNavigation(a, rawHref, activeTab);
       })();
       return;
     }
@@ -448,68 +610,7 @@ function installClickGuard(opts: {
     e.stopImmediatePropagation();
 
     void (async () => {
-      if (opts.isPending()) {
-        await opts.flushScan();
-        if (lockedAfterScan()) return;
-      }
-
-      const latest = opts.findTarget(a) ?? hit;
-      const risk = analyzeLinkDestination(rawHref, latest.senderRegistrable, location.origin);
-      if (risk.level !== 'safe') {
-        void sendRuntime({
-          type: 'openWarning',
-          href: risk.href,
-          host: risk.host,
-          registrable: risk.registrable,
-          level: risk.level,
-          reasons: risk.reasons,
-        });
-        return;
-      }
-
-      if (risk.needsDomainCheck) {
-        const settings = await getSettings(browser.storage.local, managedStorage());
-        if (lockedAfterScan()) return;
-        if (!settings.strictLocalMode) {
-          let timerId: ReturnType<typeof setTimeout> | undefined;
-          const waitMs = latest.senderIntelPending ? SENDER_INTEL_WAIT_MS : CLICK_INTEL_TIMEOUT_MS;
-          let intel: DomainIntel | undefined;
-          const destination = sendRuntime<DomainIntel>({ type: 'domainIntel', domain: risk.registrable }).then((r) => {
-            intel = r;
-          });
-          // While the sender's own lookup runs, wait (within the same bound) for its verdict too: a domain warning
-          // it brings locks the email, which pauses this link as well. Stop waiting as soon as such a lock lands.
-          const sender = latest.senderIntelPending ? senderVerdict(latest.senderSettled) : undefined;
-          const timeout = new Promise<void>((resolve) => {
-            timerId = setTimeout(resolve, waitMs);
-          });
-          await Promise.race(
-            sender
-              ? [
-                  Promise.all([destination, sender]),
-                  sender.then(() => (lockedNow() ? undefined : new Promise<never>(() => {}))),
-                  timeout,
-                ]
-              : [destination, timeout],
-          ).finally(() => clearTimeout(timerId));
-          if (lockedAfterScan()) return;
-          const finalRisk = mergeLinkIntel(risk, intel);
-          if (finalRisk.level !== 'safe') {
-            void sendRuntime({
-              type: 'openWarning',
-              href: finalRisk.href,
-              host: finalRisk.host,
-              registrable: finalRisk.registrable,
-              level: finalRisk.level,
-              reasons: finalRisk.reasons,
-              intel,
-            });
-            return;
-          }
-        }
-      }
-
-      if (lockedAfterScan()) return;
+      if (!(await decideHeld(held))) return;
       let sameOrigin = false;
       try {
         sameOrigin = new URL(rawHref).origin === location.origin;
