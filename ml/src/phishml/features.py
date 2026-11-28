@@ -320,6 +320,15 @@ def _normalize_shown_text(text: str) -> str:
     return DOT_LOOKALIKE_RE.sub(".", INVISIBLE_RE.sub("", unicodedata.normalize("NFKC", text)))
 
 
+# A host whose TLD is punycode ('www.paypal.cоm' -> 'www.paypal.xn--cm-...'), which _is_valid_domain rejects
+# (mirror of features.ts PUNY_TLD_HOST_RE; local to shown_host).
+PUNY_TLD_HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?\Z", re.ASCII)
+
+
+def _is_puny_tld_host(h: str) -> bool:
+    return len(h) <= 253 and bool(PUNY_TLD_HOST_RE.match(h))
+
+
 def shown_host(text: str) -> str:
     """Extract a hostname only when link text looks like an explicit URL or bare domain/IP."""
     t = _normalize_shown_text(text).strip(JS_WS)
@@ -331,7 +340,7 @@ def shown_host(text: str) -> str:
         if _js_len(re.split(r"[/?#\\]", candidate[candidate.index("://") + 3 :], maxsplit=1)[0]) > MAX_SHOWN_AUTHORITY:
             return ""
         h = _host(candidate)
-        return h if (_is_valid_domain(h) or is_ip_host(h)) else ""
+        return h if (_is_valid_domain(h) or is_ip_host(h) or _is_puny_tld_host(h)) else ""
     bare = t.lstrip(WRAP_OPEN).rstrip(WRAP_CLOSE)
     if not bare or JS_WS_RE.search(bare):
         return ""
@@ -350,6 +359,8 @@ def shown_host(text: str) -> str:
         raw_host = _to_ascii_hostname(raw_host)
     if is_ip_host(raw_host):
         return raw_host
+    if _is_puny_tld_host(raw_host):  # non-ASCII TLD after an ASCII label; all-non-ASCII bare text stays prose
+        return raw_host if any(not lbl.startswith("xn--") for lbl in raw_host.split(".")[:-1]) else ""
     if not _is_valid_domain(raw_host):
         return ""
     tld = raw_host.rsplit(".", 1)[-1]

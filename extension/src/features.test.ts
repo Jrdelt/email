@@ -137,3 +137,24 @@ describe('shownHost stays linear on long punctuation runs', () => {
     expect(shownHost('Visit https://www.paypal.com/login.')).toBe('www.paypal.com');
   });
 });
+
+describe('a look-alike letter in the TLD of shown link text', () => {
+  // 'www.paypal.cоm' (Cyrillic о) reads as www.paypal.com, but its punycode TLD failed isValidDomain, so the text was
+  // treated as prose and the mismatch rule never ran.
+  const href = 'https://login-check.example-evil.xyz/s';
+  it.each(['www.paypal.cоm', 'https://www.paypal.cоm/signin', 'appleid.apple.сom', 'paypal.cоm', '(www.paypal.cоm).'])(
+    '%s is a shown domain that mismatches its link',
+    (text) => {
+      expect(shownHost(text)).toMatch(/\.xn--[a-z0-9-]+$/);
+      expect(extractFeatures('x@sender.example', 'Hello', [{ text, href }]).n_text_href_mismatch).toBe(1);
+      expect(scoreEmail('x@sender.example', 'Hello', [{ text, href }]).level).not.toBe('safe');
+    },
+  );
+  it('a real IDN address matching its link is no mismatch, and all-non-ASCII bare text stays prose', () => {
+    const f = extractFeatures('x@sender.example', 'Hello', [{ text: 'https://пример.рф/', href: 'https://xn--e1afmkfd.xn--p1ai/' }]);
+    expect(f.n_text_href_mismatch).toBe(0);
+    expect(shownHost('https://пример.рф/')).toBe('xn--e1afmkfd.xn--p1ai');
+    expect(shownHost('Нажмите.здесь')).toBe('');
+    expect(shownHost('пример.рф')).toBe('');
+  });
+});

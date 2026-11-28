@@ -71,3 +71,12 @@ def test_cloud_storage_html_links_and_billing_urgency():
     )
     assert f["n_cloud_html_links"] == 1
     assert f["urgency_hits"] >= 3
+
+
+def test_lookalike_letter_in_shown_tld_mismatches():
+    href = "https://login-check.example-evil.xyz/s"
+    for text in ("www.paypal.cоm", "https://www.paypal.cоm/signin", "appleid.apple.сom", "paypal.cоm"):
+        assert shown_host(text).rsplit(".", 1)[-1].startswith("xn--"), text
+        assert extract_features("x@sender.example", "Hello", [Link(text, href)])["n_text_href_mismatch"] == 1, text
+    assert shown_host("https://пример.рф/") == "xn--e1afmkfd.xn--p1ai"
+    assert shown_host("Нажмите.здесь") == ""

@@ -153,6 +153,12 @@ function asciiHost(host: string): string {
   }
 }
 
+// A host whose TLD is punycode: 'www.paypal.cоm' (Cyrillic о) becomes 'www.paypal.xn--cm-...', which isValidDomain
+// rejects (its TLD rule is [a-z]{2,63}), yet the reader sees www.paypal.com. Kept local to shownHost so the
+// isValidDomain gate for network lookups and relays stays as it is.
+const PUNY_TLD_HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?$/;
+const isPunyTldHost = (h: string): boolean => h.length <= 253 && PUNY_TLD_HOST_RE.test(h);
+
 /**
  * Extract a hostname only when the link text looks like an explicit URL or bare domain/IP,
  * so prose like "please reset your password immediately." or filenames like "report.pdf" return ''.
@@ -165,7 +171,7 @@ export function shownHost(text: string): string {
     const candidate = trimTrailingPunct(m[0]);
     if (candidate.slice(candidate.indexOf('://') + 3).split(/[/?#\\]/)[0]!.length > MAX_SHOWN_AUTHORITY) return '';
     const h = hostOf(candidate);
-    return isValidDomain(h) || isIpHost(h) ? h : '';
+    return isValidDomain(h) || isIpHost(h) || isPunyTldHost(h) ? h : '';
   }
   const bare = stripWrapping(t);
   if (!bare || /\s/.test(bare)) return '';
@@ -176,6 +182,9 @@ export function shownHost(text: string): string {
   if (bracketedIpv6 && isIpHost(bracketedIpv6)) return bracketedIpv6;
   const rawHost = asciiHost(authority.replace(/:\d{1,5}$/, '').toLowerCase());
   if (isIpHost(rawHost)) return rawHost;
+  // A non-ASCII TLD after an ASCII label (paypal.cоm, appleid.apple.сom) imitates a Latin TLD; bare text whose labels
+  // are all non-ASCII ("Нажмите.здесь") stays prose.
+  if (isPunyTldHost(rawHost)) return rawHost.split('.').slice(0, -1).some((l) => !l.startsWith('xn--')) ? rawHost : '';
   if (!isValidDomain(rawHost)) return '';
   const tld = rawHost.slice(rawHost.lastIndexOf('.') + 1);
   return rawHost.startsWith('www.') || COMMON_TLDS.has(tld) ? rawHost : '';
