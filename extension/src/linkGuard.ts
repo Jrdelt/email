@@ -1,4 +1,4 @@
-import { RISKY_DOWNLOAD_EXTS } from './attachments';
+import { ARCHIVE_EXTS, RISKY_DOWNLOAD_EXTS } from './attachments';
 import { isIpHost, isLookupDomain, registrableDomain } from './domain';
 import { destinationIntelWarnings, type DomainIntel } from './domainIntel';
 import { IP_LOGGER_HOSTS, isCloudHtmlLink, safePercentDecode, SHORTENER_HOSTS } from './features';
@@ -269,6 +269,11 @@ export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', 
   if (ext && RISKY_DOWNLOAD_EXTS.has(ext)) {
     hasDanger = true;
     reasons.push(`This link leads directly to a risky file type (.${ext}) that can carry malware or hidden scripts`);
+  } else if (ext && ARCHIVE_EXTS.has(ext)) {
+    // Same file as an attachment carries an archive warning; as a link it goes to the warning page (which still
+    // lets the user continue) instead of downloading straight away.
+    hasWarning = true;
+    reasons.push(`This link downloads an archive (.${ext}), a common way to deliver malware`);
   }
 
   if (IP_LOGGER_HOSTS.has(host) || IP_LOGGER_HOSTS.has(registrable)) {

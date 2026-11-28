@@ -67,6 +67,20 @@ describe('analyzeLinkDestination', () => {
     expect(wrapped.href).toBe('https://evil.example/payload.svg');
   });
 
+  it('sends archive downloads (.zip, .rar, .7z...) to the warning page instead of opening them', () => {
+    for (const ext of ['zip', 'rar', '7z', 'tgz', 'cab']) {
+      const r = analyzeLinkDestination(`https://evil.example/files/Invoice_7781.${ext}`, 'attacker.example');
+      expect(r.level).toBe('warning');
+      expect(r.reasons.join(' ')).toContain(`archive (.${ext})`);
+      expect(r.needsDomainCheck).toBe(false);
+    }
+    // Upper case and percent-encoded dots in the path still count; the query string does not.
+    expect(analyzeLinkDestination('https://evil.example/files/INVOICE%2EZIP').level).toBe('warning');
+    expect(analyzeLinkDestination('https://shop.example.com/search?q=a.zip').level).toBe('safe');
+    // A risky type inside a wrapped link still wins over the archive warning.
+    expect(analyzeLinkDestination('https://cdn.example.com/files/setup.exe').level).toBe('danger');
+  });
+
   it('flags danger for IP-logger/Grabify links like urlto.me before opening', () => {
     const r = analyzeLinkDestination('https://urlto.me/2r7Nf');
     expect(r.level).toBe('danger');

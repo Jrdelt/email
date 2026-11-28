@@ -33,7 +33,8 @@ export const RISKY_DOWNLOAD_EXTS: ReadonlySet<string> = new Set(
   [...DANGEROUS_EXTS].filter((e) => !['html', 'htm', 'shtml', 'xhtml', 'xht', 'com'].includes(e)),
 );
 
-const ARCHIVE_EXTS = new Set([
+/** Archive types: a warning as an attachment, and a warning (not danger) when a clicked link downloads one. */
+export const ARCHIVE_EXTS: ReadonlySet<string> = new Set([
   'zip', 'zipx', 'rar', 'r00', '001', '7z', 'tar', 'gz', 'tgz', 'cab', 'xz', 'bz2', 'arj', 'lzh', 'ace', 'uue',
 ]);
 const EXT = '([a-z0-9-]{1,20})';
