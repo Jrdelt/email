@@ -4,29 +4,29 @@ WORKS WITH
 Gmail, Outlook on the web, iCloud Mail, Yahoo Mail and Proton Mail, in your browser on a computer. It does not run inside phone or desktop mail apps. After installing, reload any webmail tab you already had open.
 
 WHAT IT LOOKS FOR
-• Fake senders: a display name that claims to be a well-known company but comes from a different address, lookalike web addresses, and senders your webmail could not verify.
-• Deceptive links: text that shows one website but goes to another, URL shorteners and IP loggers that hide where you will land, and pages hosted on raw cloud storage.
+• Fake senders: a display name that claims to be a well-known company but comes from a different address, lookalike web addresses, and (in Gmail set to English) senders Gmail could not verify.
+• Deceptive links: text that shows one website but goes to another, URL shorteners and IP loggers that hide where you will land, and pages hosted on raw cloud storage or on free hosting services.
 • Pressure tactics: urgent threats about your password or account.
-• New or reported sites: whether the sender's domain, or a site you click through to, was registered in the last 30 days, does not exist, or is on a public spam list.
+• Brand-new sites: whether the sender's domain, or a site you click through to, was registered in the last 30 days or does not exist at all.
 • Risky attachments: files that disguise their real type or can run code.
 
 WHAT IT DOES
 • Pauses the links and forms in a flagged message until you click "I trust this email". You can always keep reading.
-• Keeps attachments locked on messages you have not trusted yet, even when the text itself looks fine.
-• Double-checks where you are going the moment you click, sees through redirect wrappers, and stops on a warning page if the destination looks dangerous.
+• Keeps attachments locked inside the messages you open until you trust them, even when the text itself looks fine. In Gmail's inbox list, file buttons stay locked until you open the email.
+• Double-checks where a link or form in an email is taking you the moment you click, sees through redirect wrappers, and stops on a warning page if the destination looks dangerous.
 • Already clicked something suspicious? A calm step-by-step recovery guide is one click away in the toolbar popup.
-• Asks you to confirm before "I trust this email" unlocks a high-risk message, and lets you undo trust with one click.
+• Asks you to confirm before you trust a high-risk message or its sender, and lets you undo trust with one click.
 
 PRIVATE BY DESIGN
 • Your email text, attachments, sender addresses and full links never leave your browser.
-• For the age and spam-list checks, only the bare site name (like example.com) is looked up with public domain registration (RDAP) and DNS services, then cached on your device for up to 24 hours. These lookups are the reason the privacy section of this page lists personal communications, web history and website content.
+• For the website age checks, only the bare site name (like example.com) is looked up with public domain registration (RDAP) and DNS services, then cached on your device for up to 24 hours. These lookups are the reason the privacy section of this page lists personal communications, web history and website content.
 • Want zero lookups? Turn on Strict Local Mode in the toolbar popup (IT admins can enforce it by policy). The online checks then switch off and nothing leaves your browser.
-• "Clear all local data" in the popup erases your trusted senders, notes and lookup cache.
+• "Clear all local data" in the popup erases your trusted senders, trusted emails, notes and lookup cache.
 • No account, no ads, no analytics, no tracking. It checks a message only when you open it.
 • Free and open source (MIT license). The source code is linked from this page.
 
 GOOD TO KNOW
-No tool catches every scam, and a quiet inbox is not a guarantee. If a message feels wrong, contact the sender another way, such as through their official website or phone number.
+No tool catches every scam, and a quiet inbox is not a guarantee. It cannot read text inside pictures, so an email that is only an image gets fewer checks, and links that open an app on your computer instead of a web page are not checked. If a message feels wrong, contact the sender another way, such as through their official website or phone number.
 
 WHY IT ASKS FOR ACCESS
 • Your webmail sites: to read the email you open, show the banner, and pause links and attachments. Messages are checked on your computer, not on a server.
@@ -36,4 +36,4 @@ NEW IN 0.2.0
 Yahoo Mail and Proton Mail support, Strict Local Mode, "Clear all local data", and many fixes that make link and attachment locks harder to get around. Because two new mail sites were added, your browser may switch the extension off after the update until you approve them in the Extensions menu. Then reload any open webmail tab.
 
 SUPPORT
-Spotted a false alarm or a bug? Use the Support section on this page. The "Not phishing" button only saves a private note on your device, so it does not reach us.
+Spotted a false alarm or a bug? Use the Support section on this page. Reports there are public, so leave out names, email addresses and file names. The "Not phishing" button only saves a private note on your device, so it does not reach us.

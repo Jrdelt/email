@@ -1,54 +1,31 @@
 # Chrome Web Store & Microsoft Edge Add-ons Listing — Phishing Email Detector
 
-> Last Updated: 2026-11-25
+> Last Updated: 2026-11-28
 
-> **Important Version Note:** Chrome Web Store version `0.1.0` (ID `bdpnkkpanopdfhnclfcpllnlccphlejp`) was submitted prior to adding **Strict Local Mode (`managed_schema.json`)** and the **Yahoo Mail** & **Proton Mail** adapters (`mail.yahoo.com`, `mail.proton.me`). Its **Privacy practices** tab was filled in with the earlier answers (*Personal communications: No*, *Web history: No*), which under-declare what 0.1.0 already does (sender and clicked-link domains are looked up). Safest: cancel the 0.1.0 review and resubmit with the corrected answers below; otherwise correct the Privacy practices tab as soon as 0.1.0 is approved, without waiting for the next version. Then bump `extension/package.json` `"version"` to `0.2.0` before submitting the next update to Chrome Web Store (fresh submissions to Edge Add-ons and Firefox AMO can use the latest `store-upload/` archives immediately). See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md) and [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md) for all browser stores and HIPAA guidance.
+> **Important Version Note:** Chrome Web Store version `0.1.0` (ID `bdpnkkpanopdfhnclfcpllnlccphlejp`) was submitted prior to adding **Strict Local Mode (`managed_schema.json`)** and the **Yahoo Mail** & **Proton Mail** adapters (`mail.yahoo.com`, `mail.proton.me`). Its **Privacy practices** tab was filled in with the earlier answers (*Personal communications: No*, *Web history: No*), which under-declare what 0.1.0 already does (sender and clicked-link domains are looked up). Safest: cancel the 0.1.0 review and resubmit with the corrected answers below; otherwise correct the Privacy practices tab as soon as 0.1.0 is approved, without waiting for the next version. Then bump `extension/package.json` `"version"` to `0.2.0` before submitting the next update to Chrome Web Store.
+>
+> **Open owner decision (version label):** `extension/package.json` is still `0.1.0`, so every archive built now (`npm run zip:all`, including the ones for a fresh Edge Add-ons or Firefox AMO submission) is labelled `0.1.0` although it contains the 0.2.0 features (Yahoo Mail, Proton Mail, Strict Local Mode, click-time checks of form submissions). The new name and short description in [store/listing/name.txt](store/listing/name.txt) and [summary.txt](store/listing/summary.txt) are not in `extension/wxt.config.ts` yet either. Decide when to bump to `0.2.0` (and apply both files with it) before uploading anywhere. See [docs/browser-support-and-stores.md](docs/browser-support-and-stores.md) and [docs/hipaa-and-compliance.md](docs/hipaa-and-compliance.md) for all browser stores and HIPAA guidance.
 
 ---
 
-## Store Packages Ready to Upload
+## Store Packages
 
-All ready-to-upload files are gathered in `store-upload/` at the repo root (gitignored; regenerate anytime with `cd extension && npm run build:all && npm run zip:all`):
-- **Chrome Web Store ZIP:** `store-upload/phishing-email-detection-extension-0.1.0-chrome.zip` (also at `extension/.output/phishing-email-detection-extension-0.1.0-chrome.zip`)
-- **Microsoft Edge Add-ons ZIP:** `store-upload/phishing-email-detection-extension-0.1.0-edge.zip` (also at `extension/.output/phishing-email-detection-extension-0.1.0-edge.zip`)
+Build the archives with `cd extension && npm run build:all && npm run zip:all`. They are written to `extension/.output/` (gitignored), named after the version in `extension/package.json` (see the version note above):
+- **Chrome Web Store ZIP:** `extension/.output/phishing-email-detection-extension-<version>-chrome.zip`
+- **Microsoft Edge Add-ons ZIP:** `extension/.output/phishing-email-detection-extension-<version>-edge.zip`
+- **Firefox AMO:** `extension/.output/phishing-email-detection-extension-<version>-firefox.zip` plus `...-sources.zip` (build instructions inside, from [extension/README.md](extension/README.md))
 
 ---
 
 ## Store Listing
 
-**Extension Name** [REQUIRED]
-Phishing Email Detector
-
-**Short Description** [REQUIRED — 119 / 132 characters]
-Warns about phishing in webmail. Email content stays in your browser; only sender and clicked link domains are checked.
+**Extension Name** and **Short Description** [REQUIRED]
+The store takes both from the package manifest (`extension/wxt.config.ts`), so they change only with a new version:
+- **Now (0.1.0 manifest):** *Phishing Email Detector* / *Warns about phishing in webmail. Email content stays in your browser; only sender and clicked link domains are checked.* (119 / 132 characters)
+- **With 0.2.0:** [store/listing/name.txt](store/listing/name.txt) and [store/listing/summary.txt](store/listing/summary.txt), copied into `wxt.config.ts` together with the version bump (not done yet).
 
 **Detailed Description** [REQUIRED — plain text]
-> Paste from [store/listing/description-0.1.0.txt](store/listing/description-0.1.0.txt) now, and [description-0.2.0.txt](store/listing/description-0.2.0.txt) together with the 0.2.0 package, opened in a plain-text editor (see [store/README.md](store/README.md)). Do not copy the block below from a rendered page: that is how hard line breaks reached the live listing. The block is kept for reference only.
-```text
-Warns you about phishing emails, deceptive links, and unsafe attachments in Gmail, Outlook on the web, iCloud Mail, Yahoo Mail, and Proton Mail while keeping your email content private on your device.
-
-FEATURES
-• Spots impersonation and scam tactics — flags fake sender names, lookalike websites, urgent account threats, unverified senders, and links that display one website in the text while pointing somewhere else.
-• Checks website reputation without exposing your mail — verifies how recently a sender's or clicked link's domain was registered, whether its email records are set up properly, and whether it appears on public spam lists.
-• Pauses risky links and untrusted attachments — automatically disables links in flagged emails and blocks attachments from untrusted senders until you choose to trust the email, preventing accidental downloads or fake login pages.
-• Protects you even if you click — inspects external links the moment you click them, unwraps tracking redirects, and stops dangerous or newly registered destinations on a warning screen with step-by-step recovery guidance.
-• Clear, reversible trust controls — shows who really sent the message alongside where its links lead, asks for confirmation before unlocking high-risk alerts, and lets you undo trusting an email with one click.
-
-HOW TO USE
-1. Install Phishing Email Detector and open your webmail inbox.
-2. Read your email as usual — clean messages stay out of your way, while suspicious emails or untrusted attachments display a clear warning banner at the top of the page.
-3. Click "See why" on any banner (or open the extension icon in your toolbar) to inspect sender details, manage your trusted senders list, or open the recovery guide.
-
-PRIVACY
-Your email text, attachments, sender email addresses, and full link addresses never leave your browser. No account is required, and there is no analytics or tracking. To check website age and spam listings, only the bare website domain name is looked up via public domain registration (RDAP) and DNS services and cached locally on your device for up to 24 hours (15 minutes if a lookup only partly succeeded) — or enable Strict Local Mode directly in the popup for zero network lookups.
-
-PERMISSIONS
-• Webmail site access — used only on supported webmail services so the extension can scan opened emails locally, show warning banners, and pause risky links and untrusted attachments.
-• Local storage — saves your trusted senders list, trusted email fingerprints, local false-alarm notes, and domain lookup cache on your device.
-
-SUPPORT
-Found a bug or false alarm? Use the Support link on this listing to report an issue or share feedback.
-```
+> Paste from [store/listing/description-0.1.0.txt](store/listing/description-0.1.0.txt) now, and [description-0.2.0.txt](store/listing/description-0.2.0.txt) together with the 0.2.0 package, opened in a plain-text editor (see [store/README.md](store/README.md)). Never copy it from a rendered page: that is how hard line breaks reached the live listing. (The older reference copy of the description that used to be here was removed: it had drifted from the code.)
 
 **Category** [REQUIRED]
 - **Chrome Web Store:** `Privacy & Security` (set on the live listing)
@@ -64,16 +41,19 @@ English
 
 ## Graphics & Assets
 
-> Current files: [store/graphics/](store/graphics/) (real screenshots of the extension on an invented webmail page, small promo tile, marquee, padded store icon); see [store/README.md](store/README.md) for the upload order. The live 0.1.0 listing still has older mockup screenshots: replace them with screenshots 1-4.
+> Current files: [store/graphics/](store/graphics/) (real screenshots of the extension on an invented webmail page, re-captured on 2026-11-28; small promo tile, marquee, padded store icon, Edge logo); see [store/README.md](store/README.md) for the upload order. The live 0.1.0 listing still has older mockup screenshots: replace them with screenshots 1-4.
 
-| Asset | Dimensions | Store | Status | Filename |
+| Asset | Dimensions | Store | Status | Filename (in `store/graphics/`) |
 |-------|-----------|-------|--------|----------|
-| Store Icon [REQUIRED] | 128×128 PNG | Chrome & Edge | ✅ Ready | `store-upload/icon-128.png` (`extension/public/icons/icon-128.png`) |
-| Edge Store Logo [REQUIRED for Edge] | 300×300 PNG | Edge Add-ons | ✅ Ready | `store-upload/edge-logo-300x300.png` |
-| Screenshot 1 [REQUIRED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/screenshot-1-phishing-banner-1280x800.png` |
-| Screenshot 2 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/screenshot-2-link-stopped-1280x800.png` |
-| Screenshot 3 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/screenshot-3-attachment-lock-popup-1280x800.png` |
-| Small Promo Tile [RECOMMENDED] | 440×280 (24-bit PNG) | Chrome & Edge | ✅ Ready | `store-upload/small-promo-440x280.png` |
+| Store Icon [REQUIRED] | 128×128 PNG | Chrome & Edge | ✅ Ready | `store-icon-128-padded.png` |
+| Edge Store Logo [REQUIRED for Edge] | 300×300 PNG | Edge Add-ons | ✅ Ready | `edge-logo-300x300.png` |
+| Screenshot 1 [REQUIRED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `screenshot-1-spot-phishing.png` |
+| Screenshot 2 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `screenshot-2-see-why.png` |
+| Screenshot 3 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `screenshot-3-link-stopped.png` |
+| Screenshot 4 [RECOMMENDED] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready | `screenshot-4-attachments-locked.png` |
+| Screenshot 5 [with 0.2.0] | 1280×800 (24-bit PNG) | Chrome & Edge | ✅ Ready (shows Strict Local Mode) | `screenshot-5-private.png` |
+| Small Promo Tile [RECOMMENDED] | 440×280 (24-bit PNG) | Chrome & Edge | ✅ Ready | `small-promo-440x280.png` |
+| Marquee Promo Tile [OPTIONAL] | 1400×560 (24-bit PNG) | Chrome & Edge | ✅ Ready | `marquee-1400x560.png` |
 
 ---
 
@@ -83,7 +63,7 @@ Copy-paste these plain-English explanations into the **Chrome Web Store Privacy 
 
 | Permission / Host Pattern | Type | Justification |
 |---------------------------|------|---------------|
-| `storage` | `permissions` | Stores the user's local trusted-sender allowlist, one-way SHA-256 digests of trusted emails, redacted local false-positive notes, Strict Local Mode preference (plus read-only `storage.managed` enterprise policy schema), in-memory session state (`storage.session`: the latest verdict per open webmail tab for the toolbar popup, and 1-hour link-warning entries), and a 24-hour local cache of domain lookup results (`storage.local`) on the user's device. |
+| `storage` | `permissions` | Stores the user's local trusted-sender allowlist, one-way SHA-256 digests of trusted emails, redacted local false-positive notes, Strict Local Mode preference (plus read-only `storage.managed` enterprise policy schema), in-memory session state (`storage.session`: the latest verdict per open webmail tab for the toolbar popup, and short-lived link-warning entries that are removed when the warning is closed and pruned once older than 1 hour), and a 24-hour local cache of domain lookup results (`storage.local`) on the user's device. |
 | `https://mail.google.com/*` | `host_permissions` | Reads the currently opened email's sender header, text, links, and attachment shelf in Gmail locally in the browser to detect phishing indicators, display an in-page warning banner, and pause risky links and untrusted attachments until unlocked by the user. |
 | `https://outlook.live.com/*`, `https://outlook.office.com/*`, `https://outlook.office365.com/*`, `https://outlook.cloud.microsoft/*` | `host_permissions` | Reads the currently opened email in consumer Outlook.com and Microsoft 365 Outlook on the web locally in the browser to detect phishing indicators, display an in-page warning banner, and pause risky links and untrusted attachments. |
 | `https://mail.yahoo.com/*` | `host_permissions` | Reads the currently opened email in Yahoo Mail locally in the browser (excluding compose drafts) to detect phishing indicators, display warning banners, and pause risky links and untrusted attachments. *(Included starting in `0.2.0` / fresh Edge & Firefox builds.)* |
@@ -99,7 +79,7 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 ### Data Collection & Off-Device Transmission
 - **Does the extension transmit any data off-device?**
   - **Email content, sender email addresses, attachment files/names, and full URLs:** **No** — processed strictly in memory on the user's device and never transmitted anywhere.
-  - **Registrable website domains (check `Personal communications`, `Web history` and `Website content` in the CWS form, domain names only):** When an untrusted email is opened or an external link inside an email is clicked, **only the bare registrable domain name** (e.g., `example.com`, never URL paths/queries or email addresses) is queried over HTTPS against public IANA/registry RDAP (`data.iana.org`, registry RDAP / `rdap.org`) and public DNS-over-HTTPS (`cloudflare-dns.com`, `dns.google` fallback) to check domain age, mail setup, and URIBL spam status. No developer backend, analytics, or user tracking exists.
+  - **Registrable website domains (check `Personal communications`, `Web history` and `Website content` in the CWS form, domain names only):** When an untrusted email is opened or an external link inside an email is clicked, **only the bare registrable domain name** (e.g., `example.com`, never URL paths/queries or email addresses) is queried over HTTPS against public IANA/registry RDAP (`data.iana.org`, registry RDAP / `rdap.org`) and public DNS-over-HTTPS (`cloudflare-dns.com`) to check whether the domain exists, its age, and its mail setup. Like any browser request, each lookup also carries the user's IP address, the browser's `User-Agent` and an `Origin: chrome-extension://<extension ID>` header, so these services can tell the domain came from this extension (see [docs/privacy.md](docs/privacy.md) §4). No developer backend, analytics, or user tracking exists.
 
 | Data Type | Collected / Stored Externally by Developer? | Transmitted Off-Device? | Purpose | Shared with Third Parties? |
 |-----------|---------------------------------------------|------------------------|---------|---------------------------|
@@ -107,11 +87,11 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 | Health info | No | No | N/A | No |
 | Financial info | No | No | N/A | No |
 | Authentication info | No | No | N/A | No |
-| Personal communications | Domain name only (the sender's registrable domain; emails themselves are analyzed locally in browser memory only) | Yes — only the registrable domain of the sender of an opened untrusted email (never the address, content, full link URLs or attachments; a clicked link's domain is covered under Web history) to public RDAP & DNS resolvers | Check the sender domain's registration age, email records and spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
-| Location | No (the extension never reads, stores or sends an IP address or location; public RDAP/DNS resolvers see the user's IP only as connection metadata of each lookup, see privacy.md §4) | No | N/A | No |
+| Personal communications | Domain name only (the sender's registrable domain; emails themselves are analyzed locally in browser memory only) | Yes — only the registrable domain of the sender of an opened untrusted email (never the address, content, full link URLs or attachments; a clicked link's domain is covered under Web history) to public RDAP & DNS resolvers | Check the sender domain's registration age, existence and email records | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
+| Location | No (the extension never reads, stores or sends an IP address or location; public RDAP/DNS resolvers see the user's IP, and the browser's standard request headers including the extension's `Origin`, only as metadata of each lookup, see privacy.md §4) | No | N/A | No |
 | Web history | Domain name only (of a clicked external link) | Yes — only the registrable domain of an external link the user clicks in an email (never the URL path, query or the user's other browsing) to public RDAP & DNS resolvers | Check a clicked destination before it opens | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
 | User activity | No | No | N/A | No |
-| Website content | Domain name only (sender / clicked external link registrable domain) | Yes — bare domain name only to public RDAP & DNS resolvers (cached up to 24 h) | Check domain registration age, DNS email records, and URIBL spam listings | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
+| Website content | Domain name only (sender / clicked external link registrable domain) | Yes — bare domain name only to public RDAP & DNS resolvers (cached up to 24 h) | Check domain registration age, existence and DNS email records | Public RDAP & DNS resolvers only (no ad/analytics sharing) |
 
 ### Data Use Certification (Check all 3 boxes in CWS Dashboard)
 - [x] I do not sell or transfer user data to third parties, outside of the approved use cases
@@ -137,7 +117,7 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 - **Publisher Name:** `[Fill in your publisher display name]`
 - **Contact Email:** `[Fill in a monitored email address — required and shown publicly on Chrome Web Store]`
 - **Homepage URL:** `https://github.com/Jrdelt/email`
-- **Support URL:** `https://github.com/Jrdelt/email/issues`
+- **Support URL:** `https://github.com/Jrdelt/email/issues` (public: the listing and the issue template tell users to leave out names, addresses and file names, and to use [SECURITY.md](SECURITY.md) private reporting for anything sensitive)
 
 ---
 
@@ -145,8 +125,8 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
 
 | Version | Date | Changes | Status |
 |---------|------|---------|--------|
-| (next) | 2026-11-25 | Privacy practices answers corrected: *Personal communications*, *Web history* and *Website content* are checked (registrable domains only, to public RDAP/DNS). | Pending submission |
-| 0.1.0 | 2026-11-23 | Initial store-ready package: local phishing detection for Gmail, Outlook Web, and iCloud Mail; untrusted attachment locking; click-time link guard & `warning.html` recovery guide; domain RDAP/DNS/URIBL checks. | Published |
+| (next) | 2026-11-28 | Privacy practices answers corrected: *Personal communications*, *Web history* and *Website content* are checked (registrable domains only, to public RDAP/DNS). URIBL spam-list lookup and its `dns.google` fallback removed (URIBL refuses public resolvers); form submissions in emails checked at click time like links; many lock and detection fixes. | Pending submission |
+| 0.1.0 | 2026-11-23 | Initial store-ready package: local phishing detection for Gmail, Outlook Web, and iCloud Mail; untrusted attachment locking; click-time link guard & `warning.html` recovery guide; domain RDAP/DNS checks (plus a URIBL spam-list lookup that almost never answered and was removed in the next version). | Published |
 
 ### Rejection History
 
@@ -163,3 +143,4 @@ Use these exact answers so the Chrome Web Store **Privacy Practices** form, Micr
   > 2. Open any email from an untrusted sender containing an attachment or suspicious link/sender mismatch: a warning banner appears at the top of the page and attachments/flagged links are paused until you click "I trust this email".
   > 3. Click the extension toolbar icon to view the local check summary, domain details, trusted senders list, and the "Clicked a suspicious link?" recovery guide.
 - **In-UI privacy control (`0.2.0` / fresh Edge & Firefox builds):** The toolbar popup includes a **Strict Local Mode (0 network lookups)** checkbox (and enterprise `managed_schema.json` policy override) plus a **Clear all local data** control for HIPAA/enterprise zero-egress deployments.
+- **Known limitations (also in [docs/threat-model.md](docs/threat-model.md)):** desktop browsers only; sender verification ("couldn't verify", `via`) is read only in Gmail with an English interface; inbox-list file buttons are guarded only in Gmail; image-only emails and links that open an app (`search-ms:`, `ms-word:`, ...) are not scored or checked at click time; links opened from the browser's own context menu skip the click-time check on unflagged emails; each domain lookup carries the browser's `User-Agent` and the extension's `Origin` header.
