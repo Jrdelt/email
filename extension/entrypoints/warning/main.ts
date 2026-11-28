@@ -1,6 +1,7 @@
 import { ageDays, type DomainIntel } from '../../src/domainIntel';
 import { WARN_TTL_MS, destinationIntelWarnings, isSafeHttpUrl, proceedTarget } from '../../src/linkGuard';
 import { getSettings } from '../../src/settings';
+import { ellipsizeMiddle, showable } from '../../src/text';
 import { formatAge } from '../../src/ui/details';
 import { createLogoSvg, createStatusIcon } from '../../src/ui/icons';
 
@@ -61,7 +62,7 @@ function describeDestIntel(intel: DomainIntel): string {
   if (intel.rdap.status === 'ok') {
     const age = formatAge(ageDays(intel.rdap.registered));
     if (age) parts.push(`Registered ${age}`);
-    if (intel.rdap.registrar) parts.push(`Registrar: ${intel.rdap.registrar}`);
+    if (intel.rdap.registrar) parts.push(`Registrar: ${showable(ellipsizeMiddle(intel.rdap.registrar, 80))}`);
   } else if (intel.dns.status === 'ok' && intel.dns.nxdomain) {
     parts.push('Domain does not exist (NXDOMAIN)');
   } else if (intel.rdap.status === 'notfound') {
@@ -142,7 +143,11 @@ async function init() {
 
   $('dest-box').hidden = false;
   $('dest-host').textContent = stored.host || stored.registrable || 'Unknown destination';
-  $('dest-url').textContent = stored.href;
+  // The URL as it is navigated to. The stored href is the string unwrapRedirect() returned, which percent-decodes a
+  // wrapper's inner target, so it can hold a raw U+202E that reverses the rest of the line ("evil.example/\u202emoc.
+  // lapyap.www//:sptth" reads ".../https://www.paypal.com"). The serialisation percent-encodes every non-ASCII
+  // character (a host holding one does not parse), so nothing in it can reorder the text.
+  $('dest-url').textContent = new URL(stored.href).href;
 
   const reasons = [...stored.reasons];
   renderReasons(reasons);
