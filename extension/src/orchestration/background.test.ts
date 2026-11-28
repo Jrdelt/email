@@ -428,3 +428,32 @@ describe('B7 browsing other sites wakes the background as little as the browser 
     expect(remove).not.toHaveBeenCalled();
   });
 });
+
+describe('B8 a lookup that settles late never drops the newer lookup of the same domain', () => {
+  it('after Strict Local Mode was turned on and off mid-lookup, a third request joins the running lookup', async () => {
+    const held: (() => void)[] = [];
+    const { send, fetchSpy } = await boot({
+      fetch: () => new Promise((resolve) => held.push(() => resolve(new Response('{}', { status: 404 })))),
+    });
+    const first = send({ type: 'domainIntel', domain: 'example.com' }, gmailTop());
+    await until(() => expect(held.length).toBeGreaterThan(0));
+    await fakeBrowser.storage.local.set({ privacySettings: { strictLocalMode: true } });
+    await flush();
+    await fakeBrowser.storage.local.set({ privacySettings: { strictLocalMode: false } });
+    await flush();
+    const firstHeld = held.splice(0);
+
+    void send({ type: 'domainIntel', domain: 'example.com' }, gmailTop()); // a new lookup, still running
+    await until(() => expect(held.length).toBeGreaterThan(0));
+    for (const release of firstHeld) release(); // the first lookup settles now
+    await first;
+    await flush();
+
+    const requests = fetchSpy.mock.calls.length;
+    void send({ type: 'domainIntel', domain: 'example.com' }, gmailTop());
+    await flush();
+    await flush();
+    expect(fetchSpy.mock.calls.length, 'requests sent for a lookup that is already running').toBe(requests);
+    for (const release of held.splice(0)) release();
+  });
+});

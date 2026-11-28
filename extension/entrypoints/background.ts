@@ -180,8 +180,12 @@ export default defineBackground(() => {
         if (!p) {
           const { allowed, kv } = cacheKV(generation);
           const guardedFetch: FetchFn = (u, i) => (allowed() ? fetch(u, i) : Promise.reject(new Error('lookups stopped')));
-          p = getIntel(kv, domain, guardedFetch).finally(() => inflight.delete(domain));
-          inflight.set(domain, p);
+          // Delete only this lookup's own entry: after a Strict Local Mode purge the map may hold a newer one.
+          const own: Promise<DomainIntel> = getIntel(kv, domain, guardedFetch).finally(() => {
+            if (inflight.get(domain) === own) inflight.delete(domain);
+          });
+          p = own;
+          inflight.set(domain, own);
         }
         const result = await p;
         return strictNow ? null : result;
