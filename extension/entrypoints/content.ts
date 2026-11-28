@@ -114,7 +114,7 @@ interface ScannableMsg {
   body: string;
   links: Link[];
   linksTruncated?: boolean;
-  /** iCloud: body not tied to its card for certain, so the card's sender is not trusted for it. */
+  /** Sender not tied to this body for certain (iCloud pairing, loose header fallback): not trusted for it. */
   pairingUncertain?: boolean;
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
@@ -576,7 +576,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
     });
     const allowlisted = sender.valid && trustedSenders.has(sender.address);
     const allowlistTrusted = allowlisted && canTrustByAllowlist(sender) && !email.pairingUncertain;
-    // An uncertain iCloud pairing is not an authentication failure: the email is simply checked like any other.
+    // An uncertain pairing or sender match is not an authentication failure: the email is simply checked like any other.
     if (allowlisted && !canTrustByAllowlist(sender)) {
       sender.warnings.unshift(
         `Claims to be a trusted sender (${sender.address}), but failed authentication or used an unexpected relay`,
