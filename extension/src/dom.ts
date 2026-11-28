@@ -52,6 +52,18 @@ export const ownerDocOf = (node: Node): Document => builtin<Document>(node, 'own
 /** A document's window. Email markup in a frame document can clobber `document.defaultView` (`<img name=...>`). */
 export const defaultViewOf = (doc: Document): Window | null => builtin<Window | null>(doc, 'defaultView') ?? null;
 export const parentElementOf = (node: Node): Element | null => builtin<Element | null>(node, 'parentElement') ?? null;
+/** A document's <html> element. Email markup in the document can clobber `document.documentElement` too. */
+export const documentElementOf = (doc: Document): Element | null =>
+  builtin<Element | null>(doc, 'documentElement') ?? null;
+
+/**
+ * The extension's own host elements with this id in `doc`: direct children of <html>, where the extension puts
+ * them (after <body>) and email markup never is. A lookup by id would find an element of the email first.
+ */
+export const topLevelById = (doc: Document, id: string): Element[] => {
+  const root = documentElementOf(doc);
+  return root ? queryAll(root, `:scope > #${id}`) : [];
+};
 
 const NON_TEXT_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'file', 'color', 'range', 'hidden']);
 

@@ -1,3 +1,4 @@
+import { documentElementOf, topLevelById } from '../dom';
 import { ellipsizeMiddle, showable } from '../text';
 import { createCloseIcon, createLockIcon } from './icons';
 
@@ -36,7 +37,8 @@ function ensureToast(doc: Document): ToastController {
   const existing = controllers.get(doc);
   if (existing && existing.host.isConnected) return existing;
 
-  doc.getElementById(TOAST_HOST_ID)?.remove();
+  // A toast left by an earlier copy of this script; never an element of the email with the same id.
+  for (const el of topLevelById(doc, TOAST_HOST_ID)) el.remove();
 
   const host = doc.createElement('div');
   host.id = TOAST_HOST_ID;
@@ -115,7 +117,7 @@ function ensureToast(doc: Document): ToastController {
   toast.append(badge, msgEl, close);
   region.append(liveEl, toast);
   root.append(style, region);
-  (doc.documentElement ?? doc.body).appendChild(host);
+  (documentElementOf(doc) ?? doc.body).appendChild(host);
 
   const ctrl: ToastController = {
     host,
@@ -155,7 +157,7 @@ function ensureToast(doc: Document): ToastController {
 }
 
 function presentToast(doc: Document, message: string, trigger: HTMLElement | null): void {
-  if (!doc.documentElement && !doc.body) return;
+  if (!documentElementOf(doc) && !doc.body) return;
   const ctrl = ensureToast(doc);
   ctrl.trigger = trigger;
 
@@ -211,6 +213,6 @@ export function removePausedLinkToast(doc: Document = document): void {
     ctrl.host.remove();
     controllers.delete(doc);
   } else {
-    doc.getElementById(TOAST_HOST_ID)?.remove();
+    for (const el of topLevelById(doc, TOAST_HOST_ID)) el.remove();
   }
 }

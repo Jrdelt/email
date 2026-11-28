@@ -1,4 +1,5 @@
 import type { AttachmentAnalysis } from '../attachments';
+import { documentElementOf, topLevelById } from '../dom';
 import { intelWarnings } from '../domainIntel';
 import type { Verdict } from '../features';
 import { canTrustByAllowlist, type SenderInfo } from '../sender';
@@ -179,8 +180,16 @@ const BANNER_CSS = `
     button:focus-visible,summary:focus-visible{outline:2px solid Highlight;outline-offset:2px}
   }`;
 
+// The banner host this script made in each document. Never looked up by id alone: the email's own markup can carry
+// id="ped-banner-host" and comes first in document order, so each re-render would delete one of its elements
+// instead of the previous banner, and banners would pile up.
+const hosts = new WeakMap<Document, HTMLElement>();
+
 export function removeBanner(doc: Document = document): void {
-  doc.getElementById(HOST_ID)?.remove();
+  hosts.get(doc)?.remove();
+  hosts.delete(doc);
+  // A banner left by an earlier copy of this script (the extension was updated or reloaded).
+  for (const el of topLevelById(doc, HOST_ID)) el.remove();
 }
 
 /** Shared status derivation used by both the in-page banner and the toolbar popup. */
@@ -644,5 +653,6 @@ export function showBanner(model: BannerModel, actions: BannerActions, doc: Docu
   card.append(topSticker, close, mainRow, actionsBar, ...[emailConfirm, senderConfirm].filter((b) => b !== undefined), drawer);
   wrap.append(card);
   root.append(style, wrap);
-  (doc.documentElement ?? doc.body).appendChild(host);
+  (documentElementOf(doc) ?? doc.body).appendChild(host);
+  hosts.set(doc, host);
 }
