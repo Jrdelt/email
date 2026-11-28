@@ -15,7 +15,7 @@ import {
   textOf,
 } from '../dom';
 import { hostOf, registrableDomain } from '../domain';
-import { EXPLICIT_URL, INVISIBLE_RE, safePercentDecode, shownHostReader, type Link } from '../features';
+import { EXPLICIT_URL, INVISIBLE_RE, normalizeShownText, safePercentDecode, shownHostReader, type Link } from '../features';
 import { unwrapRedirectUrl } from '../linkGuard';
 import type { AttachmentRef } from './types';
 
@@ -299,6 +299,56 @@ const NOT_RENDERED_TAGS = new Set(['style', 'script', 'noscript', 'template']);
 
 const reverseText = (t: string): string => [...t].reverse().join('');
 
+const NON_ASCII_RE = /[^\x00-\x7f]/;
+const DOT_LETTER_RE = /\.\p{L}/u;
+const LETTER_START_RE = /^\p{L}/u;
+const WRAP_OPEN_RE = /^["'(<{\u00ab\u201c\u2018]+/; // what shownHost strips before a bare host (features.ts WRAP_OPEN)
+const V4_WHOLE_RE = /^[0-9.]+$/;
+const V4_HEAD_RE = /^[0-9.]*/;
+const V6_WHOLE_RE = /^[0-9a-f:.[\]]+$/i;
+const V6_HEAD_RE = /^[0-9a-f:.[\]]*/i;
+
+/**
+ * Whether link text made of these text nodes (in order) can show a host once CSS leaves any of them out, with no
+ * bidi reordering. CSS hides whole text nodes, so the rendered text is a subsequence of them, and shownHost (after
+ * NFKC and the look-alike folds, which act per character) finds a host only in:
+ * - an explicit URL, which needs ":/" contiguous: within a node, or a node ending in ':' joined to a later node
+ *   starting with '/';
+ * - a bare host: the whole rendered text, trimmed, without whitespace. So only nodes whose trimmed text has no
+ *   whitespace ("solid") can be shown, and the host starts at the first of them (after quotes or brackets). A domain
+ *   needs a '.' immediately followed by a letter (its TLD): within a solid node, or a solid node ending in '.' joined
+ *   to a later one starting with a letter. An IPv4 address needs 3 dots and 4 digits, an IPv6 one (or other text
+ *   isIpHost takes) a colon not at its end, in a run of solid nodes made only of address characters, up to the
+ *   leading address characters of the run's last node.
+ * This over-approximates every reading rendered() can produce (true when in doubt), so product cards ("Merino
+ * scarf", "$19.99", "19,99 €"), accented or symbol text and &nbsp; cost no style reads, while a hidden splitter in a
+ * host still does.
+ */
+export function textCouldShowHost(nodes: Iterable<string>): boolean {
+  let colonEnd = false; // an earlier node ends with ':'
+  let dotEnd = false; // an earlier solid node ends with '.'
+  let v4 = { dots: 0, digits: 0 }; // every earlier solid node made only of digits and dots
+  let v6 = ''; // every earlier solid node made only of IPv6 characters
+  for (const raw of nodes) {
+    const t = NON_ASCII_RE.test(raw) ? normalizeShownText(raw) : raw;
+    if (t.includes(':/') || (colonEnd && t.startsWith('/'))) return true;
+    colonEnd ||= t.endsWith(':');
+    const solid = t.trim().replace(WRAP_OPEN_RE, '');
+    if (!solid || /\s/.test(solid)) continue;
+    if (DOT_LETTER_RE.test(solid) || (dotEnd && LETTER_START_RE.test(t))) return true;
+    dotEnd ||= t.endsWith('.');
+    const head4 = V4_HEAD_RE.exec(solid)![0];
+    const dots = v4.dots + (head4.split('.').length - 1);
+    const digits = v4.digits + head4.replace(/\./g, '').length;
+    if (dots >= 3 && digits >= 4) return true;
+    if (V4_WHOLE_RE.test(solid)) v4 = { dots, digits };
+    const run6 = v6 + V6_HEAD_RE.exec(solid)![0];
+    if (run6.replace(/[.:]+$/, '').includes(':')) return true;
+    if (V6_WHOLE_RE.test(solid)) v6 = run6;
+  }
+  return false;
+}
+
 /** The element that sets the bidi override for text in `el` (`el` or its nearest such ancestor up to `root`). */
 type BidiOverride = { owner: Element; rtl: boolean } | null;
 
@@ -379,7 +429,7 @@ function linkTextReader(root: Element): { read(el: Element): LinkText; exceeded(
   // Created on first use: most links never need them. Every link's ancestors are checked for a bidi override only
   // when the body can have one (a <bdo>, an inline unicode-bidi, or CSS that mentions an override), and from the
   // computed style only in that last case.
-  let styles: { style: StyleOf | null; bidi: (el: Element) => BidiOverride } | null = null;
+  let styles: { style: StyleOf | null; bidi: (el: Element) => BidiOverride; reorders: boolean } | null = null;
   const styling = () => {
     if (!styles) {
       const style = styleReader(ownerDocOf(root), LINK_STYLE_CHECKS, () => {
@@ -387,10 +437,19 @@ function linkTextReader(root: Element): { read(el: Element): LinkText; exceeded(
       });
       const css = cssMentions(root, OVERRIDE_RE);
       const markup = css || Element.prototype.querySelector.call(root, 'bdo, [style*="bidi" i]') !== null;
-      styles = { style, bidi: markup ? bidiOverrides(root, css ? style : null) : () => null };
+      styles = { style, bidi: markup ? bidiOverrides(root, css ? style : null) : () => null, reorders: markup };
     }
     return styles;
   };
+  // The link's text nodes, within the shared work budget.
+  function* textNodes(el: Element): Generator<string> {
+    const w = ownerDocOf(el).createTreeWalker(el, 0x4 /* SHOW_TEXT */);
+    for (let n = w.nextNode(); n && left >= 0; n = w.nextNode()) {
+      const t = n.nodeValue ?? '';
+      left -= 1 + t.length;
+      yield t;
+    }
+  }
   const rendered = (el: Element): string | null => {
     const { style, bidi } = styling();
     // Only what hides part of the link counts (elements inside it): a link hidden as a whole is not read at all.
@@ -419,9 +478,15 @@ function linkTextReader(root: Element): { read(el: Element): LinkText; exceeded(
     out += runOwner?.rtl ? reverseText(run) : run;
     return out.replace(RLO_RUN_RE, (_, inner: string) => reverseText(inner));
   };
-  const needsRendered = (el: Element, raw: string): boolean =>
-    HOSTISH_RE.test(raw) &&
-    (RLO_RE.test(raw) || Element.prototype.querySelector.call(el, '*') !== null || styling().bidi(el) !== null);
+  const needsRendered = (el: Element, raw: string): boolean => {
+    if (!HOSTISH_RE.test(raw)) return false;
+    const rlo = RLO_RE.test(raw);
+    if (!rlo && Element.prototype.querySelector.call(el, '*') === null && styling().bidi(el) === null) return false;
+    if (rlo || styling().reorders) return true;
+    // No bidi reordering: CSS can only leave whole text nodes out. When no choice of them shows a host, the styles
+    // need not be read (a budget spent here is reported by rendered(), fail closed).
+    return textCouldShowHost(textNodes(el)) || left < 0;
+  };
   return {
     read(el) {
       let v = memo.get(el);
@@ -469,7 +534,9 @@ export const withSubject = (subject: string, body: string): string =>
 const NON_TEXT_SEL = 'style, script, noscript, template';
 const TEXT_CHUNK = 4096; // raw characters normalised at a time (per-node regexes are slow on many tiny nodes)
 const RAW_SCAN_LIMIT = 50 * MAX_BODY_CHARS; // safety bound on raw characters read in each direction
-// Elements whose computed style is read per body (~15 ms in Chromium at worst); past it, text counts as shown.
+// Elements whose computed style is read per body; past it, text counts as shown. A read costs about 3-4 us in
+// Chromium, so the whole budget is about 70-80 ms (more on a first scan): bodyText caches its result per body until
+// the body changes, so rescans of an unchanged open email do not pay it again.
 const STYLE_CHECKS = MAX_BODY_CHARS;
 // How much a text node skipped by a filter counts toward RAW_SCAN_LIMIT: skipping costs per node, not per character,
 // so one huge hidden node is cheap to pass, while very many tiny ones still end the read.
@@ -710,13 +777,46 @@ function cssHiddenText(root: Element, style: StyleOf | null = styleReader(ownerD
 export function bodyText(el: HTMLElement): string {
   const all = sampleText(el, MAX_BODY_CHARS, null);
   if (!all.cut) return all.text;
+  const cached = shownFirstCache.get(el);
+  if (cached?.sample === all.text) return cached.text;
+  const text = shownFirst(el, all.text);
+  rememberShownFirst(el, all.text, text);
+  return text;
+}
+
+/** The sample of a body too long to fit, shown text first (see bodyText): the costly part, with its style reads. */
+function shownFirst(el: HTMLElement, all: string): string {
   const hidden = cssHiddenText(el);
-  if (!hidden) return all.text;
+  if (!hidden) return all;
   const shown = sampleText(el, MAX_BODY_CHARS, (p) => !hidden(p));
-  if (!shown.skipped) return all.text;
+  if (!shown.skipped) return all;
   const room = MAX_BODY_CHARS - shown.text.length - 1;
   const rest = room > 1 ? sampleText(el, room, hidden).text : '';
   return shown.text && rest ? `${shown.text}\n${rest}` : shown.text || rest;
+}
+
+/**
+ * shownFirst per body element, kept until the body changes: every debounced DOM change of the webmail rescans the
+ * open email, and an unchanged body need not pay its style reads again. Any change inside it (nodes, text, or an
+ * attribute that can show or hide text) drops the entry, and so does a different unfiltered sample.
+ */
+const shownFirstCache = new WeakMap<HTMLElement, { sample: string; text: string }>();
+const STYLE_ATTRS = ['style', 'class', 'hidden', 'id', 'dir', 'lang'];
+
+function rememberShownFirst(el: HTMLElement, sample: string, text: string): void {
+  if (typeof MutationObserver !== 'function') return;
+  if (!shownFirstCache.has(el)) {
+    const watch = new MutationObserver(() => {
+      shownFirstCache.delete(el);
+      watch.disconnect();
+    });
+    try {
+      watch.observe(el, { subtree: true, childList: true, characterData: true, attributeFilter: STYLE_ATTRS });
+    } catch {
+      return;
+    }
+  }
+  shownFirstCache.set(el, { sample, text });
 }
 
 /** Parse a header string like `PayPal <a@b.com>`, `PayPal (a@b.com)`, or bare `a@b.com`. */
@@ -805,9 +905,10 @@ const animValues = (anim: Element): Set<string> =>
 /**
  * Links, form actions and SMIL link targets inside `el` (de-duplicated). `truncated` is set when there are more
  * distinct links than MAX_LINKS: the extras cannot be checked, so callers treat the email as suspicious (fail closed)
- * instead of letting padding links hide the real one.
+ * instead of letting padding links hide the real one. `truncatedBy` is 'markup' when the links were few enough but
+ * their text or formatting used up the work budget (the notice then says so, not "too many links").
  */
-export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean } {
+export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean; truncatedBy?: 'markup' } {
   const base = ownerDocOf(el).baseURI || 'https://invalid.local';
   const out: Link[] = [];
   // Newsletters repeat the same href many times; unwrapping parses a URL, so do it once per distinct href.
@@ -878,9 +979,12 @@ export function scanLinks(el: HTMLElement): { links: Link[]; truncated: boolean 
     seen.add(key);
     return true;
   });
+  const tooMany = truncated || unique.length > MAX_LINKS;
+  const markup = linkText.exceeded() || shown.exceeded();
   return {
     links: sampleLinks(unique),
-    truncated: truncated || linkText.exceeded() || shown.exceeded() || unique.length > MAX_LINKS,
+    truncated: tooMany || markup,
+    ...(markup && !tooMany ? { truncatedBy: 'markup' as const } : {}),
   };
 }
 
@@ -906,10 +1010,11 @@ function sampleLinks(unique: Link[]): Link[] {
 
 export const linksIn = (el: HTMLElement): Link[] => scanLinks(el).links;
 
-/** `links` plus `linksTruncated` for ExtractedEmail objects. */
-export function linkFields(el: HTMLElement): { links: Link[]; linksTruncated?: true } {
-  const { links, truncated } = scanLinks(el);
-  return truncated ? { links, linksTruncated: true } : { links };
+/** `links` plus `linksTruncated` (and why, `linksTruncatedBy`) for ExtractedEmail objects. */
+export function linkFields(el: HTMLElement): { links: Link[]; linksTruncated?: true; linksTruncatedBy?: 'markup' } {
+  const { links, truncated, truncatedBy } = scanLinks(el);
+  if (!truncated) return { links };
+  return truncatedBy ? { links, linksTruncated: true, linksTruncatedBy: truncatedBy } : { links, linksTruncated: true };
 }
 
 function filenameFromHref(rawHref: string, base: string): string {

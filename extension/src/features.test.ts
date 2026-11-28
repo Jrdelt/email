@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MAX_LINK_TEXT_CHARS, MAX_LINKS } from './adapters/extract';
 import { extractFeatures, FEATURE_NAMES, isCloudHtmlLink, type Link, scoreEmail, shownHost } from './features';
 
@@ -139,6 +139,11 @@ describe('scoreEmail', () => {
   });
 });
 
+// Wall-clock budgets hold on an idle machine, not beside other test files running in parallel. The default run asserts
+// the work done (deterministic) plus a generous ceiling that still catches a blow-up; `npm run test:perf` (one file at
+// a time, --mode perf) asserts the real 10 ms budget.
+const PERF_RUN = import.meta.env.MODE === 'perf';
+
 describe('scoring an email at the MAX_LINKS cap stays within the 10 ms budget', () => {
   // Link text as the adapters cap it (MAX_LINK_TEXT_CHARS), full of characters NFKC has to decompose.
   const filler = ('ｗｗｗ．ｐａｙｐａｌ．ｃｏｍ／' + 'ａ'.repeat(120)).repeat(12).slice(0, MAX_LINK_TEXT_CHARS - 8);
@@ -161,7 +166,23 @@ describe('scoring an email at the MAX_LINKS cap stays within the 10 ms budget', 
     ['ligatures NFKC expands 18 times', (i: number) => ({ text: `${'\ufdfa'.repeat(MAX_LINK_TEXT_CHARS - 8)}${i}`, href: `https://e${i}.example/` })],
   ])('%s', (_, mk) => {
     const links = Array.from({ length: MAX_LINKS }, (_, i) => mk(i));
-    expect(medianMs(() => scoreEmail('alerts@shop.example', 'Please verify your password', links))).toBeLessThan(10);
+    const texts = new Set(links.map((l) => l.text));
+    // The work: each link text is normalised at most once, and in all no more than the shown-text budget (250k
+    // normalised characters) plus the one text that crosses it.
+    const normalize = vi.spyOn(String.prototype, 'normalize');
+    try {
+      scoreEmail('alerts@shop.example', 'Please verify your password', links);
+      const calls = normalize.mock.calls.map((_, i) => String(normalize.mock.contexts[i]));
+      const linkCalls = calls.filter((t) => texts.has(t));
+      expect(new Set(linkCalls).size).toBe(linkCalls.length);
+      const normalised = linkCalls.reduce((n, t) => n + t.normalize('NFKC').length, 0);
+      expect(normalised).toBeLessThanOrEqual(250_000 + 18 * MAX_LINK_TEXT_CHARS);
+    } finally {
+      normalize.mockRestore();
+    }
+    // The time: the real budget in the perf run, a ceiling five times higher beside parallel test files.
+    const ms = medianMs(() => scoreEmail('alerts@shop.example', 'Please verify your password', links));
+    expect(ms).toBeLessThan(PERF_RUN ? 10 : 50);
   });
 
   it('fails closed, keeping the findings it made, when the link text is too long to read in full', () => {

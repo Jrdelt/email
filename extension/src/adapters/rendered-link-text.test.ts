@@ -2,9 +2,9 @@
 // The text/destination mismatch check reads a link's text: it must be the text the reader sees. Hidden splitters
 // (display:none, font-size:0, a stylesheet class), a reversed string under an RTL bidi override (<bdo dir=rtl>,
 // unicode-bidi:bidi-override, U+202E) made a link that shows https://www.paypal.com/signin look like no host at all.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { scoreEmail } from '../features';
-import { scanLinks } from './extract';
+import { scanLinks, textCouldShowHost } from './extract';
 import { gmail } from './gmail';
 
 const EVIL = 'https://evil.example/signin';
@@ -34,6 +34,11 @@ describe('link text is the text the reader sees', () => {
     ['reversed text in a bidi-override span', '<span style="unicode-bidi:bidi-override;direction:rtl">moc.lapyap.www</span>'],
     ['reversed text under U+202E', '\u202emoc.lapyap.www\u202c'],
     ['reversed text on the link itself', 'moc.lapyap.www', ' style="unicode-bidi: bidi-override; direction: rtl"'],
+    // Look-alike dots NFKC or the fold turn into '.', split by a hidden node.
+    ['a splitter before a one-dot leader (U+2024)', 'www<span hidden>x</span>\u2024paypal\u2024com'],
+    ['a splitter before a small full stop (U+FE52)', 'www.paypal<span hidden>x</span>\ufe52com'],
+    ['a splitter before a Lisu letter tone (U+A4F8)', 'www.paypal<span hidden> </span>\ua4f8com'],
+    ['a splitter between a dot node and a letter node', 'www.paypal<span>.</span><span hidden> </span><span>com</span>'],
   ];
   for (const [label, inner, attrs] of cases) {
     it(`shows the host behind ${label}`, () => showsPaypal(textOfOnlyLink(inner, attrs)));
@@ -60,10 +65,19 @@ describe('link text is the text the reader sees', () => {
     }
   });
 
+  it('shows a bare IPv4 address behind a hidden splitter', () => {
+    const text = textOfOnlyLink('1<span hidden>x</span>92.168.10.1');
+    const v = scoreEmail('billing@attacker.example', 'Please confirm your billing details:', [{ text, href: EVIL }]);
+    expect(v.reasons).toContain('A link says 192.168.10.1 but actually goes to evil.example');
+  });
+
   it('fails closed (truncated) past the style budget instead of reading later links as before', () => {
     const link = (n: number) => `<a href="${EVIL}">${'<span>www.</span>'.repeat(n)}paypal.com</a>`;
     expect(scanLinks(body(Array.from({ length: 10 }, () => link(100)).join(' '))).truncated).toBe(false);
-    expect(scanLinks(body(Array.from({ length: 10 }, () => link(250)).join(' '))).truncated).toBe(true);
+    expect(scanLinks(body(Array.from({ length: 10 }, () => link(250)).join(' ')))).toMatchObject({
+      truncated: true,
+      truncatedBy: 'markup', // few links: their formatting, not their number, ended the check
+    });
   });
 
   it('keeps an LTR override inside an RTL one in reading order', () => {
@@ -102,5 +116,58 @@ describe('link text is the text the reader sees', () => {
     const hidden = score();
     expect(plain.reasons).toContain('A link says www.paypal.com but actually goes to evil.example');
     expect(hidden).toEqual(plain);
+  });
+});
+
+describe('which link text can show a host once CSS leaves parts out (no style reads otherwise)', () => {
+  it.each([
+    [['Merino scarf'], 'a product name'],
+    [['$19.99'], 'a price'],
+    [['19,99 \u20ac'], 'a euro price'],
+    [['Merino scarf', '$19.99', 'Shop now'], 'a product card'],
+    [['\u00c9charpe en laine', '\u2605\u2605\u2605\u2605\u2606', '\u00a0', '4.5'], 'accents, stars, &nbsp; and a rating'],
+    [['Merino scarf in wool\u2026', '$19.99'], 'an ellipsis'],
+    [['Shop now.', 'New arrivals'], 'a sentence then more words (whitespace inside)'],
+    [['Price:', '$19.99'], 'a label and a price'],
+  ])('%j (%s) cannot', (nodes) => {
+    expect(textCouldShowHost(nodes)).toBe(false);
+  });
+
+  it.each([
+    [['www', '.', 'paypal', '.com']],
+    [['paypal.', 'com']],
+    [['www.paypal', 'x', '.com']],
+    [['https:', 'x', '//evil.example']],
+    [['Visit https://www.', 'paypal.com']],
+    [['1', 'x', '92.168.0.1']],
+    [['[', '::1]']],
+    [['www\u2024paypal\u2024com']],
+    [['(www', '.', 'paypal.com)']],
+  ])('%j can', (nodes) => {
+    expect(textCouldShowHost(nodes)).toBe(true);
+  });
+
+  // A retail newsletter: hundreds of product cards, each a table inside one <a>, with prices, &nbsp; and accents.
+  const card = (n: number) => `
+    <a href="https://shop.example/p/${n}">
+      <table>
+        <tr><td><img src="https://shop.example/i/${n}.jpg" alt=""></td></tr>
+        <tr><td><span>\u00c9charpe m\u00e9rinos</span>&nbsp;<span>No ${n}</span></td></tr>
+        <tr><td><span>$19.99</span> <s>29,99&nbsp;\u20ac</s> <span>\u2605\u2605\u2605\u2605\u2606</span></td></tr>
+      </table>
+    </a>`;
+
+  it('checks a 300-card newsletter in full and reads no style for it', () => {
+    const el = body(`<p>This week's picks</p>${Array.from({ length: 300 }, (_, i) => card(i)).join('')}`);
+    const spy = vi.spyOn(window, 'getComputedStyle');
+    try {
+      const r = scanLinks(el);
+      expect(r.truncated).toBe(false);
+      expect(r.links).toHaveLength(300);
+      expect(spy).not.toHaveBeenCalled();
+      expect(scoreEmail('news@shop.example', "This week's picks", r.links).level).toBe('safe');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

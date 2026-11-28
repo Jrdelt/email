@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # The 10 ms scoring budget, timed one test file at a time (npm test checks the work done).
+      - run: npm run test:perf
       - run: npm run build:all
       - run: npm run zip:all
       - name: Verify <500 KB unpacked bundle budget

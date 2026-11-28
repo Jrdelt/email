@@ -207,7 +207,7 @@ function stripWrapping(t: string): string {
 }
 
 /** Normalise link text the way a reader sees it (mirror of features.py _normalize_shown_text). */
-function normalizeShownText(text: string): string {
+export function normalizeShownText(text: string): string {
   return text.normalize('NFKC').replace(INVISIBLE_RE, '').replace(DOT_LOOKALIKE_RE, '.');
 }
 

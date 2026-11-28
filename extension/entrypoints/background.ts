@@ -148,6 +148,7 @@ export default defineBackground(() => {
           links?: unknown;
           attachmentNames?: unknown;
           linksTruncated?: unknown;
+          linksTruncatedBy?: unknown;
           sig?: unknown;
           nonce?: unknown;
           locked?: unknown;
@@ -273,6 +274,10 @@ export default defineBackground(() => {
           links,
           // Over-cap link lists are also truncated here, so report that the extras were not checked.
           linksTruncated: m.linksTruncated === true || (Array.isArray(m.links) && m.links.length > MAX_LINKS),
+          // Why, only when the links were few enough (the notice then names their formatting, not their number).
+          ...(m.linksTruncated === true && m.linksTruncatedBy === 'markup' && !(Array.isArray(m.links) && m.links.length > MAX_LINKS)
+            ? { linksTruncatedBy: 'markup' }
+            : {}),
           attachmentNames,
           ...(typeof m.sig === 'string' && SIG_RE.test(m.sig) ? { sig: m.sig } : {}),
         })

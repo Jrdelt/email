@@ -14,6 +14,8 @@ export interface ExtractedEmail {
   links: Link[];
   /** More distinct links than can be checked: the email is treated as suspicious (fail closed). */
   linksTruncated?: boolean;
+  /** Why: 'markup' when the links' text or formatting used up the work budget, not their number. */
+  linksTruncatedBy?: 'markup';
   /**
    * The sender cannot be tied to this body for certain (iCloud pairing, or an address found only by an adapter's
    * loose header fallback, not the webmail's own From node), so it is never auto-trusted from the allowlist.

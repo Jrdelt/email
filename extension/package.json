@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:perf": "vitest run --mode perf --no-file-parallelism src/features.test.ts src/adapters/extract.test.ts",
     "postinstall": "wxt prepare"
   },
   "devDependencies": {

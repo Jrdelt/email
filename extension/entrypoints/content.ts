@@ -125,6 +125,8 @@ interface ScannableMsg {
   body: string;
   links: Link[];
   linksTruncated?: boolean;
+  /** 'markup': the links' text or formatting used up the work budget, not their number. */
+  linksTruncatedBy?: 'markup';
   /** Sender not tied to this body for certain (iCloud pairing, loose header fallback): not trusted for it. */
   pairingUncertain?: boolean;
   attachments?: AttachmentRef[];
@@ -150,9 +152,12 @@ function overflowVerdict(overflowCount: number): Verdict {
   };
 }
 
-/** Not every link could be checked (padding past MAX_LINKS): never let such an email score safe. */
-function withTooManyLinks(v: Verdict): Verdict {
-  const reason = 'This email has too many links to check them all, so its links are paused';
+/** Not every link could be checked (padding past MAX_LINKS, or past the link-text budget): never let it score safe. */
+function withTooManyLinks(v: Verdict, by?: 'markup'): Verdict {
+  const reason =
+    by === 'markup'
+      ? 'This email has too much link formatting to check every link, so its links are paused'
+      : 'This email has too many links to check them all, so its links are paused';
   // Keep a real finding as is; otherwise this is an "unchecked" notice, not a phishing verdict.
   if (v.level !== 'safe') return { ...v, reasons: [...v.reasons, reason] };
   return { score: 0.3, level: 'suspicious', unchecked: true, reasons: [...v.reasons, reason] };
@@ -783,7 +788,7 @@ async function evaluateAndRender<T extends ScannableMsg>(opts: {
   const untrustedVerdict = (overflow: boolean, sender: SenderInfo, email: T): Verdict => {
     if (overflow) return overflowVerdict(lockedOverflow);
     const v = scoreEmail(sender.address, email.body, email.links);
-    return email.linksTruncated ? withTooManyLinks(v) : v;
+    return email.linksTruncated ? withTooManyLinks(v, email.linksTruncatedBy) : v;
   };
   /**
    * What an email's trust means for scoring and locks. Where the adapter cannot see the webmail's sender
@@ -1362,7 +1367,8 @@ function runICloudSandbox() {
       syncInlineAttachmentLocks(extractICloudSandbox(document).attachments, true);
       return;
     }
-    const { active, body, links, linksTruncated = false, attachments, container } = extractICloudSandbox(document);
+    const { active, body, links, linksTruncated = false, linksTruncatedBy, attachments, container } =
+      extractICloudSandbox(document);
     if (!active || !container) {
       if (document.body) unlockLinks(document.body);
       if (activeInlineAtts.length) {
@@ -1379,7 +1385,7 @@ function runICloudSandbox() {
       return;
     }
     const attachmentNames = attachments.map((a) => a.name);
-    const sig = JSON.stringify({ active, body, links, linksTruncated, attachmentNames });
+    const sig = JSON.stringify({ active, body, links, linksTruncated, linksTruncatedBy, attachmentNames });
     if (force || sig !== lastSig) {
       if (sig !== lastSig) {
         awaitingVerdict = true;
@@ -1393,6 +1399,7 @@ function runICloudSandbox() {
           body,
           links,
           linksTruncated,
+          ...(linksTruncatedBy ? { linksTruncatedBy } : {}),
           attachmentNames,
           ...(hash ? { sig: hash } : {}),
         });
@@ -1658,6 +1665,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
           body?: unknown;
           links?: unknown;
           linksTruncated?: unknown;
+          linksTruncatedBy?: unknown;
           attachmentNames?: unknown;
           sig?: unknown;
           nonce?: unknown;
@@ -1685,6 +1693,7 @@ function runICloudApp(kv: typeof browser.storage.local) {
         body: typeof m.body === 'string' ? m.body : '',
         links: Array.isArray(m.links) ? (m.links as Link[]) : [],
         ...(m.linksTruncated === true ? { linksTruncated: true } : {}),
+        ...(m.linksTruncated === true && m.linksTruncatedBy === 'markup' ? { linksTruncatedBy: 'markup' as const } : {}),
         ...(attachmentNames.length ? { attachmentNames } : {}),
         ...(typeof m.sig === 'string' ? { sig: m.sig.slice(0, 32) } : {}),
       };

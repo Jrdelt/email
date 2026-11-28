@@ -34,6 +34,7 @@ export interface ICloudSandboxPayload {
   body: string;
   links: Link[];
   linksTruncated?: boolean;
+  linksTruncatedBy?: 'markup';
   attachmentNames?: string[];
   /** The sandbox's body signature (128 bits of SHA-256): lock decisions echo it so stale ones can be ignored. */
   sig?: string;
@@ -45,6 +46,7 @@ export interface ICloudThreadMessage {
   body: string;
   links: Link[];
   linksTruncated?: boolean;
+  linksTruncatedBy?: 'markup';
   attachments?: AttachmentRef[];
   attachmentContainers?: HTMLElement[];
   attachmentNames?: string[];
@@ -268,6 +270,7 @@ export function extractICloudSandbox(
   body: string;
   links: Link[];
   linksTruncated?: boolean;
+  linksTruncatedBy?: 'markup';
   attachments: AttachmentRef[];
   container: HTMLElement | null;
 } {
@@ -280,11 +283,19 @@ export function extractICloudSandbox(
   }
 
   const body = bodyText(bodyEl);
-  const { links, truncated } = scanLinks(bodyEl);
+  const { links, truncated, truncatedBy } = scanLinks(bodyEl);
   const attachments = inlineAttachmentsIn(bodyEl);
   const active = body.trim().length > 0 || links.length > 0 || attachments.length > 0 || bodyEl.querySelector('form') !== null;
   if (!active) return { active: false, body: '', links: [], attachments: [], container: null };
-  return { active: true, body, links, ...(truncated ? { linksTruncated: true } : {}), attachments, container: bodyEl };
+  return {
+    active: true,
+    body,
+    links,
+    ...(truncated ? { linksTruncated: true } : {}),
+    ...(truncated && truncatedBy ? { linksTruncatedBy: truncatedBy } : {}),
+    attachments,
+    container: bodyEl,
+  };
 }
 
 function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: ICloudSandboxPayload | undefined): ICloudThreadMessage {
@@ -296,6 +307,7 @@ function threadMessage(h: ICloudHeader, frameId: number | undefined, payload: IC
     body,
     links: payload?.links ?? [],
     ...(payload?.linksTruncated ? { linksTruncated: true } : {}),
+    ...(payload?.linksTruncated && payload.linksTruncatedBy === 'markup' ? { linksTruncatedBy: 'markup' as const } : {}),
     ...(h.attachments.length ? { attachments: h.attachments } : {}),
     ...(h.attachmentContainers.length ? { attachmentContainers: h.attachmentContainers } : {}),
     ...(attachmentNames.length ? { attachmentNames } : {}),
@@ -422,6 +434,7 @@ export const icloud: WebmailAdapter = {
         body: sb.body,
         links: sb.links,
         ...(sb.linksTruncated ? { linksTruncated: true } : {}),
+        ...(sb.linksTruncatedBy ? { linksTruncatedBy: sb.linksTruncatedBy } : {}),
         ...(sb.attachments.length ? { attachments: sb.attachments } : {}),
         container: sb.container,
       }];

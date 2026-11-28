@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { scoreEmail } from '../features';
 import { analyzeSender } from '../sender';
 import {
@@ -429,18 +429,32 @@ describe('Gmail inbox-list file buttons', () => {
 });
 
 describe('link text is read once per element, within a work budget', () => {
+  // The time is a ceiling well above the measured cost (tens of ms beside parallel test files) that still catches the
+  // original blow-ups (about a second); the work is asserted exactly, by the large texts normalised.
+  const CEILING_MS = 750;
   const timed = <T>(f: () => T): [T, number] => {
     const t = performance.now();
     const v = f();
     return [v, performance.now() - t];
+  };
+  /** Run `f`, counting String.prototype.normalize calls on strings of at least `minLength` characters. */
+  const normalisedLarge = <T>(minLength: number, f: () => T): [T, number, number] => {
+    const spy = vi.spyOn(String.prototype, 'normalize');
+    try {
+      const [v, ms] = timed(f);
+      return [v, ms, spy.mock.contexts.filter((t) => String(t).length >= minLength).length];
+    } finally {
+      spy.mockRestore();
+    }
   };
   const filler = (n: number) => 'lorem ipsum '.repeat(Math.ceil(n / 12)).slice(0, n);
 
   it('thousands of SMIL <set> in one <a> do not re-read its large text', () => {
     const sets = Array.from({ length: 1000 }, (_, i) => `<set attributeName="href" to="#n${i}"/>`).join('');
     const m = body(`<svg><a href="#top"><text>${filler(50_000)}</text>${sets}</a></svg>`);
-    const [r, ms] = timed(() => scanLinks(m));
-    expect(ms).toBeLessThan(150);
+    const [r, ms, reads] = normalisedLarge(50_000, () => scanLinks(m));
+    expect(reads).toBeLessThanOrEqual(1); // the large text, once
+    expect(ms).toBeLessThan(CEILING_MS);
     expect(r.links.some((l) => l.href.endsWith('#n999'))).toBe(true);
   });
 
@@ -449,8 +463,17 @@ describe('link text is read once per element, within a work budget', () => {
     const m = body(
       `<svg><a href="https://top.example/"><text><tspan style="display:none">x</tspan>${'\ufdfa'.repeat(2000)}</text>${sets}</a></svg>`,
     );
-    const [r, ms] = timed(() => scanLinks(m));
-    expect(ms).toBeLessThan(150);
+    const spy = vi.spyOn(String.prototype, 'normalize');
+    let r: ReturnType<typeof scanLinks>;
+    let ms: number;
+    try {
+      [r, ms] = timed(() => scanLinks(m));
+      // Not once per <set> target (1,900): the text is read once and its shown host once.
+      expect(spy.mock.contexts.filter((t) => String(t).includes('\ufdfa')).length).toBeLessThanOrEqual(4);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(ms).toBeLessThan(CEILING_MS);
     expect(r.links.some((l) => l.href === 'https://n1899.example/')).toBe(true);
   });
 
@@ -458,8 +481,10 @@ describe('link text is read once per element, within a work budget', () => {
     let html = `<span>${filler(100_000)}</span>`;
     for (let i = 0; i < 400; i++) html = `<div data-ped-formaction="#n${i}">${html}</div>`;
     const m = body(html);
-    const [r, ms] = timed(() => scanLinks(m));
-    expect(ms).toBeLessThan(150);
+    const [r, ms, reads] = normalisedLarge(100_000, () => scanLinks(m));
+    // Within the link-text budget (25 x MAX_BODY_CHARS raw characters): a few full reads, then samples of both ends.
+    expect(reads).toBeLessThanOrEqual(6);
+    expect(ms).toBeLessThan(CEILING_MS);
     expect(r.truncated).toBe(true);
     expect(r.links.length).toBeGreaterThan(0);
   });
@@ -476,7 +501,7 @@ describe('link text is read once per element, within a work budget', () => {
     }
     parent.appendChild(document.createElementNS(svgNS, 'text')).textContent = `Statement ${filler(100_000)} invoice.html`;
     const [atts, ms] = timed(() => inlineAttachmentsIn(m));
-    expect(ms).toBeLessThan(150);
+    expect(ms).toBeLessThan(CEILING_MS);
     expect(atts).toHaveLength(300);
     for (const a of [atts[0], atts[299]]) {
       expect(a.name.startsWith('Statement lorem')).toBe(true);
@@ -509,6 +534,27 @@ describe('text hidden by CSS cannot push the shown message out of the sample', (
 
   it('keeps the shown text whole between ~13 KB of hidden filler on each side', () => {
     shown(bodyText(sandwich('<div style="display:none;font-size:0">')));
+  });
+
+  it('reads the styles of an unchanged long body once across rescans, and again once it changes', async () => {
+    const el = sandwich('<div class="f" style="display:none">');
+    const spy = vi.spyOn(window, 'getComputedStyle');
+    try {
+      const first = bodyText(el);
+      shown(first);
+      const reads = spy.mock.calls.length;
+      expect(reads).toBeGreaterThan(0);
+      expect(bodyText(el)).toBe(first); // a rescan of the same, unchanged body
+      expect(spy.mock.calls.length).toBe(reads);
+      // The filler is shown now: the cached sample must not outlive the change.
+      for (const f of el.querySelectorAll('.f')) f.removeAttribute('style');
+      await new Promise((r) => setTimeout(r, 0));
+      const after = bodyText(el);
+      expect(spy.mock.calls.length).toBeGreaterThan(reads);
+      expect(after.trimStart().startsWith('Thanks for being a valued member')).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('passes a hidden node of any length cheaply (over a million characters on each side)', () => {
