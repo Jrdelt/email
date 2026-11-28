@@ -3,7 +3,7 @@ import { getIntel, type DomainIntel, type FetchFn } from '../src/domainIntel';
 import { icloudFrameRole, isSupportedWebmailUrl } from '../src/hosts';
 import { MAX_ATTACHMENT_NAMES } from '../src/attachments';
 import { MAX_LINKS, capLinkText } from '../src/adapters/extract';
-import { WARN_TTL_MS, isSafeHttpUrl } from '../src/linkGuard';
+import { WARN_TTL_MS, isSafeHttpUrl, proceedTarget } from '../src/linkGuard';
 import { clearLookupCaches, getSettings } from '../src/settings';
 
 const MAX_BODY_CHARS = 21_000; // sandbox body (head + tail sample, see adapters/extract.ts bodyText) plus slack
@@ -123,6 +123,7 @@ export default defineBackground(() => {
           attachmentsLocked?: unknown;
           frameIds?: unknown;
           href?: unknown;
+          via?: unknown;
           host?: unknown;
           registrable?: unknown;
           level?: unknown;
@@ -176,8 +177,11 @@ export default defineBackground(() => {
       const reasons = Array.isArray(m.reasons)
         ? m.reasons.filter((r): r is string => typeof r === 'string').slice(0, 10)
         : [];
+      // The clicked gateway URL, only when it leads exactly to the checked destination (see proceedTarget).
+      const via = proceedTarget(m.href, m.via);
       const entry = {
         href: m.href,
+        ...(via !== m.href ? { via } : {}),
         host: typeof m.host === 'string' ? m.host : '',
         registrable: typeof m.registrable === 'string' ? m.registrable : '',
         level: m.level === 'warning' ? 'warning' : 'danger',

@@ -1,11 +1,13 @@
 import { ageDays, type DomainIntel } from '../../src/domainIntel';
-import { WARN_TTL_MS, destinationIntelWarnings, isSafeHttpUrl } from '../../src/linkGuard';
+import { WARN_TTL_MS, destinationIntelWarnings, isSafeHttpUrl, proceedTarget } from '../../src/linkGuard';
 import { getSettings } from '../../src/settings';
 import { formatAge } from '../../src/ui/details';
 import { createLogoSvg, createStatusIcon } from '../../src/ui/icons';
 
 interface StoredWarning {
   href: string;
+  /** The clicked enterprise link-protection URL that leads to `href`; never shown (Safe Links data= can name the recipient). */
+  via?: string;
   host: string;
   registrable: string;
   level: 'warning' | 'danger';
@@ -180,10 +182,14 @@ async function init() {
   adv.hidden = false;
   const proceed = $('proceed-btn');
   proceed.textContent = `I understand the risk — open ${stored.host || 'link'}`;
+  // Through the organisation's link protection when the email's link went through it, so its time-of-click check,
+  // block page and click log are not skipped (proceedTarget checks again that it leads exactly to the shown address).
+  const target = proceedTarget(stored.href, stored.via);
+  if (target !== stored.href) proceed.title = "Opens through your organisation's link protection";
   proceed.addEventListener('click', async () => {
-    if (!isSafeHttpUrl(stored.href)) return;
+    if (!isSafeHttpUrl(stored.href) || !isSafeHttpUrl(target)) return;
     await browser.storage.session?.remove?.(key).catch(() => {});
-    location.replace(stored.href);
+    location.replace(target);
   });
 
   $('back-btn').focus();

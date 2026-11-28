@@ -423,11 +423,14 @@ function installClickGuard(opts: {
       settled = next === settled ? undefined : next;
     }
   };
-  // The warning page gets the destination only: never a form's fields.
-  const openWarning = (risk: LinkRisk, extra: { intel?: DomainIntel } = {}) =>
+  // The warning page gets the destination only: never a form's fields. `via` is the URL that was clicked: when it is
+  // the organisation's link-protection gateway (Safe Links, ...), "Open anyway" goes through it (background.ts keeps
+  // it only then), so the tenant's time-of-click check is not skipped for exactly the links this extension stopped.
+  const openWarning = (h: HeldNavigation, risk: LinkRisk, extra: { intel?: DomainIntel } = {}) =>
     void sendRuntime({
       type: 'openWarning',
       href: risk.href,
+      ...(h.href !== risk.href ? { via: h.href } : {}),
       host: risk.host,
       registrable: risk.registrable,
       level: risk.level,
@@ -449,7 +452,7 @@ function installClickGuard(opts: {
     const latest = opts.findTarget(h.source) ?? h.hit;
     const risk = analyzeLinkDestination(h.href, latest.senderRegistrable, location.origin);
     if (risk.level !== 'safe') {
-      openWarning(risk);
+      openWarning(h, risk);
       return false;
     }
 
@@ -481,7 +484,7 @@ function installClickGuard(opts: {
         if (pausedByLock(h)) return false;
         const finalRisk = mergeLinkIntel(risk, intel);
         if (finalRisk.level !== 'safe') {
-          openWarning(finalRisk, { intel });
+          openWarning(h, finalRisk, { intel });
           return false;
         }
       }

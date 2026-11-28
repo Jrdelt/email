@@ -213,6 +213,45 @@ describe('B2 message validation', () => {
   });
 });
 
+describe('B2b openWarning keeps the clicked enterprise gateway URL for "Open anyway"', () => {
+  const DEST = 'http://news.example.org/offer';
+  const SAFE_LINKS = `https://nam12.safelinks.protection.outlook.com/?url=${encodeURIComponent(DEST)}&data=05%7C01%7C&reserved=0`;
+  const store = async (via: unknown, href = DEST) => {
+    const { send, createTab } = await boot();
+    await send({ type: 'openWarning', href, via, host: 'news.example.org', level: 'warning', reasons: [] }, gmailTop());
+    const { url } = createTab.mock.calls.at(-1)![0] as { url: string };
+    return (await session(`warn:${new URL(url).searchParams.get('id')}`)) as { href: string; via?: string };
+  };
+
+  it('stores a Safe Links, Proofpoint or Barracuda URL that leads exactly to the checked destination', async () => {
+    expect(await store(SAFE_LINKS)).toMatchObject({ href: DEST, via: SAFE_LINKS });
+    const proofpoint = 'https://urldefense.proofpoint.com/v2/url?u=http-3A__news.example.org_offer&d=DwMF&c=x';
+    expect(await store(proofpoint)).toMatchObject({ href: DEST, via: proofpoint });
+    const barracuda = `https://linkprotect.cudasvc.com/url?a=${encodeURIComponent(DEST)}&c=E,1,x`;
+    expect(await store(barracuda)).toMatchObject({ href: DEST, via: barracuda });
+  });
+
+  it('drops anything else: another destination, two destinations, a tracking redirector, http, junk', async () => {
+    for (const via of [
+      `https://nam12.safelinks.protection.outlook.com/?url=${encodeURIComponent('https://other.example/')}`,
+      `${SAFE_LINKS}&url=${encodeURIComponent('https://other.example/')}`,
+      `https://www.google.com/url?q=${encodeURIComponent(DEST)}`,
+      `https://secure-web.cisco.com/token/${encodeURIComponent(DEST)}`,
+      SAFE_LINKS.replace('https:', 'http:'),
+      SAFE_LINKS.replace('https://', 'https://user:pw@'),
+      `https://evil.example/?url=${encodeURIComponent(DEST)}`,
+      `${SAFE_LINKS}&pad=${'x'.repeat(5000)}`,
+      DEST,
+      42,
+      undefined,
+    ]) {
+      const entry = await store(via);
+      expect(entry.href, String(via)).toBe(DEST);
+      expect(entry, String(via)).not.toHaveProperty('via');
+    }
+  });
+});
+
 describe('B3 tabs.onUpdated keeps a verdict only for same-origin loads', () => {
   it('keeps tab:<id> for a same-origin load, ignores non-loading updates, drops it for another origin', async () => {
     const { send } = await boot();

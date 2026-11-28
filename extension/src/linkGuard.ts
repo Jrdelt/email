@@ -158,6 +158,37 @@ export function unwrapRedirect(href: string): { href: string; ambiguous: boolean
 /** Unwrap redirect wrappers locally (see unwrapRedirect) and return the real http(s) target. */
 export const unwrapRedirectUrl = (href: string): string => unwrapRedirect(href).href;
 
+// Enterprise link-protection gateways: the organisation's own time-of-click check (verdict, block page, click log).
+// Tracking redirectors (Google, Facebook, YouTube) are not tenant controls. Cisco Secure Email is left out: it follows
+// its own token, not the last path segment decoded here, so it could open somewhere other than the page shows.
+const LINK_GATEWAY_HOSTS = new Set(['urldefense.com', 'urldefense.proofpoint.com', 'linkprotect.cudasvc.com']);
+const MAX_GATEWAY_URL = 4096;
+
+/** True for the host of an enterprise link-protection gateway (Defender Safe Links, Proofpoint, Barracuda). */
+export function isEnterpriseLinkGateway(host: string): boolean {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  return h.endsWith('.safelinks.protection.outlook.com') || LINK_GATEWAY_HOSTS.has(h);
+}
+
+/**
+ * The URL "Open anyway" on warning.html opens for the checked destination `href`: the clicked `via` URL when it is an
+ * https enterprise link-protection gateway that leads exactly (and unambiguously) to `href`, so the organisation's
+ * time-of-click check still runs; otherwise `href` itself. Nothing is sent anywhere: `via` is the URL the user
+ * clicked, and the browser opens it only when the user chooses to proceed.
+ */
+export function proceedTarget(href: string, via: unknown): string {
+  if (typeof via !== 'string' || via.length > MAX_GATEWAY_URL || via === href) return href;
+  let u: URL;
+  try {
+    u = new URL(via);
+  } catch {
+    return href;
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || !isEnterpriseLinkGateway(u.hostname)) return href;
+  const inner = unwrapRedirect(via);
+  return !inner.ambiguous && inner.href === href ? via : href;
+}
+
 /** Analyze a clicked link destination locally and report whether online destination-domain intel is needed. */
 export function analyzeLinkDestination(rawHref: string, senderRegistrable = '', pageOrigin = ''): LinkRisk {
   const { href, ambiguous } = unwrapRedirect(rawHref);
