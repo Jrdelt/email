@@ -392,3 +392,39 @@ describe('B6 expired data is deleted when the background starts, not only at the
     expect(await local('domainIntelCache')).toBeUndefined();
   });
 });
+
+describe('B7 browsing other sites wakes the background as little as the browser allows', () => {
+  type AddListener = (cb: (...a: unknown[]) => unknown, filter?: unknown) => void;
+  const onUpdated = () => fakeBrowser.tabs.onUpdated as unknown as { addListener: AddListener };
+
+  it('asks only for tab status changes where the browser can filter (Firefox), not title or favicon updates', async () => {
+    const add = vi.spyOn(onUpdated(), 'addListener');
+    await boot();
+    expect(add).toHaveBeenCalledWith(expect.any(Function), { properties: ['status'] });
+  });
+
+  it('still registers the listener where filters throw (Chrome, Edge), and keeps every other listener', async () => {
+    const original = onUpdated().addListener.bind(onUpdated());
+    vi.spyOn(onUpdated(), 'addListener').mockImplementation((cb, filter) => {
+      if (filter !== undefined) throw new Error('This event does not support filters');
+      original(cb);
+    });
+    const { send } = await boot();
+    await send({ type: 'verdict', payload: { level: 'danger' } }, gmailTop(7));
+    await until(async () => expect(await session('tab:7')).toBeDefined());
+    await tabUpdated(7, { status: 'loading', url: 'https://evil.example/' });
+    await until(async () => expect(await session('tab:7')).toBeUndefined());
+  });
+
+  it('a restart in Strict Local Mode does not rewrite storage when there is no lookup cache to purge', async () => {
+    let remove: ReturnType<typeof vi.spyOn> | undefined;
+    await boot({
+      seed: async () => {
+        await fakeBrowser.storage.local.set({ privacySettings: { strictLocalMode: true } });
+        remove = vi.spyOn(fakeBrowser.storage.local, 'remove');
+      },
+    });
+    await flush();
+    expect(remove).not.toHaveBeenCalled();
+  });
+});

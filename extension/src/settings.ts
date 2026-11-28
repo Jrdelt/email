@@ -68,10 +68,23 @@ export async function getSettings(localKV: ReadableKV, managedKV?: ReadableKV): 
 
 const LOOKUP_CACHE_KEYS = ['domainIntelCache', 'rdapBootstrap'] as const;
 
-/** Drop cached online-lookup results (sender/destination domains). Used when Strict Local Mode turns on. */
+/**
+ * Drop cached online-lookup results (sender/destination domains). Used when Strict Local Mode turns on, and each
+ * time the background starts in Strict Local Mode, so it writes only when there is something to delete (a key that
+ * cannot be read counts as present).
+ */
 export async function clearLookupCaches(localKV: RemovableKV): Promise<void> {
-  if (localKV.remove) await localKV.remove([...LOOKUP_CACHE_KEYS]);
-  else await localKV.set({ domainIntelCache: {}, rdapBootstrap: {} });
+  const present: string[] = [];
+  for (const key of LOOKUP_CACHE_KEYS) {
+    try {
+      if ((await localKV.get(key))[key] !== undefined) present.push(key);
+    } catch {
+      present.push(key);
+    }
+  }
+  if (!present.length) return;
+  if (localKV.remove) await localKV.remove(present);
+  else await localKV.set(Object.fromEntries(present.map((key) => [key, {}])));
 }
 
 /** Persist user-selected Strict Local Mode unless overridden by managed enterprise policy. */

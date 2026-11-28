@@ -110,7 +110,7 @@ export default defineBackground(() => {
   });
   // A tab that starts loading a page of another site drops its stored verdict. Subframe loads and same-site
   // navigations also report 'loading'; there the webmail's content script keeps or replaces the verdict itself.
-  browser.tabs?.onUpdated?.addListener((tabId: number, changeInfo: { status?: string; url?: string }, tab?: { url?: string }) => {
+  const onTabUpdated = (tabId: number, changeInfo: { status?: string; url?: string }, tab?: { url?: string }) => {
     if (changeInfo.status !== 'loading') return;
     const key = `tab:${tabId}`;
     void (async () => {
@@ -120,7 +120,18 @@ export default defineBackground(() => {
       const origin = originOf(changeInfo.url ?? tab?.url);
       if (!origin || !stored || stored.origin !== origin) await store.remove(key);
     })().catch(() => {});
-  });
+  };
+  // This fires for every tab on every site, so ask for status changes only: Firefox then no longer wakes the
+  // background for title and favicon updates. Chrome and Edge throw "This event does not support filters" (a URL
+  // filter would also hide navigations away from webmail), so they get the unfiltered listener.
+  const tabEvents = browser.tabs?.onUpdated as unknown as
+    | { addListener(cb: typeof onTabUpdated, filter?: { properties: string[] }): void }
+    | undefined;
+  try {
+    tabEvents?.addListener(onTabUpdated, { properties: ['status'] });
+  } catch {
+    tabEvents?.addListener(onTabUpdated);
+  }
 
   const handleMessage = (
     msg: unknown,
